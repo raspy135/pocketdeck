@@ -12,6 +12,7 @@
         [ "examples/dither_test.py", "examples/dither_test.py" ],
         [ "fontloader.py", "fontloader.py" ],
         [ "home.py", "home.py" ],
+        [ "pem.py", "pem.py" ],
 
     ],
     "version": "1.0"
