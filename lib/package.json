@@ -1,7 +1,18 @@
 {
     "urls": [
         [ "uping.py","uping.py" ],
-        [ "xbmreader.py","xbmreader.py" ]
+        [ "xbmreader.py","xbmreader.py" ],
+        [ "analog_clock.py","analog_clock.py"],
+        [ "benchmark.py", "benchmark.py"],
+        [ "gdrive.py", "gdrive.py" ],
+        [ "wavplay.py", "wavplay.py" ],
+        [ "wavtest.py", "wavtest.py" ],
+        [ "xbmviewer.py", "xbmviewer.py" ],
+        [ "codec_config.py", "codec_config.py" ],
+        [ "examples/dither_test.py", "examples/dither_test.py" ],
+        [ "fontloader.py", "fontloader.py" ],
+        [ "home.py", "home.py" ],
+
     ],
     "version": "1.0"
 }
