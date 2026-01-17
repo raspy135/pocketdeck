@@ -984,7 +984,7 @@ class editor:
       self.cursor_move(0,1)
 
     # Input method toggle
-    elif keys == b'\x1b`':
+    elif keys == b'\x1b`' or keys == b'\x1b~':
       if self.file.input_method == self.IM_EN:
         self.file.input_method = self.IM_JP
         if not self.jpfont_loaded:
