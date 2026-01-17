@@ -2,6 +2,8 @@
 
 Pocket deck is a tiny computer which can do small things, especially text writing, personal management, some audio processing and life improvement. It can be customized with MicroPython and powerful API, snappy graphics and quality audio.
 
+![Product image](images/pocketdeck.jpg)
+
 # Features
 
 ## Hardware
