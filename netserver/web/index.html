@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pocket Deck Screencast</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>Pocket Deck Screencast</h1>
+            <div class="status-bar">
+                <span id="status-indicator" class="status-dot"></span>
+                <span id="status-text">Disconnected</span>
+            </div>
+        </header>
+
+        <main>
+            <div class="canvas-wrapper">
+                <canvas id="screenCanvas" width="400" height="240"></canvas>
+            </div>
+
+            <div class="controls">
+                <div class="button-group" style="display: flex; gap: 0.5rem;">
+                    <button id="connectBtn" class="btn primary">Connect</button>
+                    <button id="castBtn" class="btn secondary" disabled>Start Cast</button>
+                </div>
+                <div class="info">
+                    <span class="label">FPS:</span> <span id="fpsCounter">0</span>
+                </div>
+            </div>
+
+            <div class="clipboard-section">
+                <h3 class="section-title">Clipboard</h3>
+                <div class="clipboard-controls">
+                    <button id="copyToDevBtn" class="btn secondary">Send to Device</button>
+                    <button id="pasteFromDevBtn" class="btn secondary">Get from Device</button>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

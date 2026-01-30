@@ -4,6 +4,12 @@ Pocket deck is a tiny computer which can do small things, especially text writin
 
 ![Product image](images/pocketdeck.jpg)
 
+
+
+# Purchase
+
+https://shop.nunomo.net/products/pocket-deck-pre-order-status
+
 # Features
 
 ## Hardware
