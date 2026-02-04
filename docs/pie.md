@@ -1,6 +1,6 @@
-# Pie Framework Documentation
+# Pie audio sequencer
 
-The `Pie` framework is a high-level, mini-notation based sequencer designed for the Pocket deck audio engine. it allows you to compose complex rhythms, melodies, and effects chains using simple strings.
+The `Pie` framework is a high-level, mini-notation based sequencer designed for the Pocket deck audio engine, and the syntax is inspired by TidalCycles and Strudel. It allows you to compose complex rhythms, melodies, and effects chains using simple strings.
 
 ## The Pie Class
 
