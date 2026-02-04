@@ -6,6 +6,15 @@ The `Pie` framework is a high-level, mini-notation based sequencer designed for 
 
 The `Pie` class is the central heart of the sequencer. It manages timing (BPM), schedules events, and coordinates playback between instruments and effects.
 
+## Supported audio modules
+
+Pie supports all audio modules in Pocket deck's audio module. 
+
+- Sampler : Play samples, great for drums
+- Wavetable : Wavetable synth, great for melodies
+- Echo, compressor, filter for effects
+- Router : for signal routing
+
 ### Basic Usage
 
 ```python
@@ -38,14 +47,13 @@ def main(vs, args):
   **Must be called in your main loop.** This processes timing and dispatches events to the audio engine.
 - `process_interactive(filename, loc)`: Standard interactive mode entry point.
 - `get_tick_from_cycle(cycle)`: Calculates the specific audio tick (sample count) for a given cycle. Useful for scheduling timed events with `master.add(module, tick)`.
-- `start() / stop()`
-  Manual control over the sequencer clock.
+
 
 ---
 
 ## Interactive Mode (Live Coding)
 
-Pie supports a powerful interactive mode that allows you to change patterns and parameters in real-time without restarting your script.
+Pie supports a powerful interactive mode that allows you to change patterns and parameters in real-time without restarting your script. You still need to setup modules in the main script.
 
 ### Setup
 
@@ -143,8 +151,6 @@ with Pie(bpm=120) as p, PieFilter() as lpf:
 | **PieEcho** | Delay time |
 | **PieMixer** | Volume |
 
-The above primary parameters are what get passed to the `trigger()` method when a note or value is encountered in a pattern.
-
 ### 6. Pitch and Notes
 They are only available for `PieWavetable`.
 - **MIDI Numbers**: Integers (e.g., `60`).
@@ -198,11 +204,14 @@ All instrument and effect wrappers support the following methods:
 - `trigger(value, ...)`: Initiation method for pattern events.
 
 ### PieSampler
-- `load_wav(slot, filename)`: Helper to load WAV files from SD card or internal flash.
+- `load_wav(slot, filename)`: Helper to load WAV files from SD card or internal flash. Optimized files(16bit with target sample rate) are recommended.
 
 ### PieWavetable
 - Automatically handles frequency conversions for notes like `"C4"`.
+- `set_table(self, slot, frames)`: Load wavetable from data array. data array is a list of frames, each frame is bytearry.
+- `load_wavetable(self, slot, filename, stride=1, max_frames=256, frame_size=2048)`: Load wavetable from file for wavetable synthesis such as Serum. Internally the sample length is converted to 256 samples per framem 16bit. Optimized files are recommended.
 - `morph(val)`: Can be automated via the pattern.
+- `pitch_transition(transition_ms)`: Set smooth pitch transition time. 
 
 ---
 
@@ -212,7 +221,6 @@ All instrument and effect wrappers support the following methods:
 
 - `add(module, execute_at=0)`: Adds an instrument or effect to the router's processing chain at the specified tick (0 for immediate).
 - `clear(execute_at=0)`: Removes all children from the router at the specified tick (0 for immediate).
-- `clear_events()`: Cancels any pending timed `add` or `clear` operations.
 
 ```python
 with PieRouter() as master, PieSampler(4) as drums, PieFilter() as lpf:
