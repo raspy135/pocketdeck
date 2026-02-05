@@ -16,19 +16,28 @@ codec_config= codec_config.codec_config()
 
 SETTING_FILENAME = '/config/settings.json'
 
+def format_mic_gain(value):
+  return f'{value/2:.1f}dB'
+  
 def set_mic_gain(value = None):
+  
+  ## Mic gain is 0 (0dB) to 0x5f (47.5dB)
+  
   if value != None:
-    if value > 0:
+    if value > 0x5f:
+      value = 0x5f
+    if value < 0:
       value = 0
-    if value < -60:
-      value = -60
-    value = 255 + value      
     codec_config.set_micgain(value)
+  
   if set_audio_power():
-    return codec_config.get_micgain()-255
+    return codec_config.get_micgain()
 
   return 0
   
+def format_audio_volume(value):
+  return f'{value}dB'
+
 def set_audio_volume(value = None):
   if value != None:
     if value > 0:
@@ -44,6 +53,11 @@ def set_audio_volume(value = None):
 
 def set_speaker_out(value = None):
   if value != None:
+    if value:
+      codec_config.set_lpf(cutoff_freq=9000)
+    else:
+      codec_config.set_pass_through()
+      
     codec_config.toggle_lo(value)
   if set_audio_power():
     return codec_config.get_lo()
@@ -51,7 +65,8 @@ def set_speaker_out(value = None):
 
 def set_audio_power(value = None):
   if value != None:
-    audio.power(value)
+    if audio.power() != value:
+      audio.power(value)
   return audio.power()
 
 def set_system_font(value = None):
@@ -91,11 +106,12 @@ menu_list = [
      'type' : 'int',
      'step' : 3,
      'value' : set_audio_volume(),
+     'format' : format_audio_volume,
      'callback' : set_audio_volume
      }
   ],
   [ 'Speaker out' , 
-         { 'description': 'Controls speaker output',
+         { 'description': 'Set it off when you use phone out',
      'type' : 'switch',
      'value' : set_speaker_out(),
      'callback' : set_speaker_out
@@ -106,6 +122,7 @@ menu_list = [
      'type' : 'int',
      'step' : 3,
      'value' : set_mic_gain(),
+     'format' : format_mic_gain,
      'callback' : set_mic_gain
      }
    ],
@@ -329,8 +346,8 @@ class setting():
       self.splash_count -= 1
       self.v.finished()
       return
-    self.menu_ui.draw_cursor(self.time_diff)
-    self.menu_ui.draw_menu()
+    self.menu_ui.draw_cursor(self.time_diff, offset=10)
+    self.menu_ui.draw_menu(offset=10)
     self.menu_ui.draw_help()
     self.menu_ui.draw_clock()
     self.menu_ui.draw_message()

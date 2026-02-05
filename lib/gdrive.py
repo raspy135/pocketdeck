@@ -1,4 +1,3 @@
-# main.py - Google Drive OAuth Device Flow for ESP32
 import urequests
 import ujson
 import time
@@ -6,10 +5,9 @@ import network
 import googleapi_posts
 from machine import Pin
 import gc
+import argparse
+import sys
 
-# Wi-Fi Configuration
-WIFI_SSID = "your_wifi"
-WIFI_PASS = "your_password"
 
 # Google OAuth Configuration (from your Google Cloud Console)
 CLIENT_ID = "410521312052-b7im4ugrl7ifjdb9dcpe5v4tk391uq3s.apps.googleusercontent.com"
@@ -20,7 +18,7 @@ DEVICE_CODE_URL = "https://oauth2.googleapis.com/device/code"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 
 # Storage for tokens
-TOKEN_FILE = "/config/tokens.json"
+TOKEN_FILE = "/config/google_tokens.json"
 
 vs = None
 
@@ -278,15 +276,13 @@ def list_drive_files():
 
 def oauth_setup():
     """Complete OAuth setup flow"""
-    print_vs("\n" + "="*40)
-    print_vs("Google Drive OAuth Setup")
-    print_vs("="*40)
+    print_vs("Checking OAuth status..")
     
     # Check if already authenticated
     tokens = load_tokens()
     if tokens and "access_token" in tokens:
-        print_vs("Already authenticated!")
-        return True
+        #print_vs("Already authenticated!")
+        return ''
     
     # Get device code
     device_data = get_device_code()
@@ -304,60 +300,51 @@ def oauth_setup():
         # Calculate expiration timestamp
         tokens["expires_at"] = time.time() + tokens["expires_in"]
         save_tokens(tokens)
-        return True
+        return "Setup Completed"
     else:
         return False
 
-def main(vs_arg, args):
+def main(vs_arg, args_in):
     global vs
     vs = vs_arg
     """Main program"""
-    print_vs("ESP32 Google Drive Sync")
-    
-    isFirst = True
-    # Main menu
-    while isFirst:
-        isFirst = False
-        print_vs("\n" + "="*40)
-        print_vs("1. Setup Google Drive OAuth")
-        print_vs("2. Upload test file")
-        print_vs("3. List Drive files")
-        print_vs("4. Exit")
-        print_vs("="*40)
-        
-        # In real implementation, get input from buttons/screen
-        # For now, simulate choice
-        choice = "1"  # Change this based on your input method
-        
-        if choice == "1":
-            if oauth_setup():
-                print_vs("Setup complete!")
-            else:
-                print_vs("Setup failed")
-                
-        elif choice == "2":
-            # Create a test file
-            test_content = "Hello from ESP32 at " + str(time.time())
-            with open("/test.txt", "w") as f:
-                f.write(test_content)
-            
-            if upload_file_to_drive("/test.txt", "esp32_test.txt"):
-                print_vs("Upload successful!")
-            else:
-                print_vs("Upload failed")
-                
-        elif choice == "3":
-            files = list_drive_files()
-            if files:
-                print_vs("Files in Drive:")
-                for f in files:
-                    print_vs(f"  -{f}")
-            else:
-                print_vs("No files or failed to list")
-                
-        elif choice == "4":
-            break
-        
-        time.sleep(2)
+    parser = argparse.ArgumentParser( description = "Google drive")
+    parser.add_argument('-l','--list', type=bool, help = 'list', default=False)    
 
+    parser.add_argument("src_file", nargs='?')
+    parser.add_argument("dst_file", nargs='?')
+    #print(args_in, file=vs)
+
+    args = parser.parse_args(args_in[1:])
+    #print(args)
+
+    res =  oauth_setup()
+    if res == False:
+      res = "Setup Failed"
+    if res != '':
+        print_vs(res)
+        if res == 'Setup Failed':
+          return
+
+    dst_file = args.dst_file
+    if args.src_file and not args.dst_file:
+      fname = args.src_file.split('/')[-1]
+      dst_file = fname
+
+    if (not args.list) and args.src_file != None:
+        
+      print(f'src file {args.src_file}', file=vs)
+      if upload_file_to_drive(args.src_file, dst_file):
+        print_vs("Upload successful!")
+      else:
+        print_vs("Upload failed")
+    else:
+      files = list_drive_files()
+      if files:
+        print_vs("Files in Drive:")
+        for f in files:
+          print_vs(f"  {f}")
+      else:
+        print_vs("No files or failed to list")
+                
 

@@ -88,6 +88,7 @@ class analog_clock:
     self.secondhand_size = 90
     self.offset = (110,125)
     self.offset_days = 0
+    self.coffset = (300,40)
     self.pi = 3.1415926536
     self.week_list = ("Mo", "Tu", "We" ,"Th", "Fr", "Sa", "Su" )
     self.week_list2 = ("Mon", "Tue", "Wed" ,"Thu", "Fri", "Sat", "Sun" )
@@ -137,6 +138,15 @@ class analog_clock:
     audio.stream_setup(0, 48000, 1, len(self.wavbuf_click))
     audio.stream_setdata(0, 0, memoryview(self.wavbuf_click))
     audio.stream_play(True)
+
+
+  def draw_oneline_help(self):
+    self.v.set_draw_color(1)
+    self.v.set_font('u8g2_font_profont15_mf')
+    help_copy_str = 'C - Copy date '
+    copy_str_width = self.v.get_str_width(help_copy_str) + 1
+    self.v.draw_str(pdeck.get_screen_size()[0] - copy_str_width, self.coffset[1] + 195,help_copy_str)
+
         
   def update(self,e):
     if not self.v.active:
@@ -149,7 +159,6 @@ class analog_clock:
       self.last_day = self.day
       self.get_tide(self.shifted_day)
     
-    self.coffset = (300,40)
     #self.draw_edge()
     self.update_timer()
     
@@ -162,7 +171,6 @@ class analog_clock:
       return
 
     self.last_second = self.second
-    
     #self.draw_secondhand()
     #return
 
@@ -185,6 +193,8 @@ class analog_clock:
         self.draw_tide_chart()
 
       self.draw_calender()
+      
+      self.draw_oneline_help()
 
       
     if self.message_life > 0:
@@ -417,6 +427,9 @@ class analog_clock:
     self.v.set_font("u8g2_font_profont29_mf")
     month_str = self.month_list[self.month][:3]
     self.v.draw_str(self.coffset[0] - 40, self.offset[1]-0, f"{self.kt.minute:02} : {self.kt.second:02}")
+    self.v.set_font("u8g2_font_profont15_mf")
+    self.v.draw_str(self.coffset[0] - 60, self.offset[1] + 30, 'Rotate your finger')
+    self.v.draw_str(self.coffset[0] - 60, self.offset[1] + 30 + 16, 'on D-pad to set time')
     
 
   def draw_timerhand(self):
@@ -568,8 +581,8 @@ class analog_clock:
 
   def keyevent_loop(self):
     
-    #if not self.tide_chart:
-    #  self.get_tide(self.shifted_day)
+    if not self.tide_chart:
+      self.get_tide(self.shifted_day)
     
     while True:
       ret = self.v.read_nb(1)
@@ -685,7 +698,7 @@ el = elib.esclib()
 def main(vs, args):
   v = vs.v
   v.print(el.erase_screen())
-  #v.print(el.display_mode(False))
+  v.print(el.display_mode(False))
   v.print(el.home())
 
   v.unsubscribe_callback()

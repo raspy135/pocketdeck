@@ -19,7 +19,7 @@ import esclib as elib
 import argparse
 import array
 import jp_input
-
+import ls
 
 el = elib.esclib()
 
@@ -28,6 +28,21 @@ IM_JP = const(2)
 
 import benchmark
 bm = benchmark.benchmark(False)
+
+def _basename(p):
+    if p.endswith("/") and p != "/":
+        p = p[:-1]
+    i = p.rfind("/")
+    return p if i < 0 else p[i + 1 :]
+
+def _dirname(p):
+    if p.endswith("/") and p != "/":
+        p = p[:-1]
+    i = p.rfind("/")
+    if i < 0:
+        return "."
+    return p[:i] or "/"
+
 
 class editor:
   def __init__(self,v):
@@ -80,7 +95,8 @@ class editor:
 
   def load_jpfont(self):
     import fontloader
-    fontname = 'font_unifont_japanese3'
+    #fontname = 'font_unifont_japanese3'
+    fontname = 'unifont_large'
     fontloader.load(fontname)
   
     font = fontloader.font_list[fontname]
@@ -339,9 +355,9 @@ class editor:
 
     for r in range(r_in,-1, -1):
       row = self.file.rows[r]
-      if row.len == 0:
+      if row.get_len() == 0:
         continue
-      c_start = c_in  if c_start == -1 else row.len - 1
+      c_start = c_in  if c_start == -1 else row.get_len() - 1
       for c in range(c_start,-1, -1):
         #print(f" r {r}, c {c}")
         ch = row.at(c)
@@ -472,15 +488,23 @@ class editor:
     self.file.push_pos_history(pos)
     self.jump_to_position(intnum,0, 1)
 
+  def process_open_file_select(self, idx, item):
+    #print(f' {idx}:{item}')
+    #self.open_input_line_dialog('Open file','Filename', self.process_open_file, answer_list = None, default_str=item.encode('utf-8'))
+    self.process_open_file(item.encode('utf-8'))
+    
   def process_open_file(self, name):
     #print(f"Opening.. file={name.decode()}")
+    filename = name.decode()
+    filename = None if filename == '' else filename
+    
     self.file.saved_pos = self.save_pos()
     self.file_list.insert(0,self.file)
     self.file_row = 0
     self.file_col = 0
     self.scroll_row = 0
     self.scroll_col = 0
-    self.file = editor_file(self.v, name.decode(), self.text_height, self.text_width, self.tab_size)
+    self.file = editor_file(self.v, filename, self.text_height, self.text_width, self.tab_size)
     self.render_main_text(True)
     self.jump_to_position(self.file_row, self.file_col, 1, False)
     return
@@ -506,7 +530,7 @@ class editor:
     #print("process_yank_select")
     self.yankbuf.curbuf = item
     if pdeck_enabled:
-      pdeck.clipboard_copy(self.yankbuf.curbuf)
+      pdeck.clipboard_copy(self.yankbuf.curbuf.encode('utf-8'))
     return
 
   def process_file_select(self, idx, item):
@@ -550,12 +574,12 @@ class editor:
           s_callback(line)
       return     
     # Backspace
-    elif keys == b'\x08': 
+    elif keys == b'\x08':
       if self.sl_info.line.len !=0 and self.sl_info.cur != 0:
         self.sl_info.line.delete_str(self.sl_info.cur -1,1)
         self.sl_info.cur -= 1  
     # Enter
-    elif keys == b'\x0d' or keys == b'\x0a': 
+    elif keys in (b'\x0d', b'\x0a'): 
       #print("Calling callback")
       self.h_diff -= 1
       self.file.h += 1
@@ -565,6 +589,28 @@ class editor:
       s_callback = self.sl_info.callback
       self.sl_info = None
       s_callback(line)
+    elif keys in (b'\x09') and self.sl_info.callback == self.process_open_file:
+      #TAB
+      try:
+        flist = ls.list_file(self.sl_info.line.decode() + '*')
+        if len(flist[1]) > 0:
+          if len(flist[1]) > 1:
+            slist=[]
+            for item in flist[1]:
+              slist.append(flist[0] + '/' + item)
+            
+            self.h_diff -= 1
+            self.file.h += 1
+            self.text_height += 1
+            self.sl_info = None
+            self.open_select_dialog(slist,5,"File list", self.process_open_file_select)
+            
+          else:
+            new_line = (flist[0] + '/' + flist[1][0])
+            self.sl_info.line.update_str(bytearray(new_line.encode('utf-8')))
+            self.sl_info.cur = len(new_line)
+      except Exception as e:
+         print(e)
     else:
       if keys[0] >= 0x20:
         self.sl_info.line.insert_str(self.sl_info.cur, keys)
@@ -573,7 +619,7 @@ class editor:
     
   def process_select_dialog(self, keys):
     #Ctrl-g to quit
-    if keys == b'\x07' or keys == b'q':
+    if keys in (b'\x07', b'q'):
       self.mode = self.MODE_NORMAL
       self.h_diff -= self.sd_info.height
       self.text_height += self.sd_info.height
@@ -581,21 +627,21 @@ class editor:
       self.sd_info = None
       return
     #Up
-    elif keys == b'\x1b[A' or keys == b'\x10':
+    elif keys in (b'\x1b[A', b'\x10'):
       if self.sd_info.scroll + self.sd_info.cur != 0:
         self.sd_info.cur -= 1
       if self.sd_info.cur < 0:
         self.sd_info.cur = 0
         self.sd_info.scroll -= 1
     #Down
-    elif keys ==  b'\x1b[B' or keys == b'\x0e':
+    elif keys in  (b'\x1b[B', b'\x0e'):
       if self.sd_info.scroll + self.sd_info.cur < len(self.sd_info.slist) - 1:
         self.sd_info.cur += 1
       if self.sd_info.cur == self.sd_info.height:
         self.sd_info.cur -= 1
         self.sd_info.scroll += 1
     #Enter
-    elif keys == b'\x0d' or keys == b'\x0a': 
+    elif keys in ( b'\x0d', b'\x0a'): 
       self.h_diff -= self.sd_info.height
       self.text_height += self.sd_info.height
       self.file.h += self.sd_info.height
@@ -629,10 +675,7 @@ class editor:
     #Arrow keys (or any escape sequences, some control keys) to quit
     #print(f"hi {keys}")
     if keys[0] == 0x1b \
-        or keys == b'\x01' or keys == b'\x02' \
-        or keys == b'\x05' or keys == b'\x06' \
-        or keys == b'\x0a' or keys == b'\x0b' \
-        or keys == b'\x0e' or keys == b'\x10':
+        or keys in (b'\x01', b'\x02', b'\x05', b'\x06', b'\x0a',b'\x0b', b'\x0e', b'\x10'):
       #print("hi2")
       pos = self.save_pos()
       self.file.push_pos_history(pos)  
@@ -691,6 +734,7 @@ class editor:
         self.search_exec()
 
     elif keys[0] >= 0x20:
+
       self.search_info.query_str += keys.decode("utf-8")
       if self.search_info.aborted or self.search_info.matched_query or len(self.search_info.query_str) == 1:
         self.search_exec()
@@ -708,9 +752,9 @@ class editor:
     self.render_main_text(True)
     self.jump_to_position(self.file_row, self.file_col, 1, False)
 
-  def open_input_line_dialog(self,subject,header,callback, answer_list = None):
+  def open_input_line_dialog(self,subject,header,callback, answer_list = None, default_str=b''):
     self.mode = self.MODE_INPUT_LINE_DIALOG
-    self.sl_info = input_line_info(subject, header, callback)
+    self.sl_info = input_line_info(subject, header, callback, default_str)
     self.h_diff += 1
     self.text_height -= 1
     self.file.h -= 1
@@ -718,7 +762,15 @@ class editor:
     self.input_answer_list = answer_list
     self.jump_to_position(self.file_row, self.file_col, 1, False)
 
-
+  def switch_buf_if_exists(self,link_filename):
+    # Check if the file is already opened
+    for i,file in enumerate(self.file_list):
+      #print(f'{file.filename} vs {link_filename}')
+      if file.filename == link_filename or file.filename == link_filename + '.md':
+        self.process_file_select(i,None)
+        return True
+    return False
+  
   def process_key(self):
     keys = self.v.read(1)
 
@@ -742,7 +794,7 @@ class editor:
       seq.append( self.v.read(1) )
       keys = b''.join(seq)
    
-    # C-x C-c to exit
+    # C- x C-c to exit
     if keys == b'\x18\x03':
       return 1
 
@@ -778,6 +830,7 @@ class editor:
       if keys == b'\x1b`':
         pass
       elif self.file.im_session and len(self.file.im_session.buffer) == 0 and keys[0] <= 0x20:
+        # Pass through control chars when IM is not active
         pass
       else:
         last_len = len(self.file.im_session.buffer)
@@ -883,7 +936,7 @@ class editor:
       else:
         self.set_message("No more history")
    
-    # Escape + ' (Position hisoty walk backward)
+    # Escape + ; (Position hisoty walk backward)
     elif keys == b'\x1b;':
       pos = self.file.walk_pos_history(-1)
       if pos:
@@ -895,10 +948,40 @@ class editor:
     elif keys == b'\x1bg':
       self.open_input_line_dialog("Go to line #","Line #",self.process_goto_line)
 
-    # Escape + . : Go to function definition
-    elif keys == b'\x1b.' or keys == b'\x1b/':
+    # Escape + . : Go to function definition in Python mode, try to go link in md mode
+    elif keys in (b'\x1b.', b'\x1b/'):
       pos, sym = self.file.get_symbol(self.file_row, self.file_col)
-      if sym:
+      #print(f'sym {sym}')
+      if sym and self.file.mode == 'md':
+        print(f'sym in md mode {sym}')
+        if sym.startswith('/'):
+          dirname = ''
+        else:
+          dirname = _dirname(self.file.filename) + "/"
+        try:
+          link_filename = dirname + sym
+          #print(link_filename)
+          st = os.stat(link_filename)
+          if st[0]&0x4000:
+            raise Exception('directory')
+    
+          res = self.switch_buf_if_exists(link_filename)
+          if not res:
+            self.process_open_file(link_filename.encode('utf-8'))
+        except Exception as e:
+          try:
+            link_filename += ".md"
+            #print(link_filename)
+            st = os.stat(link_filename)
+            res = self.switch_buf_if_exists(link_filename)
+            if not res:
+              self.process_open_file(link_filename.encode('utf-8'))
+          except Exception as e:
+            self.process_open_file(link_filename.encode('utf-8'))
+            #self.set_message('Link not found')
+            print(e)
+        
+      if sym and self.file.mode == 'py':
         pos = self.save_pos()
         self.file.push_pos_history(pos)
         self.mode = self.MODE_SEARCH
@@ -932,7 +1015,7 @@ class editor:
         self.open_select_dialog(self.yankbuf.bufs,5, "Yank list", self.process_yank_select)
 
     #Ctrl-a (Move to the start of the line)
-    elif keys == b'\x01' or keys == b'\x1b[1~':
+    elif keys in (b'\x01', b'\x1b[1~'):
       # Stop at indent first
       if self.file.mode == "py":
         pos = self.file.get_indent(self.file_row)
@@ -947,7 +1030,7 @@ class editor:
       self.update_scroll_for_curmove()
 
     #Ctrl-e (Move to the end of the line)
-    elif keys == b'\x05' or keys == b'\x1b[4~':
+    elif keys in (b'\x05', b'\x1b[4~'):
       self.file_col = self.file.rows[self.file_row].get_len()
       self.update_scroll_for_curmove()
     
@@ -969,22 +1052,22 @@ class editor:
       self.jump_to_position(self.file_row, self.file_col, 1, False)
 
     #Up
-    elif keys == b'\x1b[A' or keys == b'\x10':
+    elif keys in (b'\x1b[A', b'\x10'):
       self.cursor_move(-1,0)
     #Down
-    elif keys ==  b'\x1b[B' or keys == b'\x0e':
+    elif keys in (b'\x1b[B', b'\x0e'):
       self.cursor_move(1,0)
     #Left
-    elif keys == b'\x1b[D' or keys == b'\x02':
+    elif keys in (b'\x1b[D', b'\x02'):
       self.dmod = False
       self.cursor_move(0,-1)
     #Right 
-    elif keys == b'\x1b[C' or keys == b'\x06':
+    elif keys in (b'\x1b[C', b'\x06'):
       self.dmod = False
       self.cursor_move(0,1)
 
     # Input method toggle
-    elif keys == b'\x1b`' or keys == b'\x1b~':
+    elif keys in (b'\x1b`', b'\x1b~'):
       if self.file.input_method == self.IM_EN:
         self.file.input_method = self.IM_JP
         if not self.jpfont_loaded:
@@ -1001,7 +1084,7 @@ class editor:
 
 
     # Delete
-    elif keys == b'\x1b[3~' or keys == b'\x04': 
+    elif keys in ( b'\x1b[3~', b'\x04'): 
       if not self.adding_yank:
         self.yankbuf.reset_buf()
       self.adding_yank = True
@@ -1014,7 +1097,7 @@ class editor:
       self.update_scroll_for_curmove()
                     
     # Enter
-    elif keys == b'\r' or keys == b'\x0a':
+    elif keys in (b'\r',b'\x0a'):
       self.file_row, self.file_col = self.file.insert_return(self.file_row, self.file_col)
       self.update_scroll_for_curmove()
     #PageDown
@@ -1121,11 +1204,11 @@ class select_dialog_info:
     self.scroll = 0
 
 class input_line_info:
-  def __init__(self, subject, header, callback):
+  def __init__(self, subject, header, callback, default_str=b''):
     self.subject = subject
     self.callback = callback
     self.header = header
-    self.line = erow(b"", 2) # dummy tab_size
+    self.line = erow(default_str, 2) # dummy tab_size
     self.cur = 0
 
 class search_info:
@@ -1169,14 +1252,23 @@ class editor_file:
     self.filename = filename
     self.mode = "txt"
     self.num_updated = 0
-    self.period_regex = re.compile("([A-Za-z0-9_]+)")
-    if self.filename != None and self.filename[-3:] == ".py":
+    self.period_regex = {}
+    self.period_regex['py'] = re.compile("([A-Za-z0-9_]+)")
+    self.period_regex['md'] = re.compile("([A-Za-z0-9_\ \/\.']+)")
+    if self.filename != None and self.filename[-3:] == ".md":
+      self.mode = "md"
+    elif self.filename != None and self.filename[-3:] == ".py":
       self.mode = "py"
     if self.file_exists(filename):
       try:
         with open(filename, "r") as f:
           for line in f:
-            self.rows.append(erow(line[:-1].encode('utf-8'), self.tab_size))
+            if line[-1] in ('\n', '\r'):
+              if len(line) > 1 and line[-2] in ('\r','\n'):
+                line = line[:-2]
+              else:
+                line = line[:-1]
+            self.rows.append(erow(line.encode('utf-8'), self.tab_size))
       except:
         self.rows.append(erow(b"", self.tab_size))
     else:
@@ -1192,22 +1284,26 @@ class editor_file:
     return False
 
   def push_pos_history(self,pos):
-    # Duplicated detection
+    # Detect Duplication
     if len(self.pos_history) > 0 and self.phistory_cur > 0 and pos[2] == self.pos_history[self.phistory_cur-1][2] and pos[3] == self.pos_history[self.phistory_cur-1][3]:
       return
 
-    if len(self.pos_history) > 0:
-      self.phistory_cur += 1
+    #if len(self.pos_history) > 0:
+    
+    self.phistory_cur += 1
     self.pos_history.insert(self.phistory_cur,pos)
     #print(f"pos history saved to #{self.phistory_cur}:{pos[2]},{pos[3]}")
-    if len(self.pos_history) == 0:
-      self.phistory_cur += 1
+    #if len(self.pos_history) == 0:
+    #  self.phistory_cur += 1
 
-
-    if len(self.pos_history) > 20:
-      del self.pos_history[0]
-      self.phistory_cur -= 1
-      
+    if len(self.pos_history) > 30:
+      if self.phistory_cur > 10:
+        del self.pos_history[-1]
+      else:
+        del self.pos_history[0]
+      #self.phistory_cur -= 1
+      if self.phistory_cur > len(self.pos_history):
+        self.phistory_cur = len(self.pos_history)
 
   def walk_pos_history(self,step):
     if self.phistory_cur+step < 0 or self.phistory_cur+step >= len(self.pos_history):
@@ -1304,10 +1400,12 @@ class editor_file:
     ct = 0
     i = 0
     for ch in str:
-      if ord(ch) >= 0x100:
-        ct += 2
-      else:
-        ct += 1
+      ct += pdeck.get_utf8_width(ch)
+      #if ord(ch) >= 0x100:
+      #  ct += 2
+      #else:
+      #  ct += 1
+      
       i += 1
       if ct >= col:
         return str[:i]
@@ -1503,9 +1601,15 @@ class editor_file:
       comp_list = list(set(comp_list))
     return comp_list
 
-  def get_symbol(self,r,c):
+  def get_symbol(self, r,c):
     line = self.rows[r]
-    search_list = ( b".",b"(",b" ",b"+",b"/",b"-",b"~",b"=",b">",b"<",b"?",b",",b".",b"{",b"}",b"[",b"]",b"|")
+    if self.mode == 'py':
+      search_list = ( b".",b"(",b" ",b"+",b"/",b"-",b"~",b"=",b">",b"<",b"?",b",",b".",b"{",b"}",b"[",b"]",b"|")
+    elif self.mode == 'md':
+      search_list = ( b"(",b"+",b"-",b"~",b"=",b">",b"<",b"?",b",",b"{",b"}",b"[",b"]",b"|")
+    else:
+      return None
+      
     period = None
     sep_ch = None
     for ch in range(c-1,-1,-1):
@@ -1518,7 +1622,7 @@ class editor_file:
         break
 
     if period:
-      result = self.period_regex.search(line.substr(period,-1).decode('utf-8'))
+      result = self.period_regex[self.mode].search(line.substr(period,-1).decode('utf-8'))
     else:
       return (None, None)
     if result:
@@ -1600,7 +1704,7 @@ class yank_buffer:
       self.curbuf += str
     #print(f"yank buf '{self.curbuf}'")
     if pdeck_enabled:
-      pdeck.clipboard_copy(self.curbuf)
+      pdeck.clipboard_copy(self.curbuf.encode('utf-8'))
       
     
 
@@ -1661,7 +1765,7 @@ class erow:
         
       if ch&0xc0 == 0xc0:
         csize = 1
-        dsize = 2
+        dsize = pdeck.get_utf8_width(self.chars[i:i+3])
         org_numchar = numchar
         org_numdchar = numdchar
       elif ch&0xc0 == 0x80:
@@ -1809,7 +1913,7 @@ class erow:
     self.update()
 
   def update_str(self, str):
-    if type(self.chars) != bytearray:
+    if not isinstance(self.chars, bytearray):
       raise Exception('chars must be bytearray')
     self.chars = str
     self.update()
