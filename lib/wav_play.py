@@ -100,5 +100,6 @@ class wav_play:
   def stop(self):
     audio.stream_play(False)
   def close(self):
+    audio.stream_setup(0, 0, 0, 0)
     self.f.close()
 
