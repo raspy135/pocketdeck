@@ -204,10 +204,10 @@ class editor:
   def refresh_screen(self):
     bm.start_bench()
 
-    #self.v.print(el.cursor_mode(False)) #hide cursor
-    #self.v.print(el.home())
-    #if self.dmod:
-    self.render_main_text()
+    self.v.print(el.cursor_mode(False)) #hide cursor
+    if self.dmod:
+      self.render_main_text()
+      self.dmod = False
     #else:
     #  print("no update")
     bm.add_bench('render')
@@ -248,7 +248,14 @@ class editor:
       if self.sl_info: #mode == self.MODE_INPUT_LINE_DIALOG:
         self.print_input_line_dialog()
 
-    self.v.print(el.reset_font_color() + el.move_cursor(self.d_row +1, self.d_col + 1))
+    if self.mode == self.MODE_INPUT_LINE_DIALOG:
+      # Position cursor at the end of input or current cursor position in input
+      prompt_len = len(self.sl_info.header) + 2
+      self.v.print(el.move_cursor(self.text_height + 2, prompt_len + self.sl_info.cur + 1))
+    else:
+      self.v.print(el.reset_font_color() + el.move_cursor(self.d_row +1, self.d_col + 1))
+
+
 
     #if (self.mode == self.MODE_REPLACE or self.mode == self.MODE_SEARCH) and 
     if self.search_info.matched_query != None:
@@ -265,7 +272,7 @@ class editor:
       #out += el.cur_left(len(self.search_info.matched_query))
       out += el.reset_font_color()
       self.v.print(out)
-    self.v.print(el.cursor_mode(True)) #show cursor
+    self.v.print(el.cursor_mode(True)) #show cursor at the very end
     bm.add_bench('status bar')
     bm.print_bench()
 
@@ -548,7 +555,6 @@ class editor:
     return
 
   def process_input_line_dialog(self, keys):
-    
     #Ctrl-g to quit
     if keys == b'\x07':
       self.mode = self.MODE_NORMAL
@@ -814,7 +820,8 @@ class editor:
 
     #print(f"--- {keys} ---")
     #self.v.read(1)
-
+    self.dmod = True
+    
     if self.mode == self.MODE_SEARCH:
       return self.process_search(keys)
       
@@ -823,8 +830,9 @@ class editor:
 
     if self.mode == self.MODE_INPUT_LINE_DIALOG:
       return self.process_input_line_dialog(keys)
-    
-    self.dmod = True
+
+
+
 
     if self.file.input_method == self.IM_JP:
       if keys == b'\x1b`':
@@ -1025,12 +1033,13 @@ class editor:
           self.file_col = 0
 
       else:
+        self.dmod = False
         self.file_col = 0
-
       self.update_scroll_for_curmove()
 
     #Ctrl-e (Move to the end of the line)
     elif keys in (b'\x05', b'\x1b[4~'):
+      self.dmod = False
       self.file_col = self.file.rows[self.file_row].get_len()
       self.update_scroll_for_curmove()
     
@@ -1046,16 +1055,18 @@ class editor:
       self.file_row, self.file_col = self.file.yank(self.file_row, self.file_col, self.yankbuf)
       self.jump_to_position(self.file_row, self.file_col, -1)
 
-    #Ctrl-l to scroll to middle of the cursor
     elif keys == b'\x0c':
       #print("center")
       self.jump_to_position(self.file_row, self.file_col, 1, False)
+      self.dmod = True
 
     #Up
     elif keys in (b'\x1b[A', b'\x10'):
+      self.dmod = False
       self.cursor_move(-1,0)
     #Down
     elif keys in (b'\x1b[B', b'\x0e'):
+      self.dmod = False
       self.cursor_move(1,0)
     #Left
     elif keys in (b'\x1b[D', b'\x02'):
@@ -1437,24 +1448,17 @@ class editor_file:
         out_line = row.substr(ln[2], expos)
         
         
-        # Expanding tab manually
         if row.tab_detected:
-          ol2 = bytearray()
-          dnum = 0
-          for ch in out_line:
-            if ch == 0x9:
-              dsize = self.tab_size - (dnum % self.tab_size)
-              while dsize > 0:
-                ol2.append(0x20)
-                dnum += 1
-                dsize -= 1
-            else:
-              ol2.append(ch)
-              dnum += 1
-          out_line=ol2
-        #if len(out_line) > self.w:
-        #  out_line = out_line[:self.w]
-        out_buf.extend(out_line + el.erase_to_end_of_current_line().encode('utf-8'))
+          # Use cached expanded characters and slice them
+          # We need to map ln[2] (file col) and expos (file col end) to expanded col positions
+          # or simply use the fact that d_pos is display position.
+          d_start = row.bdmap[row.cbmap[ln[2]]]
+          out_line = row.ex_chars[d_start : d_start + self.w]
+        else:
+          out_line = row.substr(ln[2], expos)
+        
+        out_buf.extend(out_line)
+        out_buf.extend(el.erase_to_end_of_current_line().encode('utf-8'))
         #print(f"outbuf: {out_line}")
         #print(f"outbuf: {out_line.decode('utf-8')}")
         
@@ -1832,13 +1836,22 @@ class erow:
     #print(self.dbmap)  
     self.len : int = numchar
     
+    # Build ex_chars (tab-expanded version) if needed
     if tab_found:
-      self.scanned = True
-      #self.ex_chars = self.get_expanded_chars()
       self.tab_detected = True
-      #self.ex_len = len(self.ex_chars)
+      self.scanned = True
+      ex_chars = bytearray()
+      for i, ch in enumerate(self.chars):
+        if ch == 0x9:
+          d_pos = self.bdmap[i]
+          dsize = self.tab_size - (d_pos % self.tab_size)
+          ex_chars.extend(b' ' * dsize)
+        else:
+          ex_chars.append(ch)
+      self.ex_chars = ex_chars
+      self.ex_len = len(self.ex_chars)
     else:
-      self.ex_chars = None #self.chars
+      self.ex_chars = self.chars
       self.ex_len = self.len
       self.tab_detected = False
       
