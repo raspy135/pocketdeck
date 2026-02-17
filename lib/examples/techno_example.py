@@ -76,12 +76,12 @@ def key_wait(vs, p_obj, period, repeatuntil):
 
 def main(vs, args):
     audio.power(True)
-    audio.sample_rate(44100)
+    audio.sample_rate(32000)
     
-    with PieSampler(16) as drums, PieWavetable(1) as bass_synth, PieReverb() as reverb, PieCompressor() as comp:
-        reverb.set_params(room_size=0.1, brightness=0.3, predelay_ms=15.0, transition_ms=0, mix=0.2)
+    with PieSampler(8) as drums, PieWavetable(1) as bass_synth, PieReverb() as reverb, PieCompressor() as comp:
+        reverb.set_params(room_size=0.1, brightness=0.3, predelay_ms=25.0, transition_ms=0, mix=0.2)
         #reverb.detach()
-        comp.set_params(3.5, 3)
+        comp.set_params(2, 3)
         # 1. Prepare 808 Sounds
         kick = generate_kick_808(4000)
         snare = generate_snare_808(3000)
@@ -116,8 +116,8 @@ def main(vs, args):
         d_beat_basic3 = "0 0 0 0, ~ 1 ~ 1, [~ 3]* 16" 
         d_beat_full = "0 [0 0] 0 [0 1], [~ 2]*8"
         d_beat_minimal = "0 ~ 0 0, [~ 2]*4"
-
-        p.add(comp,"[3 1 3 1]")
+        
+        #p.add(comp,"[3 1 3 1]")
         # Hypnotic Sub Bass (MIDI 36 is C2)
         b_loop = "[36 36 ~ 36] [36 ~ 39 36]"
         b_offbeat = "[~ 36]*4"
@@ -132,6 +132,11 @@ def main(vs, args):
         print("\n[Intro] Kick & Sub Pulse", file=vs)
         idx_d = p.add(drums, d_beat_basic2)
         idx_b = p.add(bass_synth, b_offbeat)
+
+        comp.dev.active(True)
+        
+        #Enable reverb if you like
+        #reverb.dev.active(True)
         
         with p:
           if not key_wait(vs, p, cycle_time, 4):

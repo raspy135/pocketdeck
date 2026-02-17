@@ -15,6 +15,7 @@ class hello_graphic():
     self.ghost_x = 20
 
   def update(self,e):
+    
     # Display fps
     overlay.show_fps(self.v)
     
@@ -26,7 +27,6 @@ class hello_graphic():
       self.ghost1[3])
     
     self.ghost_x += 1
-    
     # Once you finished update, you need to notify the frame update is finished.
     self.v.finished()
     

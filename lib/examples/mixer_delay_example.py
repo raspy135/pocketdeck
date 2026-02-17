@@ -27,14 +27,14 @@ def main(vs, args):
           sampler.load(1, snare, ch_snare)
 
           # Configure effects
-          echo.set_type("ping_pong")
-          echo.set_params(time_ms=250, feedback=0.2)
+          echo.set_type("stereo") #stereo or ping_pong
+          echo.set_params(time_ms=125, feedback=0.2)
           
           # Create sequencer
           pie = Pie(bpm=120)
           
           # 1. Add beats
-          pie.add(sampler, "0 . 1 . 0 0 1 .")
+          pie.add(sampler, "[0 . 1 . 0 0 1 .] , [vol0:0.8:0 vol0:0.1:0]*4")
           
           # 2. Add Echo Sweep (time_ms)
           # We sweep the primary parameter (time_ms)
@@ -44,7 +44,7 @@ def main(vs, args):
           # Use dispatch() via pattern syntax cmd:val:trans
           pie.add(mixer, "[pan:-1:0 pan:1:0]")# ~ pan:1:0 ~]")
           
-          print("Starting sequence (8 cycles)...", file=vs)
+          print("Starting sequence (4 cycles)...", file=vs)
           ct = 0
           last_cycle=-1
           with pie:
@@ -53,7 +53,7 @@ def main(vs, args):
               time.sleep(0.1)
               cur_cycle = int(pie.playing_cycle)
               if last_cycle != cur_cycle:
-                print(f"Cycle {cur_cycle}/8...", file=vs)
+                print(f"Cycle {cur_cycle}/4...", file=vs)
                 last_cycle = cur_cycle
               ct += 1
               if cur_cycle == 4:
