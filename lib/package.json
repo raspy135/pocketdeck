@@ -97,10 +97,6 @@
             "examples/techno_example.py"
         ],
         [
-            "examples/wirejump.py",
-            "examples/wirejump.py"
-        ],
-        [
             "fontloader.py",
             "fontloader.py"
         ],
