@@ -25,6 +25,10 @@
             "codec_config.py"
         ],
         [
+            "copy.mpy",
+            "copy.mpy"
+        ],
+        [
             "cp.py",
             "cp.py"
         ],
@@ -33,8 +37,20 @@
             "cpmv.py"
         ],
         [
+            "datetime.mpy",
+            "datetime.mpy"
+        ],
+        [
+            "dic.py",
+            "dic.py"
+        ],
+        [
             "dsp_utils.py",
             "dsp_utils.py"
+        ],
+        [
+            "esclib.py",
+            "esclib.py"
         ],
         [
             "examples/compressor_example.py",
@@ -57,6 +73,10 @@
             "examples/hello_world.py"
         ],
         [
+            "examples/input_test.py",
+            "examples/input_test.py"
+        ],
+        [
             "examples/interactive_example.py",
             "examples/interactive_example.py"
         ],
@@ -77,6 +97,10 @@
             "examples/techno_example.py"
         ],
         [
+            "examples/wirejump.py",
+            "examples/wirejump.py"
+        ],
+        [
             "fontloader.py",
             "fontloader.py"
         ],
@@ -91,6 +115,10 @@
         [
             "home.py",
             "home.py"
+        ],
+        [
+            "imagelib.py",
+            "imagelib.py"
         ],
         [
             "journal.py",
@@ -125,6 +153,18 @@
             "mv.py"
         ],
         [
+            "ntptime.mpy",
+            "ntptime.mpy"
+        ],
+        [
+            "pathlib.mpy",
+            "pathlib.mpy"
+        ],
+        [
+            "pattern_example.py",
+            "pattern_example.py"
+        ],
+        [
             "pem.py",
             "pem.py"
         ],
@@ -137,8 +177,24 @@
             "ping.py"
         ],
         [
+            "pngreader.py",
+            "pngreader.py"
+        ],
+        [
+            "pngviewer.py",
+            "pngviewer.py"
+        ],
+        [
             "pwd.py",
             "pwd.py"
+        ],
+        [
+            "re_findall.py",
+            "re_findall.py"
+        ],
+        [
+            "recorder.py",
+            "recorder.py"
         ],
         [
             "rm.py",
@@ -147,6 +203,14 @@
         [
             "rmdir.py",
             "rmdir.py"
+        ],
+        [
+            "sound.py",
+            "sound.py"
+        ],
+        [
+            "types.mpy",
+            "types.mpy"
         ],
         [
             "uping.py",
@@ -165,12 +229,20 @@
             "wavtest.py"
         ],
         [
+            "xbm2xbmr.py",
+            "xbm2xbmr.py"
+        ],
+        [
             "xbmreader.py",
             "xbmreader.py"
         ],
         [
             "xbmviewer.py",
             "xbmviewer.py"
+        ],
+        [
+            "zen_chamber.py",
+            "zen_chamber.py"
         ]
     ],
     "version": "1.0"
