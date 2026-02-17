@@ -75,6 +75,19 @@ def set_system_font(value = None):
   return pdeck.get_default_terminal_font_size()
   
 
+def set_autosleep(value = None):
+  if value != None:
+    if value < 0:
+      value=0
+    pdeck_utils.autosleep = value
+    pdeck.set_autosleep(value*60)
+  return pdeck_utils.autosleep
+  
+def format_autosleep(value):
+  if value == 0:
+    return 'never'
+  return f'{value} min'
+
 def set_timezone(value = None):
   if value != None:
     pdeck_utils.timezone = value
@@ -163,6 +176,14 @@ menu_list = [
      'format' : format_timezone
      }
      ],
+     ['Sleep',
+     { 'description': 'Autosleep to save power',
+     'type' : 'int',
+     'value' : set_autosleep(),
+     'callback' : set_autosleep,
+     'format' : format_autosleep
+     }
+     ],
    ],
  ],
  [ 'Reload app list', 
@@ -202,7 +223,7 @@ class setting():
     self.current_tick=0
     if not skiplogo:
       self.splash_count = 400
-      self.logo = xbmreader.read("/sd/data/nunomo_logo.xbm")
+      self.logo = xbmreader.read_xbmr("/sd/data/nunomo_logo.xbmr")
     else:
       self.splash_count = 0
     self.boxes = []
@@ -231,7 +252,7 @@ class setting():
       if isinstance(item, list) and len(item) == 2 and isinstance(item[1], list):
         self.update_setting(item[1])
       if isinstance(item, list) and len(item) == 2 and isinstance(item[1], dict):
-        if 'value' in item[1]:
+        if 'value' in item[1] and item[0] in self.loaded_setting:
           #print(f'Updating{item[0]}')
           if item[1]['value'] != self.loaded_setting[item[0]]['value']:
             item[1]['value'] = self.loaded_setting[item[0]]['value']

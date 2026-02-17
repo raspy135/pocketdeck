@@ -2,6 +2,7 @@ import pdeck
 import os
 import re
 import argparse
+import time
 
 def is_int(s):
   try:
@@ -90,7 +91,9 @@ def main(vs,args_in):
   
   for i, item in enumerate(filelist):
     if args.list:
-      print(f'{i}: {item} ', file=vs)
+      st = os.stat(ret[0] + "/" + item)
+      t = time.localtime(st[7])
+      print(f'{i}: {'[Dir]' if st[0]&0x4000 != 0 else ''} {item} {st[6]:,} {t[0]}/{t[1]}/{t[2]}', file=vs)
     else:
       print(f'{item} ', end='', file=vs)
 

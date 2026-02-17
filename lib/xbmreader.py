@@ -1,12 +1,13 @@
 import re
-import re_test
+import re_findall
 import pdeck
 import array
+import struct
 
 v = pdeck.vscreen()
 
 def read_bytes(regex, line):
-  #ret = re_test.findall(regex, line)
+  #ret = re_findall.findall(regex, line)
   #bline = line.encode('utf-8')
   ret = []
   i = 0
@@ -25,6 +26,17 @@ def read_bytes(regex, line):
     else:
       i += 1
 
+def read_xbmr(filename):
+  out = None #bytearray()
+  idx = 0
+  line_num = 0
+  with open(filename, "rb") as file:
+    content = file.read()
+    
+  mcontent = memoryview(content)
+  header = struct.unpack("<hhhh", content)
+  return (filename,  header[2], header[3], mcontent[8:], header[1])
+  
 def read(filename):
   out = None #bytearray()
   idx = 0
@@ -62,7 +74,7 @@ def read(filename):
         out[idx] = num
         idx += 1
     line_num += 1
-  return (name,  width, height, memoryview(bytes(out)))
+  return (name,  width, height, memoryview(bytes(out)), 1)
 
 def scale_one(one, scale):
   r = bytearray()
@@ -92,8 +104,7 @@ def scale(data, scale):
       if scale == 2:
         out.extend(line)
       line = bytearray()
-
-  return (data[0],data[1]*scale,data[2]*scale, memoryview(bytes(out)))
+  return (data[0],data[1]*scale,data[2]*scale, memoryview(bytes(out)), data[4])
 
 
 def gen_shift_images(data):

@@ -72,8 +72,9 @@ class ktimer:
     self.dial_base = 0
 
 class analog_clock:
-  def __init__(self,v, vs):
+  def __init__(self,v, vs, sampler):
     self.key_event = False
+    self.sampler = sampler
     self.tide_chart = None
     self.message = ''
     self.message_life = 0
@@ -122,22 +123,18 @@ class analog_clock:
         self.wavbuf[i] = int(self.du.sin(phase)*(10000-(i&0xfff)*2))
         phase += 0.3
         if phase > twopi: phase -= twopi
-    #audio.stream_setup(0, 48000, 1, len(self.wavbuf))
-    #audio.stream_setdata(0, 0, memoryview(self.wavbuf))
     
     self.wavbuf_click = array.array('h',bytearray(0x1000))
     for i in range(0x800):
-        self.wavbuf_click[i] = int(math.sin(i*1)*1000)
+        self.wavbuf_click[i] = int(math.sin(i*0.001)*3000)
+    self.sampler.set_sample(0, self.wavbuf)
+    self.sampler.set_sample(1, self.wavbuf_click)
       
   def wavplay_alarm(self):
-    audio.stream_setup(0, 48000, 1, len(self.wavbuf))
-    audio.stream_setdata(0, 0, memoryview(self.wavbuf))
-    audio.stream_play(True)
+    self.sampler.play(0)
     
   def wavplay_click(self):
-    audio.stream_setup(0, 48000, 1, len(self.wavbuf_click))
-    audio.stream_setdata(0, 0, memoryview(self.wavbuf_click))
-    audio.stream_play(True)
+    self.sampler.play(1)
 
 
   def draw_oneline_help(self):
@@ -218,7 +215,7 @@ class analog_clock:
   def update_timer(self):
     kt = self.kt
     if kt.stat == KT_ALARM:
-      if not audio.stream_play():
+      if not self.sampler.is_playing(0):
         self.wavplay_alarm()
 
     if kt.stat == KT_RUNNING:
@@ -279,7 +276,7 @@ class analog_clock:
         kt.minute = 0
       if last_minute != kt.minute:
         kt.dial_base = dial
-        #self.wavplay_click()
+        self.wavplay_click()
       
     #self.v.draw_str(300,20,str(input[4]))
     #self.v.draw_str(300,35,str(kt.minute))
@@ -559,6 +556,10 @@ class analog_clock:
       for entry in response_data['predictions']:
         #print(entry['t'])
         self.tide_chart.append(float(entry['v']))
+    if len(self.tide_chart) < 170:
+      print("Tide chart data error")
+      self.tide_chart = []
+      return
     #print(self.tide_chart)
 
   def update_time(self):
@@ -702,10 +703,13 @@ def main(vs, args):
   v.print(el.home())
 
   v.unsubscribe_callback()
-  clock = analog_clock(v, vs)
+  sampler = audio.sampler(2)
+  with sampler:
+    clock = analog_clock(v, vs, sampler)
   
-  v.callback(clock.update)
-  clock.keyevent_loop()
+    v.callback(clock.update)
+    clock.keyevent_loop()
+  
   v.print(el.display_mode(True))
   print("finished.", file=vs)
   v.callback(None)

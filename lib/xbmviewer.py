@@ -8,12 +8,15 @@ pu.reimport('xbmreader')
 class drawxbm():
   def __init__(self,vs, filename):
     self.vs = vs
-    self.image = xbmreader.read(filename)
+    if filename[-4:] == 'xbmr':
+      self.image = xbmreader.read_xbmr(filename)
+    else:
+      self.image = xbmreader.read(filename)
     self.v = vs.v
 
   def update(self,e):
     self.v.draw_box(0,0,420, 240)
-    self.v.draw_xbm(0,0,self.image[1],self.image[2], self.image[3])
+    self.v.draw_xbm(200-self.image[1]//2,120-self.image[2]//2,self.image[1],self.image[2], self.image[3])
     self.v.finished()
 
   

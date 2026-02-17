@@ -18,6 +18,41 @@ class codec_config:
         'R': {'page': 45, 'base': 20}
     }
     
+  def get_input_mixer(self):
+    self.ic.writeto_mem(self.address, 0x0, b'\x01')
+    val = self.ic.readfrom_mem(self.address, 0x18,1)[0]
+    self.ic.writeto_mem(self.address, 0x0, b'\x00')
+    return val
+    
+  def set_input_mixer(self,val):
+    a = bytearray(1)
+    a[0] = val
+    a = bytes(a)
+    self.ic.writeto_mem(self.address, 0x0, b'\x01')
+    # 0 = 0.0dB
+    # 1 = -0.4dB
+    # 0x28 = MUTE
+    if a[0] > 0x28:
+      a[0] = 0x28
+    self.ic.writeto_mem(self.address, 0x18, a)
+    self.ic.writeto_mem(self.address, 0x19, a)
+    if a[0] != 0x28:
+      a = bytearray(1)
+      a[0] = 0xa
+      a = bytes(a)
+      self.ic.writeto_mem(self.address, 0x0c, a)
+      self.ic.writeto_mem(self.address, 0x0d, a)
+    else:
+      a = bytearray(1)
+      a[0] = 0x8
+      a = bytes(a)
+      self.ic.writeto_mem(self.address, 0x0c, a)
+      self.ic.writeto_mem(self.address, 0x0d, a)
+      
+    self.ic.writeto_mem(self.address, 0x0, b'\x00')
+    
+
+
   def set_vol(self,val):
     a = bytearray(1)
     a[0] = val
@@ -87,11 +122,16 @@ class codec_config:
   def toggle_li(self,val):
     self.ic.writeto_mem(self.address, 0x0, b'\x01')
     if val:
+      # Enable line in (In 1)
       self.ic.writeto_mem(self.address, 0x34, b'\x80')
       self.ic.writeto_mem(self.address, 0x37, b'\x80')
+      self.ic.writeto_mem(self.address, 0x33, b'\x00')
     else:
+      # Enable Microphone (In 2)
       self.ic.writeto_mem(self.address, 0x34, b'\x20')
       self.ic.writeto_mem(self.address, 0x37, b'\x20')
+      self.ic.writeto_mem(self.address, 0x33, b'\x50')
+      
     self.ic.writeto_mem(self.address, 0x0, b'\x00')
 
   def set_pass_through(self):

@@ -1,6 +1,6 @@
 import os
 
-def check_src_dst_names(vs, src,dst):
+def check_src_dst_names(vs, src,dst, allow_dir = False):
   basename = src.rsplit('/',1)[-1]
     
   try:
@@ -10,7 +10,7 @@ def check_src_dst_names(vs, src,dst):
     return
     
   #0x4000 means directory
-  if bool(st[0]&0x4000):
+  if bool(st[0]&0x4000) and not allow_dir:
     print("Source file is a directory", file=vs)
     return
     
@@ -25,7 +25,7 @@ def check_src_dst_names(vs, src,dst):
   
 
   #0x4000 means directory
-  if bool(st[0]&0x4000):
+  if bool(st[0]&0x4000) and not allow_dir:
     dst = dst + '/' + basename
   
   return (src,dst)

@@ -429,7 +429,6 @@ class graph_diary:
 
       self.loaded = True
 
-
 def main(vs, args):
   org_filename = "/sd/Documents/journal.md"
   if len(args) == 2:

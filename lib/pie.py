@@ -31,30 +31,140 @@ def note_to_freq(note):
     return None
 
 CHORDS = {
+  "maj7": [0, 4, 7, 11],
   "maj": [0, 4, 7],
+  "major": [0, 4, 7],
+  "m": [0, 3, 7],
   "min": [0, 3, 7],
   "dim": [0, 3, 6],
   "aug": [0, 4, 8],
   "sev": [0, 4, 7, 10],
-  "maj7": [0, 4, 7, 11],
-  "min7": [0, 3, 7, 10]
+  "7": [0, 4, 7, 10],
+  "min7": [0, 3, 7, 10],
+  "m7": [0, 3, 7, 10],
+  "6": [0, 4, 7, 9],
+  "m6": [0, 3, 7, 9],
+  "dim7": [0, 3, 6, 9],
+  "sus2": [0, 2, 7],
+  "sus4": [0, 5, 7],
+  "9": [0, 4, 7, 10, 14],
+  "add9": [0, 4, 7, 14],
+  "dom9": [0, 4, 7, 10, 14]
 }
 
+SCALES = {
+  "maj": [0, 2, 4, 5, 7, 9, 11],
+  "m": [0, 2, 3, 5, 7, 8, 10],
+  "pent_maj": [0, 2, 4, 7, 9],
+  "pent_m": [0, 3, 5, 7, 10],
+  "chrom": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+}
+
+def parse_scale(s):
+  """Parses strings like 'Cmajor' or 'Dbminor' into (root_midi, scale_intervals)."""
+  if not isinstance(s, str): return None
+  s = s.lower()
+  root = None
+  scale_type = None
+  
+  # Try to find root note
+  # Handle notes like 'eb', 'c#', 'c' manually 
+  if len(s) == 0 or not ('a' <= s[0] <= 'g'): return None
+  
+  root_name = s[0]
+  if len(s) > 1 and s[1] in ('#', 'b'):
+    root_name += s[1]
+  
+  scale_type = s[len(root_name):]
+  root_name = root_name.upper()
+  
+  # Convert names like 'EB' to 'D#'
+  octave = 4
+  if root_name.endswith('B'): # Flat
+    n_idx = NOTES.index(root_name[0]) - 1
+    if n_idx < 0: n_idx = 11; octave -= 1
+    root_name = NOTES[n_idx]
+    
+  if root_name not in NOTES: return None
+  root = root_name.lower()
+  
+  if root is None: return None
+  
+  # Normalize aliases
+  if scale_type == "major": scale_type = "maj"
+  if scale_type == "minor": scale_type = "m"
+  if not scale_type: scale_type = "maj"
+  if scale_type == "pentatonic_major": scale_type = "pent_maj"
+  if scale_type == "pentatonic_minor": scale_type = "pent_m"
+  if scale_type == "chromatic": scale_type = "chrom"
+  
+  intervals = SCALES.get(scale_type)
+  if intervals is None: return None
+  
+  # Calculate root midi (default C4)
+  octave = 4
+  n_idx = NOTES.index(root.upper())
+  root_midi = 12 * (octave + 1) + n_idx
+  return (root_midi, intervals)
+
+# Sort chord names by length (longest first) to avoid '7' hitting before 'maj7'
+CHORD_NAMES = sorted(CHORDS.keys(), key=len, reverse=True)
+
 def chord_to_freqs(c_str):
-  for c_name, intervals in CHORDS.items():
-    if c_str.endswith(c_name):
-      root_note = c_str[:-len(c_name)]
-      root_freq = note_to_freq(root_note)
-      if isinstance(root_freq, (int, float)):
-        # This is a bit advanced, we'll return a list of frequencies
-        # But note_to_freq calculates using midi, so let's get root midi
-        octave = int(root_note[-1])
-        name = root_note[:-1].upper()
+  # 1. Try as a pure note first (e.g. 'C4', 'Eb5').
+  # If it matches a known note exactly with an octave, we treat it as a note.
+  # This avoids interpreting 'C7' (note C in octave 7) as a chord by mistake.
+  res = note_to_freq(c_str)
+  if res is not None:
+    return [res]
+    
+  # 2. Try as a chord (matches suffixes like '7', 'm', 'maj')
+  inv = 0
+  input_str = c_str.lower()
+  if ":" in input_str:
+    parts = input_str.split(":")
+    input_str = parts[0]
+    try: inv = int(parts[1])
+    except: pass
+    
+  for c_name in CHORD_NAMES:
+    if input_str.endswith(c_name):
+      intervals = CHORDS[c_name]
+      root_note = input_str[:-len(c_name)]
+      if not root_note: root_note = "c4" # Default fallback
+      
+      try:
+        # Extract octave if present (e.g. 'c4' or 'c')
+        if root_note[-1].isdigit():
+          octave = int(root_note[-1])
+          name = root_note[:-1].upper()
+        else:
+          octave = 4 # Default octave
+          name = root_note.upper()
+          
+        if name.endswith('B'): # Flat
+          n_idx = NOTES.index(name[0]) - 1
+          if n_idx < 0: n_idx = 11; octave -= 1
+          name = NOTES[n_idx]
         n = NOTES.index(name)
         root_midi = 12 * (octave + 1) + n
-        return [440.0 * (2.0 ** (((root_midi + i) - 69) / 12.0)) for i in intervals]
-  res = note_to_freq(c_str)
-  return [res] if res is not None else []
+        
+        midi_notes = [root_midi + i for i in intervals]
+        # Inversion logic: rotate lowest/highest note
+        if inv > 0:
+          for _ in range(inv):
+            midi_notes.sort()
+            midi_notes[0] += 12
+        elif inv < 0:
+          for _ in range(abs(inv)):
+            midi_notes.sort()
+            midi_notes[-1] -= 12
+        
+        return [midi_to_hz(m) for m in midi_notes]
+      except (ValueError, IndexError, KeyError):
+        pass
+
+  return []
 
 
 
@@ -112,19 +222,23 @@ def parse_mini(s, preprocess=None):
             except ValueError:
               val = t
 
-        # 2. Automation check
-        if isinstance(val, str) and ":" in val:
+        # 2/3. Baking & Automation Priority
+        baked = None
+        if preprocess and isinstance(val, str) and val not in ("~", "."):
+          baked = preprocess(val)
+          
+        if baked:
+          val = tuple(baked) if isinstance(baked, (list, tuple)) else baked
+        elif isinstance(val, str) and ":" in val:
           parts = val.split(":")
           cmd = parts[0]
-          v = float(parts[1]) if len(parts) > 1 else 0.0
-          trans = int(parts[2]) if len(parts) > 2 else 0
-          val = {"type": "control", "cmd": cmd, "val": v, "trans": trans}
-        
-        # 3. Baking logic (MIDI numbers and Note strings)
-        elif preprocess and val not in ("~", "."):
-          baked = preprocess(val)
-          val = tuple(baked) if isinstance(baked, (list, tuple)) else baked
-          
+          try:
+            v = float(parts[1]) if len(parts) > 1 else 0.0
+            trans = int(parts[2]) if len(parts) > 2 else 0
+            val = {"type": "control", "cmd": cmd, "val": v, "trans": trans}
+          except (ValueError, IndexError):
+            pass # Keep as string for now
+            
         stack[-1].append(val)
     return stack[0]
 
@@ -177,6 +291,10 @@ class Pattern:
       return
     self._preprocess = preprocess # Store for potentially rebinding later
     self._speed = 1.0
+    self._clip = 0.9
+    self._strum = 0.0
+    self._scale = None
+    self._transpose = 0
     self._cache = {}
     self._p = None
 
@@ -197,6 +315,48 @@ class Pattern:
     self.clear_cache()
     return self
 
+  def clip(self, n):
+    if isinstance(n, str):
+      self._clip = Pattern.create(n)
+    else:
+      self._clip = n
+    self.clear_cache()
+    return self
+
+  def strum(self, amount):
+    if isinstance(amount, str):
+      self._strum = Pattern.create(amount)
+    else:
+      self._strum = amount
+    self.clear_cache()
+    return self
+
+  def scale(self, s):
+    if isinstance(s, str) and (" " in s.strip() or "<" in s or "[" in s):
+      self._scale = Pattern.create(s)
+    else:
+      self._scale = s # Might be 'Cmajor' or None
+    self.clear_cache()
+    return self
+
+  def transpose(self, n):
+    if isinstance(n, str):
+      self._transpose = Pattern.create(n)
+    else:
+      self._transpose = n
+    self.clear_cache()
+    return self
+
+  def _get_val(self, param, offset, cycle, default):
+    if isinstance(param, Pattern):
+      # Parameter patterns are sampled at the given offset within the cycle
+      evs = param.get_events(cycle)
+      for o, d, v in evs:
+        if offset >= o and offset < o + d:
+          return v
+      return default
+    return param
+
   def _gcd(self, a, b):
     a, b = int(a * 1000 + 0.5), int(b * 1000 + 0.5)
     while b:
@@ -208,50 +368,65 @@ class Pattern:
     return abs(a * b) / self._gcd(a, b)
 
   def get_period(self, data):
-    """Calculates the inherent phrase length in cycles."""
+    """Calculates the inherent phrase length in cycles, including parameter patterns."""
+    p = self._get_period_raw(data)
+    if isinstance(self._clip, Pattern):
+      p = self._lcm(p, self._clip.get_period(self._clip._data))
+    if isinstance(self._strum, Pattern):
+      p = self._lcm(p, self._strum.get_period(self._strum._data))
+    if isinstance(self._scale, Pattern):
+      p = self._lcm(p, self._scale.get_period(self._scale._data))
+    if isinstance(self._transpose, Pattern):
+      p = self._lcm(p, self._transpose.get_period(self._transpose._data))
+    return p
+
+  def _get_period_raw(self, data):
+    """Calculates the data's inherent phrase length."""
     if isinstance(data, dict):
       t = data.get("type")
       if t == "layers":
         res = 1.0
-        for i in data["data"]: res = self._lcm(res, self.get_period(i))
+        for i in data["data"]: res = self._lcm(res, self._get_period_raw(i))
         return res
       if t == "alternation":
-        # Interleaved period: Number of items * LCM of their individual periods
         n = len(data["data"])
         l = 1.0
-        for i in data["data"]: l = self._lcm(l, self.get_period(i))
+        for i in data["data"]: l = self._lcm(l, self._get_period_raw(i))
         return n * l
       if "val" in data and "speed" in data:
-        p_val = self.get_period(data["val"])
+        p_val = self._get_period_raw(data["val"])
         s = data["speed"]
         return p_val * s if s > 1.0 else p_val
       if "val" in data and "weight" in data:
-        return self.get_period(data["val"])
+        return self._get_period_raw(data["val"])
     if isinstance(data, list):
-      # Phrasing: A list's period is the LCM of its children's periods
       res = 1.0
-      for i in data: res = self._lcm(res, self.get_period(i))
+      for i in data: res = self._lcm(res, self._get_period_raw(i))
       return res
     return 1.0
 
-  def _normalize(self, data, offset=0.0, duration=1.0, cycle=0):
+  def _normalize(self, data, offset=0.0, duration=1.0, visit_index=0, phrase_cycle=0):
     """Recursive Selector engine: generates events for exactly one cycle."""
     events = []
     
     if isinstance(data, dict):
       t = data.get("type")
       if t == "layers":
-        for layer in data["data"]:
-          events.extend(self._normalize(layer, offset, duration, cycle))
+        strum_val = self._get_val(self._strum, offset, phrase_cycle, 0.0)
+        n = len(data["data"])
+        for i, layer in enumerate(data["data"]):
+          if strum_val >= 0:
+            delay = i * strum_val
+          else:
+            delay = (n - 1 - i) * abs(strum_val)
+          events.extend(self._normalize(layer, offset + delay, duration, visit_index, phrase_cycle))
         return events
       
       if t == "alternation":
         items = data["data"]
         n = len(items)
-        # Interleaved selection: pick item based on global measure
-        idx = int(cycle % n)
-        # Pass how many times THIS specific slot has been visited
-        return self._normalize(items[idx], offset, duration, int(cycle // n))
+        idx = int(visit_index % n)
+        return self._normalize(items[idx], offset, duration, int(visit_index // n), phrase_cycle)
 
       if "val" in data and "speed" in data:
         v, s = data["val"], data["speed"]
@@ -259,25 +434,23 @@ class Pattern:
           if isinstance(v, list):
             n = len(v)
             num_per_cycle = n / s
-            page = int(cycle % s)
+            page = int(visit_index % s)
             start = int(page * num_per_cycle + 0.001)
             end = int((page + 1) * num_per_cycle + 0.001)
-            # Pass the cycle index shifted by how many phrases have passed
-            return self._normalize(v[start:end], offset, duration, int(cycle // s))
+            return self._normalize(v[start:end], offset, duration, int(visit_index // s), phrase_cycle)
           else:
-            if int(cycle % s) == 0:
-              return self._normalize(v, offset, duration, int(cycle // s))
+            if int(visit_index % s) == 0:
+              return self._normalize(v, offset, duration, int(visit_index // s), phrase_cycle)
             return []
         else: # Repeating *n
           num = int(1/s + 0.1)
           sub_dur = duration / num
           for r in range(num):
-             # Progressive cycle index ensures nested alternations advance correctly
-             events.extend(self._normalize(v, offset + r * sub_dur, sub_dur, cycle * num + r))
+             events.extend(self._normalize(v, offset + r * sub_dur, sub_dur, visit_index * num + r, phrase_cycle))
           return events
       
       if "val" in data and "weight" in data:
-        return self._normalize(data["val"], offset, duration, cycle)
+        return self._normalize(data["val"], offset, duration, visit_index, phrase_cycle)
 
     if isinstance(data, list):
       tw = sum(i.get("weight", 1.0) if isinstance(i, dict) else 1.0 for i in data)
@@ -288,7 +461,7 @@ class Pattern:
         val = item
         if isinstance(item, dict) and "weight" in item and "speed" not in item and "type" not in item:
           val = item.get("val", item)
-        events.extend(self._normalize(val, curr_off, item_dur, cycle))
+        events.extend(self._normalize(val, curr_off, item_dur, visit_index, phrase_cycle))
         curr_off += item_dur
       return events
     
@@ -296,20 +469,53 @@ class Pattern:
     if isinstance(data, tuple):
       # tuple(is_control, ...) case handled below by control check
       if not (len(data) == 4 and data[0] is True):
-        for part in data:
-          events.extend(self._normalize(part, offset, duration, cycle))
+        strum_val = self._get_val(self._strum, offset, phrase_cycle, 0.0)
+        n = len(data)
+        for i, part in enumerate(data):
+          if strum_val >= 0:
+            delay = i * strum_val
+          else:
+            delay = (n - 1 - i) * abs(strum_val)
+          events.extend(self._normalize(part, offset + delay, duration, visit_index, phrase_cycle))
         return events
 
     # Atomic Note/Chord/Sample/Control
     if data in ("~", "."): return []
     if isinstance(data, dict) and data.get("type") == "control":
-      # (offset, duration, (is_control, cmd, val, trans))
       return [(offset, duration, (True, data["cmd"], data["val"], data["trans"]))]
     
-    # Pre-baked value (Hz or ID)
+    # Transpose and Scale Mapping for relative integers
+    mapped_by_scale = False
+    if isinstance(data, (int, float)):
+      transpose_val = self._get_val(self._transpose, offset, phrase_cycle, 0)
+      if transpose_val != 0:
+        if isinstance(data, int):
+          data += int(transpose_val)
+        else:
+          # Transpose frequency: f * 2^(n/12)
+          data *= (2.0 ** (transpose_val / 12.0))
+      
+      if isinstance(data, int) and self._scale is not None:
+        s_val = self._get_val(self._scale, offset, phrase_cycle, None)
+        if s_val:
+          s_info = parse_scale(s_val)
+          if s_info:
+            root_midi, intervals = s_info
+            n = len(intervals)
+            midi = root_midi + (data // n) * 12 + intervals[data % n]
+            data = midi_to_hz(midi)
+            mapped_by_scale = True
+
+    # Pre-baked value (Hz or ID) or raw number
     if data is not None:
-      # Apply 90% gate for separation
-      dur_raw = duration * 0.9
+      # ONLY preprocess if it's an int (MIDI/ID) and not already handled by scale.
+      # Skip floats as they are assumed to be already-calculated frequencies.
+      if not mapped_by_scale and isinstance(data, int) and self._preprocess:
+        baked = self._preprocess(data)
+        data = tuple(baked) if isinstance(baked, (list, tuple)) else baked
+
+      clip_val = self._get_val(self._clip, offset, phrase_cycle, 0.9)
+      dur_raw = duration * clip_val
       events.append((offset, dur_raw, data))
     return events
 
@@ -324,7 +530,7 @@ class Pattern:
     if ckey in self._cache:
       events = self._cache[ckey]
     else:
-      events = self._normalize(self._data, 0.0, 1.0, cycle)
+      events = self._normalize(self._data, 0.0, 1.0, cycle, cycle)
       self._cache[ckey] = events
       
     if not events: return []
@@ -364,10 +570,6 @@ class PieSampler:
     for i in range(self._max_samples): 
       self.dev.volume(i, val, transition_ms, execute_at)
 
-  def _preprocess(self, val):
-    """Pass-through for sampler slots (already ints/floats)."""
-    return val
-
   def play(self, slot, loop=False, execute_at=0):
     self.dev.play(slot, loop, execute_at)
 
@@ -382,6 +584,8 @@ class PieSampler:
 
   def trigger(self, value, execute_at, duration):
     # For sampler, 'value' is the sample index
+    if isinstance(value, (list, tuple)) and len(value) > 0:
+      value = value[0]
     try:
       slot = int(value)
       self.dev.play(slot, False, execute_at)
@@ -447,13 +651,16 @@ class PieWavetable:
   def _preprocess(self, val):
     """Converts strings or MIDI numbers to Hz."""
     if isinstance(val, str):
-      return chord_to_freqs(val)
+      res = chord_to_freqs(val)
+      return res if res else None
     if isinstance(val, (int, float)):
       return [midi_to_hz(val)]
-    return val
+    return None
 
   def play(self, slot, freq, execute_at=0):
     freq = self._preprocess(freq)
+    if isinstance(freq, list) and len(freq) > 0:
+      freq = freq[0]
     self.dev.pitch(slot, freq / 440.0, 0, execute_at)
     self.dev.note_on(slot, execute_at)
     self._osc_free_at[slot] = 0x7FFFFFFF 
@@ -481,6 +688,8 @@ class PieWavetable:
       earliest_free_tick = min(self._osc_free_at)
       target_osc = self._osc_free_at.index(earliest_free_tick)
     
+    if isinstance(freq, (list, tuple)) and len(freq) > 0:
+      freq = freq[0]
     self.dev.pitch(target_osc, freq / 440.0, self.transition_ms, execute_at)
     self.dev.note_on(target_osc, execute_at)
     self.dev.note_off(target_osc, duration)
@@ -514,6 +723,12 @@ class PieFilter:
   def detach(self, state=True):
     self.dev.detach(state)
 
+  def enable(self):
+    self.dev.active(True)
+
+  def disable(self):
+    self.dev.active(False)
+
   def q(self, val, transition_ms=0, execute_at=0):
     self.dev.set_params(-1, val, transition_ms, execute_at)
 
@@ -527,7 +742,7 @@ class PieFilter:
 
   def trigger(self, value, execute_at, duration):
     # If value is from Pattern, it might be a list (from chord_to_freqs)
-    if isinstance(value, list) and len(value) > 0:
+    if isinstance(value, (list, tuple)) and len(value) > 0:
       value = value[0]
     self.dev.set_params(value, -1, 0, execute_at)
 
@@ -555,6 +770,12 @@ class PieCompressor:
   def detach(self, state=True):
     self.dev.detach(state)
 
+  def enable(self):
+    self.dev.active(True)
+
+  def disable(self):
+    self.dev.active(False)
+
   def gain(self, val, transition_ms=0, execute_at=0):
     self.dev.set_params(val, -1, transition_ms, execute_at)
 
@@ -563,7 +784,7 @@ class PieCompressor:
 
   def trigger(self, value, execute_at, duration):
     # If value is from Pattern, it might be a list
-    if isinstance(value, list) and len(value) > 0:
+    if isinstance(value, (list, tuple)) and len(value) > 0:
       value = value[0]
     self.dev.set_params(value, -1, 0, execute_at)
 
@@ -620,6 +841,12 @@ class PieEcho:
   def detach(self, state=True):
     self.dev.detach(state)
 
+  def enable(self):
+    self.dev.active(True)
+
+  def disable(self):
+    self.dev.active(False)
+
   def set_type(self, type_str):
     if type_str == "stereo":
       self.dev.set_type(audio.ECHO_STEREO)
@@ -654,6 +881,12 @@ class PieReverb:
 
   def detach(self, state=True):
     self.dev.detach(state)
+
+  def enable(self):
+    self.dev.active(True)
+
+  def disable(self):
+    self.dev.active(False)
 
   def room(self, val, transition_ms=0, execute_at=0):
     self.set_params(room_size=val, transition_ms=transition_ms, execute_at=execute_at)
@@ -742,6 +975,13 @@ class Pie:
     """Converts a sequencer cycle index to an audio tick (sample count)."""
     return self._base_tick + int(cycle * self._cycle_duration_samples)
 
+  def pattern(self, instrument, data):
+    """Creates a Pattern object linked to an instrument's preprocessing."""
+    preprocess = None
+    if hasattr(instrument, "_preprocess"):
+      preprocess = instrument._preprocess
+    return Pattern.create(data, preprocess)
+
   def add(self, instrument, pattern):
     if isinstance(pattern, str):
       preprocess = None
@@ -815,7 +1055,7 @@ class Pie:
               # Unify playback for Sampler & Wavetable
               inst.trigger(value, event_tick, duration_tick)
             except Exception as e:
-              print(f"Playback error at:{pat.print_str()}, events={events}")
+              print(f"Playback error: {e} at:{pat.print_str()}, events={events}")
               continue
       self._scheduled_until_tick += self._cycle_duration_samples
 
