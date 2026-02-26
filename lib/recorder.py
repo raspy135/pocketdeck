@@ -6,7 +6,7 @@ import pdeck_utils as pu
 import codec_config
 import wav_play
 
-SAMPLE_RATE = 44100
+SAMPLE_RATE = 24000
 
 class stream_record:
   def __init__(self, filename, stream):
@@ -16,8 +16,8 @@ class stream_record:
     #self.open(filename)
     self.total_read = 0
     self.buf = []    
-    self.buf.append(memoryview(bytearray(2000000)))
-    self.buf.append(memoryview(bytearray(2000000)))
+    self.buf.append(memoryview(bytearray(200000)))
+    self.buf.append(memoryview(bytearray(200000)))
     #self.buf.append(memoryview(bytearray(50000)))
     #self.buf.append(memoryview(bytearray(50000)))
     

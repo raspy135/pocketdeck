@@ -81,6 +81,10 @@
             "examples/interactive_example.py"
         ],
         [
+            "examples/launch_app.py",
+            "examples/launch_app.py"
+        ],
+        [
             "examples/mixer_delay_example.py",
             "examples/mixer_delay_example.py"
         ],

@@ -103,6 +103,7 @@ def poll_for_tokens(device_code, interval=5, timeout=120):
     return None
 
 def save_tokens(tokens):
+    tokens["expires_at"] = time.time() + tokens["expires_in"]
     """Save tokens to file"""
     try:
         with open(TOKEN_FILE, "w") as f:
@@ -239,7 +240,7 @@ def upload_file_to_drive(file_path, drive_filename=None):
             return False
             
     except Exception as e:
-        print_vs("Upload error:", e)
+        print_vs(f"Upload error: {e}")
         return False
 
 def list_drive_files():
@@ -297,8 +298,6 @@ def oauth_setup():
     )
     
     if tokens:
-        # Calculate expiration timestamp
-        tokens["expires_at"] = time.time() + tokens["expires_in"]
         save_tokens(tokens)
         return "Setup Completed"
     else:

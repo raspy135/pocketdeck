@@ -6,43 +6,104 @@ import pdeck
 import pdeck_utils as pu
 import esclib as elib
 import argparse
-import gpt_post
+import ubinascii
+
+API_KEY_FILENAME = "/config/openai_api_key"
 
 class chatgpt_util:
   def __init__(self,vs):
     self.vs = vs
     self.url = "https://api.openai.com/v1/responses"
+    self.api_key = ""
+  def read_api_key(self):
+    try:
+      with open(API_KEY_FILENAME,"r") as f:
+        self.api_key = f.read().strip()
+    except Exception as e:
+      print(f"Error to open API key. Put API key to {API_KEY_FILENAME}", file=self.vs)
+      return False
     
-  def make_json(self, message, references):
+    return True
+
+  def post(self, url, json=None):
+    headers = {
+      'Content-Type' : 'application/json',
+      'Accept': 'application/json',
+      'Authorization' : 'Bearer ' + self.api_key
+      }
+    return requests.post(url, headers=headers, data=json)
+
+  def make_json(self, message, references, images=None, model="gpt-5.2"):
+    content_items = []
+    
+    # Add text message
     if len(references) > 0:
-      out = []
-      out.append("I put some attached text files as reference. Then answer the question by using attached information. You are not limited to reference the attached text, you can use all your knowledge. ")
-      for i,item in enumerate(references):
-        out.append(f"----- reference  {i} -----")
-        out.append(item)
-      out.append("----- Question -----")
-      out.append(message)
-      message = "\n".join(out)
-    #print(message)  
-    payload = ujson.dumps({
-        "model" : "gpt-5.2",
-        "input" : message
+      ref_text = "I put some attached text files as reference. Then answer the question by using attached information. You are not limited to reference the attached text, you can use all your knowledge. \n"
+      for i, item in enumerate(references):
+        ref_text += f"----- reference {i} -----\n{item}\n"
+      ref_text += "----- Question -----\n"
+      message = ref_text + message
+
+    content_items.append({"type": "input_text", "text": message})
+
+    # Add images
+    if images:
+      for img in images:
+        if type(img) == str:
+          img_url = img
+        else:
+          b64 = ubinascii.b2a_base64(img).decode('utf-8').strip()
+          img_url = f"data:image/jpeg;base64,{b64}"
+          
+        content_items.append({
+          "type": "input_image",
+          "image_url": img_url
         })
-    #print(payload)
+
+    payload = ujson.dumps({
+        "model" : model,
+        "tools" : [
+          { "type" : "web_search" }
+          ],
+        "input" : [
+          {
+            "type": "message",
+            "role": "user",
+            "content": content_items
+          }
+        ]
+    })
     return payload
     
   def ask(self,json):
-    response = gpt_post.post(self.url,json.encode('utf-8'))
-    response_data = response.json()
+    response = self.post(self.url,json.encode('utf-8'))
+    #print(f"res{response.text}")
+    try:
+      response_data = response.json()
+    except:
+      print(f"Error: Non-JSON response ({response.status_code})", file=self.vs)
+      print(response.text[:200], file=self.vs)
+      response.close()
+      return None
     response.close()
 
-    #print(response_data)
-    if response_data:
-      print(response_data["error"])
-      #  print(response_data["error"]["message"], file=self.vs)
-      #  return None
-      res_text = response_data["output"][0]["content"][0]["text"]
-      return res_text
+    if "error" in response_data and response_data['error'] != None:
+      print(f"API Error: {response_data['error'].get('message', 'Unknown error')}", file=self.vs)
+      return None
+
+    try:
+      # Responses API structure: output -> items
+      # Each item can be a message with content
+      print(response_data)
+      for item in response_data.get("output", []):
+        if item.get("type") == "message":
+          for content in item.get("content", []):
+            if content.get("type") == "output_text" or content.get("type") =="text":
+              return content.get("text")
+    except Exception as e:
+      print(f"Error parsing response: {e}", file=self.vs)
+    
+    return None
 
 el = elib.esclib()
 
@@ -89,6 +150,8 @@ def main(vs, args_in):
   parser.add_argument('-c', '--clipboard', action='store_true', help='use clipboard as reference text')
   parser.add_argument('-j', '--jp',action='store_true',help='Answer in Japanese')
   parser.add_argument('-f', '--file',action='store',help='Attach file(s) as reference. file1,file2...')
+  parser.add_argument('-i', '--image',action='store',help='Attach image file(s) or image url(s). img1,img2...')
+  parser.add_argument('-m', '--model',action='store',default='gpt-5.2',help='Model to use (e.g. gpt-5-mini)')
   parser.add_argument('content', nargs='*',help='Content to ask')
 
   args = parser.parse_args(args_in[1:])
@@ -112,6 +175,8 @@ def main(vs, args_in):
 
   #response = "dummy **important** response\n\nnext line **is** important too."
   gpt = chatgpt_util(vs)
+  if not gpt.read_api_key():
+    return
   references = []
   if args.file:
     files = args.file.split(',')
@@ -127,8 +192,25 @@ def main(vs, args_in):
     references.append(pdeck.clipboard_paste().decode("utf-8"))
     #references.append(a.decode("utf-8"))
   #print(references)
+  
+  images = []
+  if args.image:
+    image_paths = args.image.split(',')
+    for img_path in image_paths:
+      if img_path.startswith("http://") or img_path.startswith("https://"):
+        images.append(img_path)
+      else:
+        try:
+          with open(img_path, 'rb') as f:
+            images.append(f.read())
+        except Exception as e:
+          print(f'Error when opening image {img_path}', file=vs)
+          return
+
+  #print(references)
   #return
-  raw_response = gpt.ask(gpt.make_json(message, references))
+  raw_response = gpt.ask(gpt.make_json(message, references, images, args.model))
+  
   response = format(raw_response)
   if response:
     print(response, file=vs)

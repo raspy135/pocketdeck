@@ -119,6 +119,16 @@ class codec_config:
       self.ic.writeto_mem(self.address, 0x0f, b'\x00')
     self.ic.writeto_mem(self.address, 0x0, b'\x00')
 
+  def get_li(self):
+    self.ic.writeto_mem(self.address, 0x0, b'\x01')
+    val = self.ic.readfrom_mem(self.address, 0x34, 1)[0]
+    self.ic.writeto_mem(self.address, 0x0, b'\x00')
+    #print(f"val{val}")   
+    if val == 0x80:
+      return True
+    else:
+      return False
+    
   def toggle_li(self,val):
     self.ic.writeto_mem(self.address, 0x0, b'\x01')
     if val:

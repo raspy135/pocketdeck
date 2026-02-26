@@ -105,7 +105,7 @@ class editor:
 
   def exit(self):
     self.v.print(el.raw_mode(False))
-    self.v.print(el.wraparound_mode(False))
+    #self.v.print(el.wraparound_mode(False))
     
   def open(self, filename):
     self.file = editor_file(self.v, filename, self.text_height, self.text_width - 1, self.tab_size)
@@ -113,7 +113,7 @@ class editor:
 
   def setup_screen(self):
     self.v.set_raw_mode(True)
-    self.v.print(el.wraparound_mode(False))
+    #self.v.print(el.wraparound_mode(False))
     self.v.print(el.erase_screen())    
 
   
@@ -809,7 +809,9 @@ class editor:
     if keys == b'\x1b':
       seq = [ keys ]
       seq.append( self.v.read(1) )
-      if seq[-1] == b'[':
+      if seq[-1] == b'[' or seq[-1] == b'O':
+        # In Rawmode, arrow keys as send as \x1bOA (or BCD) instead of \x1b[A (or BCD). Replace it back to '['
+        seq[-1] = b'['
         seq.append( self.v.read(1) )
         if seq[-1] >= b'0' and seq[-1] <= b'9':
           seq.append( self.v.read(1) )

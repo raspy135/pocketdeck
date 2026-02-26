@@ -63,6 +63,13 @@ def set_speaker_out(value = None):
     return codec_config.get_lo()
   return True
 
+def set_line_in(value = None):
+  if value != None:
+    codec_config.toggle_li(value)
+  if set_audio_power():
+    return codec_config.get_li()
+  return True
+
 def set_audio_power(value = None):
   if value != None:
     if audio.power() != value:
@@ -130,8 +137,15 @@ menu_list = [
      'callback' : set_speaker_out
      }
   ],
-  [ 'Microphone gain' ,
-     { 'description': 'Microphone sensitivity in dB',
+  [ 'Input source' , 
+         { 'description': 'On = Line in, Off = Microphone',
+     'type' : 'switch',
+     'value' : set_line_in(),
+     'callback' : set_line_in
+     }
+  ],
+  [ 'Input gain' ,
+     { 'description': 'Input gain in dB',
      'type' : 'int',
      'step' : 3,
      'value' : set_mic_gain(),
