@@ -7,7 +7,7 @@ def input(message):
   
 def input_vs(vs, message):
   elib = ec.esclib()
-  print(message, file=vs)
+  vs.v.print(message)
   out=''
   while True:
     key = vs.read(1).encode('utf-8')
@@ -21,6 +21,7 @@ def input_vs(vs, message):
     vs.v.print(str)
     out += str
     if key == b'\x0d':
+      print('', file=vs)
       break
   return out
 
