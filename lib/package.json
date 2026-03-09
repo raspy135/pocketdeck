@@ -137,6 +137,10 @@
             "menu_ui.py"
         ],
         [
+            "misc_utils.py",
+            "misc_utils.py"
+        ],
+        [
             "mkdir.py",
             "mkdir.py"
         ],
