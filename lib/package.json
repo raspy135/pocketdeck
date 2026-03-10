@@ -173,6 +173,10 @@
             "pem.py"
         ],
         [
+            "pem_keymap.py",
+            "pem_keymap.py"
+        ],
+        [
             "pie.py",
             "pie.py"
         ],
