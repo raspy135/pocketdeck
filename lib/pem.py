@@ -50,7 +50,7 @@ def _dirname(p):
 
 
 class editor:
-  def __init__(self,v):
+  def __init__(self,v, japanese):
     # enum
     self.MODE_NORMAL = 0
     self.MODE_SEARCH = 1
@@ -97,6 +97,9 @@ class editor:
     self.line_num_list = []
     self.tab_size = 2
     self.jpfont_loaded = False
+    # Load Japanese font
+    if japanese:
+      self.load_jpfont()
 
   def load_jpfont(self):
     import fontloader
@@ -107,6 +110,7 @@ class editor:
     font = fontloader.font_list[fontname]
     self.v.v.set_terminal_font(font,font,8,16)
     self.jpfont_loaded = True
+    
 
   def exit(self):
     self.v.print(el.raw_mode(False))
@@ -2148,6 +2152,7 @@ def main(vs, args_in):
   # Get a virtual screen (No argument = current)
   v = screen_interface(vs)
   parser = argparse.ArgumentParser( description = "pem")
+  parser.add_argument('-j','--japanese', action='store_true',help='Set Japansese font at launching') 
   parser.add_argument("filename")
   if len(args_in) > 1:
     args = parser.parse_args(args_in[1:])
@@ -2160,7 +2165,7 @@ def main(vs, args_in):
     #return
 
   try: 
-    e = editor(v)
+    e = editor(v, args.japanese)
     e.open(args.filename)
     e.setup_screen()
     e.refresh_screen()
