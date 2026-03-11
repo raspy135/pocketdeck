@@ -2153,21 +2153,20 @@ def main(vs, args_in):
   v = screen_interface(vs)
   parser = argparse.ArgumentParser( description = "pem")
   parser.add_argument('-j','--japanese', action='store_true',help='Set Japansese font at launching') 
-  parser.add_argument("filename")
-  if len(args_in) > 1:
-    args = parser.parse_args(args_in[1:])
-  else:
-    class obj: pass
-    args = obj()
-    args.filename = None
-    args.japanese = False
+  if len(args_in) > 1 and args_in[-1][0] != '-':
+    parser.add_argument("filename", default=None)
+    
+  args = parser.parse_args(args_in[1:])
+
+  filename=None
+  try:
+    filename=args.filename
+  except Exception as e:
     pass
-    #v.print("Specify filename\r\n")
-    #return
 
   try: 
     e = editor(v, args.japanese)
-    e.open(args.filename)
+    e.open(filename)
     e.setup_screen()
     e.refresh_screen()
     while True:
