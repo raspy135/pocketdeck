@@ -2160,6 +2160,7 @@ def main(vs, args_in):
     class obj: pass
     args = obj()
     args.filename = None
+    args.japanese = False
     pass
     #v.print("Specify filename\r\n")
     #return
