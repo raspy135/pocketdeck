@@ -61,6 +61,11 @@ class editor:
     self.IM_JP = 2
     self.h_diff = 1
     self.v = v
+
+    # Load Japanese font
+    if japanese:
+      self.load_jpfont()
+
     self.mode = self.MODE_NORMAL
     self.text_width, self.text_height = v.get_terminal_size()
     self.yankbuf = yank_buffer()
@@ -97,9 +102,6 @@ class editor:
     self.line_num_list = []
     self.tab_size = 2
     self.jpfont_loaded = False
-    # Load Japanese font
-    if japanese:
-      self.load_jpfont()
 
   def load_jpfont(self):
     import fontloader
