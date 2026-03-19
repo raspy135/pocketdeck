@@ -120,7 +120,10 @@ class editor:
     
   def open(self, filename):
     self.file = editor_file(self.v, filename, self.text_height, self.text_width - 1, self.tab_size)
+    self.file_row, self.file_col = self.file.open()
     self.v.background_update=self.file.background_update
+    #self.render_main_text(True)
+    #self.jump_to_position(self.file_row, self.file_col, 1, False)
 
   def setup_screen(self):
     self.v.set_raw_mode(True)
@@ -523,6 +526,9 @@ class editor:
     self.scroll_row = 0
     self.scroll_col = 0
     self.file = editor_file(self.v, filename, self.text_height, self.text_width, self.tab_size)
+    
+    self.file_row, self.file_col = self.file.open()
+    
     self.render_main_text(True)
     self.jump_to_position(self.file_row, self.file_col, 1, False)
     return
@@ -534,6 +540,7 @@ class editor:
     self.file.filename = fname
     print(f"Saving.. file={name.decode()}")
     total = self.file.save()
+    self.file.save_last_filename(self.file_row, self.file_col)
       
     if total == 0:
       self.set_message('File write error')
@@ -562,6 +569,7 @@ class editor:
     self.recall_pos(self.file.saved_pos)
     self.render_main_text(True)
     self.jump_to_position(self.file_row, self.file_col, 1, False)
+    self.file.save_last_filename(self.file_row, self.file_col)
     
     return
 
@@ -886,6 +894,7 @@ class editor:
       else:
         while True:
           total = self.file.save()
+          self.file.save_last_filename(self.file_row, self.file_col)
           if total != 0:
             break
           print("File write error. Retrying..")
@@ -1002,7 +1011,7 @@ class editor:
             #self.set_message('Link not found')
             print(e)
         
-      if sym and self.file.mode == 'py':
+      elif sym and self.file.mode == 'py':
         pos = self.save_pos()
         self.file.push_pos_history(pos)
         self.mode = self.MODE_SEARCH
@@ -1274,6 +1283,27 @@ class editor_file:
     self.w = w
     self.modified = False
     self.filename = filename
+
+
+  def open(self):
+    
+    resume_last_file = True
+    linenum = 0
+    colnum = 0
+    filename = self.filename
+    
+    if hasattr(km,'resume_last_file'):
+      resume_last_file=km.resume_last_file
+    if resume_last_file and self.filename == None:
+      if self.file_exists('/config/pem_filelist.txt'):
+        with open('/config/pem_filelist.txt', "r") as f:
+          first_line = f.read().split('\n')[0]
+          if ',' in first_line:
+            filename, linenum, colnum = first_line.split(',')
+            linenum = int(linenum)
+            colnum = int(colnum)
+            self.filename = filename
+
     self.mode = "txt"
     self.num_updated = 0
     self.period_regex = {}
@@ -1293,10 +1323,14 @@ class editor_file:
               else:
                 line = line[:-1]
             self.rows.append(erow(line.encode('utf-8'), self.tab_size))
+        #self.jump_to_position(linenum, colnum, 1, False)
+        #self.save_last_filename(linenum, colnum)
       except:
         self.rows.append(erow(b"", self.tab_size))
     else:
       self.rows.append(erow(b"", self.tab_size))
+    
+    return linenum, colnum      
 
   def background_update(self):
     if self.num_updated < len(self.rows):
@@ -1344,6 +1378,20 @@ class editor_file:
     except OSError:
       return False
 
+  def save_last_filename(self, row, col):
+    resume_last_file = True
+    if hasattr(km,'resume_last_file'):
+      resume_last_file=km.resume_last_file
+    if resume_last_file:
+      if self.filename == None:
+        return
+      with open('/config/pem_filelist.txt', "wb") as f:
+        try:
+          f.write(self.filename)
+          f.write(',' + str(row) + ',' + str(col))
+          f.write('\n')
+        except Exception as e:
+          print(e)
 
   def save(self):
     if self.filename == None:
@@ -2168,8 +2216,8 @@ def main(vs, args_in):
 
   try: 
     e = editor(v, args.japanese)
-    e.open(filename)
     e.setup_screen()
+    e.open(filename)
     e.refresh_screen()
     while True:
       ret = e.process_key()

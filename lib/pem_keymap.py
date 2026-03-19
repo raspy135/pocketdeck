@@ -1,12 +1,12 @@
 
-from micropython import const
+resume_last_file = True
 
 ext_keys = [ b'\x18' ]
 map = {
   'quit': [ b'\x18\x03' ],
   'save': [ b'\x18\x13' ],
   'open': [ b'\x18\x06' ],
-  'close': [ b'\x18\x06' ],
+  'close': [ b'\x18k' ],
   'switch': [ b'\x18b' ],
   'kill': [ b'\x0b' ],
   'delete': [ b'\x04', b'\x1b[3~'],  
