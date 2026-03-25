@@ -20,13 +20,21 @@ class wav_play:
   def u2(self, data):
     return array.array('H', data)[0]
 
+  def skip_bytes(self, f, n):
+    while n > 0:
+      # MicroPython read might return less than requested or None/empty
+      chunk = f.read(min(n, 1024))
+      if not chunk: break
+      n -= len(chunk)
+
   def skipChunk(self, f, chunk):
     chunkID = f.read(4)
     while chunkID != chunk:
       chunkSize = self.u4(f.read(4))
       print(f"SKIP header = {str(chunkID)}, {chunkSize}")
-      f.seek(chunkSize, 1)
+      self.skip_bytes(f, chunkSize)
       chunkID = f.read(4)
+      if not chunkID: return None
     return chunk
     
   def read_header(self, f):
@@ -47,7 +55,7 @@ class wav_play:
     self.h_fmt_byteRate = f.read(4)
     self.h_fmt_blockAligh = f.read(2)
     self.h_fmt_bitsPerSample = self.u2(f.read(2))
-    f.seek(self.h_fmt_chunkSize - 16, 1)
+    self.skip_bytes(f, self.h_fmt_chunkSize - 16)
     
     chunkID = self.skipChunk(f, b'data')
     self.h_chunkIDdata = chunkID
@@ -69,8 +77,28 @@ class wav_play:
     self.callback_lock=True
 
     if self.total_read >= self.h_data_chunkSize:
+      self.callback_lock=False
       return
-    self.total_read += self.f.readinto(self.buf[index])
+    try:
+      num_read = self.f.readinto(self.buf[index])
+    except Exception as e:
+      print(f"Stream Read Error: {e}")
+      self.total_read = self.h_data_chunkSize
+      self.callback_lock=False
+      return
+    #if self.stop_next:
+    #  audio.stream_play(False)
+    #  #return
+
+    self.total_read += num_read
+
+    if num_read < len(self.buf[index]) and self.isstreaming:
+      print(f"total_read={self.total_read}")
+      audio.stream_update_length(0, self.total_read >> (self.h_fmt_numOfChannels))
+      #self.total_read = self.h_data_chunkSize
+      #self.stop_next = True
+      #return
+      
 
     self.callback_lock=False
 
@@ -79,17 +107,41 @@ class wav_play:
   def get_position(self):
     return (audio.stream_position(0), self.h_data_chunkSize>>2)
 
-  def open(self,filename):
-      
-    self.f = open(filename, 'rb')
-    self.header = self.read_header(self.f)
+  def open_stream(self, stream, isstreaming=True):
+    self.isstreaming = isstreaming
+    self.stop_next = False
+    self.f = stream
+    self.read_header(self.f)
     print(f" sample_rate {self.h_fmt_sampleRate}, bps {self.h_fmt_bitsPerSample}")
     self.total_read = 0
-    numread = self.f.readinto(self.buf[0])
-    numread = self.f.readinto(self.buf[1])
-      
+    
     print(self.h_data_chunkSize)
-    audio.stream_setup(0, 48000, 2, self.h_data_chunkSize >> 2, self.send_callback)
+    # Calculate bytes per sample frame (channels * bytes_per_sample)
+    bytes_per_sample = (self.h_fmt_bitsPerSample // 8) * self.h_fmt_numOfChannels
+
+
+    num_samples = self.h_data_chunkSize // bytes_per_sample
+    
+    self.total_read += self.f.readinto(self.buf[0])
+    self.total_read += self.f.readinto(self.buf[1])
+    
+    audio.stream_setup(0, self.h_fmt_sampleRate, self.h_fmt_numOfChannels, num_samples, self.send_callback)
+
+  def open(self,filename):
+    self.f = open(filename, 'rb')
+    f_stat = os.stat(filename)
+    
+    self.open_stream(self.f, isstreaming=False)
+    
+    # Check actual file size to avoid huge headers from OpenAI
+    #actual_data_size = f_stat[6] - self.f.tell()
+    # Pre-fill first two buffers for immediate playback
+    #print(actual_data_size)
+    #if self.h_data_chunkSize > actual_data_size:
+    #  self.h_data_chunkSize = actual_data_size
+    #  bytes_per_sample = (self.h_fmt_bitsPerSample // 8) * self.h_fmt_numOfChannels
+    #  num_samples = self.h_data_chunkSize // bytes_per_sample
+    #  audio.stream_setup(0, self.h_fmt_sampleRate, self.h_fmt_numOfChannels, num_samples, self.send_callback)
     
   def play(self):
     audio.sample_rate(self.h_fmt_sampleRate)

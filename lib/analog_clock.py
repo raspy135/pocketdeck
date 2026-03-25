@@ -25,7 +25,7 @@ dc = { \
   "pi * 2" : (pi * 2),
   "1/1000000" : (1/1000000),
   "pi * 2 / 60" : (pi * 2 / 60 ),
-  "60*60*tz" : 60*15*pdeck_utils.timezone,
+#  "60*60*tz" : 60*15*pdeck_utils.timezone,
   "pi * 2 / 12": (pi * 2 / 12 ),
   "1/60": (1/60),
   "2*pi/1024" : (2*pi/1024),
@@ -563,7 +563,7 @@ class analog_clock:
     #print(self.tide_chart)
 
   def update_time(self):
-    ctime = time.gmtime(time.time() + dc["60*60*tz"])
+    ctime = time.gmtime(time.time() + 60*15*pdeck_utils.timezone)
     #ctime = rtc.datetime()
     self.hour = ctime[3] 
     self.year = ctime[0]
@@ -582,8 +582,8 @@ class analog_clock:
 
   def keyevent_loop(self):
     
-    if not self.tide_chart:
-      self.get_tide(self.shifted_day)
+    #if not self.tide_chart:
+    #  self.get_tide(self.shifted_day)
     
     while True:
       ret = self.v.read_nb(1)

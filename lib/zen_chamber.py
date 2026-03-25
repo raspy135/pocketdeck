@@ -142,7 +142,8 @@ class ZenChamber:
     self.router.add(self.mixer)
     
     self.echo.set_type("ping_pong")
-    self.echo.set_params(time_ms=150, feedback=0.2)
+    self.echo.set_params(time_ms=750, feedback=0.2)
+    self.echo.enable()
     
     # Init Wavetables
     sine = generate_sine(256)
@@ -152,7 +153,7 @@ class ZenChamber:
     for i in range(4):
       self.synth.dev.set_wavetable(i, [sine, saw])
       self.synth.dev.set_adsr(i, 2, 4000, 0.05, 1)
-      self.synth.dev.volume(i, 0.3)
+      self.synth.dev.volume(i, 0.2)
     
     self.comp.set_params(1.4,2.0)
     #self.synth.volume(0.8)

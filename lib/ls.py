@@ -78,7 +78,6 @@ def main(vs,args_in):
   parser.add_argument('path',nargs='?', help='Path', default = '.')
 
   args = parser.parse_args(args_in[1:])
-  
   q = args.path #args[1]
     
   ret = list_file(q)

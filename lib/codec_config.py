@@ -144,24 +144,94 @@ class codec_config:
       
     self.ic.writeto_mem(self.address, 0x0, b'\x00')
 
-  def set_pass_through(self):
-    """Sets Biquad A to unity gain (bypass/pass-through) for testing."""
-    self.set_lpf_raw(1.0, 0, 0, 0, 0)
+  def set_agc(self, enabled, target_level_db=-12):
+    """
+    Configures AGC (Auto Gain Control) for ADC.
+    target_level_db: -5.5, -8, -10, -12, -14, -17, -20, -24
+    """
+    # Page 0, Reg 86/91: AGC Control 1
+    # D7: Enable, D6-D4: Target Level
+    targets = {
+        -5.5: 0x00, -8.0: 0x10, -10.0: 0x20, -12.0: 0x30,
+        -14.0: 0x40, -17.0: 0x50, -20.0: 0x60, -24.0: 0x70
+    }
+    
+    # Simple nearest-match for dB
+    best_match = -12.0
+    min_diff = 100.0
+    for t in targets.keys():
+      diff = abs(target_level_db - t)
+      if diff < min_diff:
+        min_diff = diff
+        best_match = t
+    
+    val = targets[best_match]
+    if enabled:
+      val |= 0x80
+      
+    self.ic.writeto_mem(self.address, 0x0, b'\x00')
+    self.ic.writeto_mem(self.address, 86, bytes([val]))
+    self.ic.writeto_mem(self.address, 94, bytes([val]))
+    
+    if enabled:
+      # Max Gain (Reg 88/96): 0-0x77 (0 to 59.5dB). Default 40dB (0x50)
+      max_gain = bytes([0x50])
+      self.ic.writeto_mem(self.address, 88, max_gain)
+      self.ic.writeto_mem(self.address, 96, max_gain)
+      # Attack Time (Reg 89/97): Default ~20ms (0x02 for 32kHz sample rate)
+      self.ic.writeto_mem(self.address, 89, b'\x02')
+      self.ic.writeto_mem(self.address, 97, b'\x02')
+      # Decay Time (Reg 90/98): Default ~500ms (0x10)
+      self.ic.writeto_mem(self.address, 90, b'\x10')
+      self.ic.writeto_mem(self.address, 98, b'\x10')
+      
+  def get_agc(self):
+    """Returns (enabled, target_db)"""
+    self.ic.writeto_mem(self.address, 0x0, b'\x00')
+    val = self.ic.readfrom_mem(self.address, 86, 1)[0]
+    enabled = (val & 0x80) != 0
+    bits = val & 0x70
+    targets_inv = {
+        0x00: -5.5, 0x10: -8.0, 0x20: -10.0, 0x30: -12.0,
+        0x40: -14.0, 0x50: -17.0, 0x60: -20.0, 0x70: -24.0
+    }
+    target_db = targets_inv.get(bits, -12.0)
+    return enabled, target_db
 
-  def set_lpf(self, cutoff_freq, q=0.707, sample_rate=44100):
-    """Configures Biquad A as a Low-Pass Filter (2nd Order)."""
+  def set_pass_through(self, biquad_idx='A'):
+    """Sets specified Biquad to unity gain (bypass/pass-through) for testing."""
+    self.set_filter_raw(1.0, 0, 0, 0, 0, biquad_idx=biquad_idx)
+
+  def set_lpf(self, cutoff_freq, q=0.707, sample_rate=44100, biquad_idx='A'):
+    """Configures specified Biquad as a Low-Pass Filter (2nd Order)."""
     b0, b1, b2, a1, a2 = self._calc_lpf_coeffs(cutoff_freq, sample_rate, q)
     # Hardware eqn: y[n] = N0*x[n] + N1*x[n-1] + N2*x[n-2] + 2*D1*y[n-1] + D2*y[n-2]
     # Testing 1x Numerator scaling to fix volume drop
-    self.set_lpf_raw(b0, b1, b2, -a1/2.0, -a2)
+    self.set_filter_raw(b0, b1, b2, -a1/2.0, -a2, biquad_idx=biquad_idx)
 
-  def set_lpf_1st(self, cutoff_freq, sample_rate=44100):
-    """Configures Biquad A as a 1st Order LPF (Ultra-Stable)."""
+  def set_lpf_1st(self, cutoff_freq, sample_rate=44100, biquad_idx='A'):
+    """Configures specified Biquad as a 1st Order LPF (Ultra-Stable)."""
     # H(z) = (1-a) / (1 - a*z^-1) => y[n] = (1-a)x[n] + a*y[n-1]
     a = math.exp(-2.0 * math.pi * cutoff_freq / sample_rate)
-    self.set_lpf_raw(1.0 - a, 0, 0, a/2.0, 0)
+    self.set_filter_raw(1.0 - a, 0, 0, a/2.0, 0, biquad_idx=biquad_idx)
 
-  def set_lpf_raw(self, n0, n1, n2, d1, d2):
+  def set_hpf(self, cutoff_freq, q=0.707, sample_rate=44100, biquad_idx='A'):
+    """Configures specified Biquad as a High-Pass Filter (2nd Order)."""
+    b0, b1, b2, a1, a2 = self._calc_hpf_coeffs(cutoff_freq, sample_rate, q)
+    # Hardware eqn: y[n] = N0*x[n] + 2*N1*x[n-1] + N2*x[n-2] + 2*D1*y[n-1] + D2*y[n-2]
+    # We halve b1 and a1 to account for the hardware 2x multiplier.
+    self.set_filter_raw(b0, b1/2.0, b2, -a1/2.0, -a2, biquad_idx=biquad_idx)
+
+  def set_hpf_1st(self, cutoff_freq, sample_rate=44100, biquad_idx='A'):
+    """Configures specified Biquad as a 1st Order HPF."""
+    # H(z) = (1+a)/2 * (1-z^-1) / (1-a*z^-1)
+    # y[n] = (1+a)/2 * x[n] - (1+a)/2 * x[n-1] + a * y[n-1]
+    a = math.exp(-2.0 * math.pi * cutoff_freq / sample_rate)
+    # n1 must be halved here because hardware multiplies it by 2.
+    # desired n1 = -(1+a)/2, so pass -(1+a)/4.
+    self.set_filter_raw((1.0 + a) / 2.0, -(1.0 + a) / 4.0, 0, a / 2.0, 0, biquad_idx=biquad_idx)
+
+  def set_filter_raw(self, n0, n1, n2, d1, d2, biquad_idx='A'):
     """Writes raw floating point coefficients to hardware registers N0, N1, N2, D1, D2."""
     # 1. Power down DACs (Page 0, Reg 63)
     self.ic.writeto_mem(self.address, 0x00, b'\x00')
@@ -181,8 +251,8 @@ class codec_config:
     }
 
     for name, val in coeffs.items():
-      self._write_coefficient_24bit('L', 'A', name, val)
-      self._write_coefficient_24bit('R', 'A', name, val)
+      self._write_coefficient_24bit('L', biquad_idx, name, val)
+      self._write_coefficient_24bit('R', biquad_idx, name, val)
 
     # 3. Restore DAC Power
     self.ic.writeto_mem(self.address, 0x00, b'\x00')
@@ -196,6 +266,14 @@ class codec_config:
     alpha = sn / (2.0 * q)
     a0 = 1 + alpha
     return (1-cs)/(2*a0), (1-cs)/a0, (1-cs)/(2*a0), (-2*cs)/a0, (1-alpha)/a0
+
+  def _calc_hpf_coeffs(self, fc, fs, q):
+    """Calculates 2nd-order HPF coefficients."""
+    omega = 2.0 * math.pi * fc / fs
+    sn, cs = math.sin(omega), math.cos(omega)
+    alpha = sn / (2.0 * q)
+    a0 = 1 + alpha
+    return (1+cs)/(2*a0), -(1+cs)/a0, (1+cs)/(2*a0), (-2*cs)/a0, (1-alpha)/a0
 
   def _float_to_coeff_int(self, val):
     """Convert float to 24-bit 1.23 signed integer."""

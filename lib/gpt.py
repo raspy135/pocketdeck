@@ -1,4 +1,5 @@
 import network, socket
+import codec_config
 import ujson
 import time
 import urequests as requests
@@ -7,6 +8,11 @@ import pdeck_utils as pu
 import esclib as elib
 import argparse
 import ubinascii
+import audio
+import wav_play
+import recorder
+import os
+import re
 
 API_KEY_FILENAME = "/config/openai_api_key"
 
@@ -14,7 +20,10 @@ class chatgpt_util:
   def __init__(self,vs):
     self.vs = vs
     self.url = "https://api.openai.com/v1/responses"
+    self.stt_url = "https://api.openai.com/v1/audio/transcriptions"
+    self.tts_url = "https://api.openai.com/v1/audio/speech"
     self.api_key = ""
+
   def read_api_key(self):
     try:
       with open(API_KEY_FILENAME,"r") as f:
@@ -33,7 +42,9 @@ class chatgpt_util:
       }
     return requests.post(url, headers=headers, data=json)
 
-  def make_json(self, message, references, images=None, model="gpt-5.2"):
+
+
+  def make_json(self, message, references, images=None, model="gpt-5.2", instructions = None):
     content_items = []
     
     # Add text message
@@ -60,7 +71,7 @@ class chatgpt_util:
           "image_url": img_url
         })
 
-    payload = ujson.dumps({
+    payload_dic = {
         "model" : model,
         "tools" : [
           { "type" : "web_search" }
@@ -72,7 +83,12 @@ class chatgpt_util:
             "content": content_items
           }
         ]
-    })
+    }
+    if instructions:
+      payload_dic['instructions'] = instructions
+      
+    payload = ujson.dumps(payload_dic)
+    print(payload)
     return payload
     
   def ask(self,json):
@@ -94,7 +110,7 @@ class chatgpt_util:
     try:
       # Responses API structure: output -> items
       # Each item can be a message with content
-      print(response_data)
+      # print(response_data)
       for item in response_data.get("output", []):
         if item.get("type") == "message":
           for content in item.get("content", []):
@@ -105,7 +121,121 @@ class chatgpt_util:
     
     return None
 
+  def stt(self, filename):
+    """Transcribes audio using Whisper"""
+    boundary = "----MicroPythonPdeckBoundary"
+    try:
+      with open(filename, 'rb') as f:
+        content = f.read()
+    except Exception as e:
+      print(f"STT Error reading file: {e}", file=self.vs)
+      return None
+    
+    body = (
+        '--' + boundary + '\r\n' +
+        'Content-Disposition: form-data; name="file"; filename="audio.wav"\r\n' +
+        'Content-Type: audio/wav\r\n\r\n'
+    ).encode('utf-8') + content + (
+        '\r\n--' + boundary + '\r\n' +
+        'Content-Disposition: form-data; name="model"\r\n\r\nwhisper-1\r\n' +
+        '--' + boundary + '--\r\n'
+    ).encode('utf-8')
+    
+    headers = {
+        'Content-Type': 'multipart/form-data; boundary=' + boundary,
+        'Authorization': 'Bearer ' + self.api_key
+    }
+    
+    print("Uploading to STT...", file=self.vs)
+    res = requests.post(self.stt_url, headers=headers, data=body)
+    if res.status_code == 200:
+      text = res.json().get('text')
+      res.close()
+      return text
+    else:
+      print(f"STT Error: {res.status_code} {res.text}", file=self.vs)
+      res.close()
+      return None
+
+  def tts(self, text, filename, voice='alloy'):
+    """Converts text to speech"""
+    res = self.tts_stream(text, voice)
+    if res and res.status_code == 200:
+      with open(filename, 'wb') as f:
+        f.write(res.content)
+      res.close()
+      return True
+    return False
+
+  def tts_stream(self, text, voice='alloy'):
+    """Converts text to speech and returns a response object with a raw stream"""
+    payload = ujson.dumps({
+        #"model": "tts-1-hd",
+        "model": "gpt-4o-mini-tts",
+        "input": text,
+        "voice": voice,
+        #"speed" : 1.1,
+        "response_format": "wav"
+    }).encode('utf-8')
+    
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + self.api_key
+    }
+    
+    # In MicroPython urequests, the response object itself can sometimes be treated as a stream
+    return requests.post(self.tts_url, headers=headers, data=payload)
+
 el = elib.esclib()
+
+def record_audio(vs, filename, duration_sec=15):
+  """Records 16kHz mono audio"""
+  sample_rate = 16000
+  cc = codec_config.codec_config()
+  cc.toggle_li(False)
+  cc.set_agc(True)
+  
+  audio.sample_rate(sample_rate)
+  print(f"Recording... (press any key to stop)", file=vs)
+  rec = recorder.stream_record('dummy', vs)
+  # Use num_channels=1 for bandwidth savings as requested
+  rec.record(filename, sample_rate * duration_sec, num_channels=1)
+  
+  # Wait for recording or keypress
+  start = time.time()
+  while audio.stream_record() and (time.time() - start) < duration_sec:
+    pdeck.delay_tick(5)
+    ret = vs.v.read_nb(1)
+    if ret and ret[0] > 0:
+      break
+  rec.stop()
+  return filename
+
+def play_audio(vs, filename):
+  """Plays audio from file using wav_play"""
+  wp = wav_play.wav_play()
+  wp.open(filename)
+  wp.play()
+  while audio.stream_play():
+    pdeck.delay_tick(5)
+    ret = vs.v.read_nb(1)
+    if ret and ret[0] > 0:
+      break
+  wp.stop()
+  wp.close()
+
+def play_audio_stream(vs, stream):
+  """Plays audio from a stream using wav_play"""
+  wp = wav_play.wav_play()
+  wp.open_stream(stream)
+  wp.play()
+  while audio.stream_play():
+    pdeck.delay_tick(5)
+    ret = vs.v.read_nb(1)
+    if ret and ret[0] > 0:
+      break
+  wp.stop()
+  wp.close()
 
 def get_message(vs):
   message=""
@@ -147,55 +277,71 @@ def main(vs, args_in):
   parser = argparse.ArgumentParser(
             description='ChatGPT query' )
   parser.add_argument('-n', '--nosave',action='store_true',help='do not save the result')
+  parser.add_argument('-nf', '--no-format',action='store_true',help='do not format text (No bold)')
   parser.add_argument('-c', '--clipboard', action='store_true', help='use clipboard as reference text')
   parser.add_argument('-j', '--jp',action='store_true',help='Answer in Japanese')
-  parser.add_argument('-f', '--file',action='store',help='Attach file(s) as reference. file1,file2...')
-  parser.add_argument('-i', '--image',action='store',help='Attach image file(s) or image url(s). img1,img2...')
-  parser.add_argument('-m', '--model',action='store',default='gpt-5.2',help='Model to use (e.g. gpt-5-mini)')
+  parser.add_argument('-f', '--file',nargs='+',action='store',help='Attach file(s) as reference. file1 file2...')
+  parser.add_argument('-i', '--image', nargs='+', action='store',help='Attach image file(s) or image url(s). img1 img2...')
+  parser.add_argument('-m', '--model',action='store',default='gpt-5.4-mini',help='Model to use (e.g. gpt-5-mini)')
+  parser.add_argument('-v', '--voice',action='store_true',help='Use voice mode (STT and TTS)')
+  parser.add_argument('-vt', '--voice-type',action='store',default='coral',help='Voice type for TTS (alloy, coral, echo, fable, onyx, nova, shimmer)')
   parser.add_argument('content', nargs='*',help='Content to ask')
+  parser.add_argument('-q', nargs='+',help='Content to ask, use this when you want to specify content explicitly.')
 
   args = parser.parse_args(args_in[1:])
 
-  print(f"Save:{args.nosave}",file=vs)
-  print(f"Content:{args.content}",file=vs)
-  print("Hello", file=vs)
-  if not args.content:
-    message = get_message(vs)
-  else:
-    message = ' '.join(args.content)
-
-
-  print(f"'{message}'",file=vs)
-  #return
-  if len(message) == 0:
-    return
-
-  ex1 = "and answer in Japanese" if args.jp else  ""
-  message = message + ex1
-
-  #response = "dummy **important** response\n\nnext line **is** important too."
   gpt = chatgpt_util(vs)
   if not gpt.read_api_key():
     return
+
+  message = ""
+  instructions = None
+
+  if args.voice:
+    rec_file = "/sd/work/voice_rec.wav"
+    record_audio(vs, rec_file)
+    print("Transcribing...", file=vs)
+    message = gpt.stt(rec_file)
+    if not message:
+      print("Failed to transcribe audio", file=vs)
+      return
+    print(f"You (STT): {message}", file=vs)
+    instructions = "Response will be fed to OpenAI TTS engine. Optimize your responce for Text to speech. Basically keep it short, suitable input for your text to speech engine."
+    
+  elif not args.content and not args.q:
+    message = get_message(vs)
+  else:
+    if args.content:
+      message += ' '.join(args.content)
+    if args.q:
+      message += ' '.join(args.q)
+  if len(message) == 0:
+    return
+
+  ex1 = " and answer in Japanese" if args.jp else  ""
+  message = message + ex1
+
   references = []
   if args.file:
-    files = args.file.split(',')
+    files = args.file
     for file in files:
+      if file.startswith("http://") or file.startswith("https://"):
+        references.append(file)
+        continue
+        
       try:
         with open(file,'r') as f:
-          references.append(f.read())
+          references.append("---- " + file + " ----\n" + f.read())
       except Exception as e:
         print(f'Error when opening {file}', file=vs)
         return
       
   if args.clipboard:
     references.append(pdeck.clipboard_paste().decode("utf-8"))
-    #references.append(a.decode("utf-8"))
-  #print(references)
   
   images = []
   if args.image:
-    image_paths = args.image.split(',')
+    image_paths = args.image
     for img_path in image_paths:
       if img_path.startswith("http://") or img_path.startswith("https://"):
         images.append(img_path)
@@ -207,13 +353,35 @@ def main(vs, args_in):
           print(f'Error when opening image {img_path}', file=vs)
           return
 
-  #print(references)
-  #return
-  raw_response = gpt.ask(gpt.make_json(message, references, images, args.model))
+  raw_response = gpt.ask(gpt.make_json(message, references, images, args.model, instructions = instructions))
+  if not raw_response:
+    return
   
-  response = format(raw_response)
+  if args.no_format:
+    response = raw_response
+  else:
+    response = format(raw_response)
   if response:
     print(response, file=vs)
+    if args.voice:
+      #raw_response = "Speak fast and casually: " + raw_response
+      raw_response_sub = re.sub('\]\(ht.+?\)',']',raw_response)
+      
+      print(raw_response_sub)
+      res = gpt.tts_stream(raw_response_sub, voice=args.voice_type)
+      if res and res.status_code == 200:
+        # In MicroPython urequests, the raw socket is often .raw or .s
+        # If none exist, we try the object itself as a backup
+        stream = getattr(res, "raw", getattr(res, "s", res))
+        #print(f"Connecting stream... {type(stream)}", file=vs)
+        try:
+          play_audio_stream(vs, stream)
+        except Exception as e:
+          print(f"Streaming failed: {e}. Falling back to file mode.", file=vs)
+          # Re-save to file if possible or just report error
+          # For now, we've already consumed part of the stream, so fallback is tricky
+        res.close()
+
     if args.nosave:
       return
     ctime = time.gmtime(time.time()-pu.timezone)

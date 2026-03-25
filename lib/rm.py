@@ -8,6 +8,7 @@ def main(vs,args):
     return
 
   ret = ls.list_file(args[1])
+  print(ret)
   if ret:
     for item in ret[1]:
       fullpath = ret[0] + '/' + item

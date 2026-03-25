@@ -113,6 +113,10 @@
             "gpt.py"
         ],
         [
+            "home.mpy",
+            "home.mpy"
+        ],
+        [
             "home.py",
             "home.py"
         ],
@@ -129,6 +133,10 @@
             "jp_input.py"
         ],
         [
+            "ls.mpy",
+            "ls.mpy"
+        ],
+        [
             "ls.py",
             "ls.py"
         ],
@@ -139,6 +147,10 @@
         [
             "mkdir.py",
             "mkdir.py"
+        ],
+        [
+            "mock_stream.py",
+            "mock_stream.py"
         ],
         [
             "mouse.py",
@@ -165,8 +177,20 @@
             "pattern_example.py"
         ],
         [
+            "pem.mpy",
+            "pem.mpy"
+        ],
+        [
             "pem.py",
             "pem.py"
+        ],
+        [
+            "pem_keymap.py",
+            "pem_keymap.py"
+        ],
+        [
+            "pem_keymap_default.py",
+            "pem_keymap_default.py"
         ],
         [
             "pie.py",
@@ -207,6 +231,10 @@
         [
             "sound.py",
             "sound.py"
+        ],
+        [
+            "stt.py",
+            "stt.py"
         ],
         [
             "types.mpy",

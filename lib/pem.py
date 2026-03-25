@@ -6,6 +6,16 @@
 # For standard Linux system, turn off this flag
 pdeck_enabled = True
 
+import sys
+try:
+  if not 'loaded' in locals():
+    del sys.modules['pem_keymap']
+  import pem_keymap as km
+except Exception as e:
+  import pem_keymap_default as km
+
+loaded = True
+
 import re
 if pdeck_enabled:
   import pdeck
@@ -45,7 +55,7 @@ def _dirname(p):
 
 
 class editor:
-  def __init__(self,v):
+  def __init__(self,v, japanese):
     # enum
     self.MODE_NORMAL = 0
     self.MODE_SEARCH = 1
@@ -56,6 +66,11 @@ class editor:
     self.IM_JP = 2
     self.h_diff = 1
     self.v = v
+
+    # Load Japanese font
+    if japanese:
+      self.load_jpfont()
+
     self.mode = self.MODE_NORMAL
     self.text_width, self.text_height = v.get_terminal_size()
     self.yankbuf = yank_buffer()
@@ -102,6 +117,7 @@ class editor:
     font = fontloader.font_list[fontname]
     self.v.v.set_terminal_font(font,font,8,16)
     self.jpfont_loaded = True
+    
 
   def exit(self):
     self.v.print(el.raw_mode(False))
@@ -109,7 +125,10 @@ class editor:
     
   def open(self, filename):
     self.file = editor_file(self.v, filename, self.text_height, self.text_width - 1, self.tab_size)
+    self.file_row, self.file_col = self.file.open()
     self.v.background_update=self.file.background_update
+    #self.render_main_text(True)
+    #self.jump_to_position(self.file_row, self.file_col, 1, False)
 
   def setup_screen(self):
     self.v.set_raw_mode(True)
@@ -512,6 +531,9 @@ class editor:
     self.scroll_row = 0
     self.scroll_col = 0
     self.file = editor_file(self.v, filename, self.text_height, self.text_width, self.tab_size)
+    
+    self.file_row, self.file_col = self.file.open()
+    
     self.render_main_text(True)
     self.jump_to_position(self.file_row, self.file_col, 1, False)
     return
@@ -523,6 +545,7 @@ class editor:
     self.file.filename = fname
     print(f"Saving.. file={name.decode()}")
     total = self.file.save()
+    self.file.save_last_filename(self.file_row, self.file_col)
       
     if total == 0:
       self.set_message('File write error')
@@ -551,6 +574,7 @@ class editor:
     self.recall_pos(self.file.saved_pos)
     self.render_main_text(True)
     self.jump_to_position(self.file_row, self.file_col, 1, False)
+    self.file.save_last_filename(self.file_row, self.file_col)
     
     return
 
@@ -795,13 +819,13 @@ class editor:
 
 
     # Ctrl-x;
-    if keys == b'\x18':
+    if keys in km.ext_keys:
       seq = [ keys ]
       seq.append( self.v.read(1) )
       keys = b''.join(seq)
    
     # C- x C-c to exit
-    if keys == b'\x18\x03':
+    if keys in km.map['quit']:
       return 1
 
 
@@ -837,7 +861,7 @@ class editor:
 
 
     if self.file.input_method == self.IM_JP:
-      if keys == b'\x1b`':
+      if keys in km.map['ime_jp_toggle']:
         pass
       elif self.file.im_session and len(self.file.im_session.buffer) == 0 and keys[0] <= 0x20:
         # Pass through control chars when IM is not active
@@ -869,12 +893,13 @@ class editor:
         return 0
       
     # C-x C-s to save file
-    if keys == b'\x18\x13':
+    if keys in km.map['save']:
       if self.file.filename == None:
         self.open_input_line_dialog("Save file","Filename",self.process_save_file)
       else:
         while True:
           total = self.file.save()
+          self.file.save_last_filename(self.file_row, self.file_col)
           if total != 0:
             break
           print("File write error. Retrying..")
@@ -886,16 +911,16 @@ class editor:
           self.set_message(f"{total} bytes written")
 
     # C-x C-f to open file
-    if keys == b'\x18\x06':
+    if keys in km.map['open']:
       
       self.open_input_line_dialog("Open file in "+os.getcwd(),"Filename",self.process_open_file)
 
     # C-x k to close file
-    if keys == b'\x18k':
+    if keys in km.map['close']:
       self.close_file()
 
     # C-x b to switch buffer
-    if keys == b'\x18b':
+    if keys in km.map['switch']:
       filenames = []
       for file in self.file_list:
         if file.filename == None:
@@ -910,36 +935,36 @@ class editor:
 
 
     # Reset yankbuf if the operation is not kill
-    if keys != b'\x0b' and keys != b'\x1b[3~' and keys != b'\x04':
+    if keys not in km.map['kill'] and keys not in km.map['delete']:
       self.adding_yank = False
 
     #Ctrl-s (Search)
-    if keys == b'\x13':
+    if keys in km.map['search']:
       pos = self.save_pos()
       self.file.push_pos_history(pos)
       self.mode = self.MODE_SEARCH
       self.search_info.start_search( (self.scroll_row, self.scroll_col, self.file_row, self.file_col),1)
 
     #Ctrl-r (Reverse Search)
-    elif keys == b'\x12':
+    elif keys in km.map['rev_search']:
       pos = self.save_pos()
       self.file.push_pos_history(pos)
       self.mode = self.MODE_SEARCH
       self.search_info.start_search( (self.scroll_row, self.scroll_col, self.file_row, self.file_col),-1 )
 
     # Escape + % (Replace)
-    elif keys == b'\x1b%':
+    elif keys in km.map['replace']:
       pos = self.save_pos()
       self.search_info.start_search(pos,1,True)
       self.open_input_line_dialog("Replace","Replace from",self.process_replace1)
 
     # Escape + " " (Manual marking)
-    elif keys == b'\x1b\x20':
+    elif keys in km.map['mark']:
       pos = self.save_pos()
       self.file.push_pos_history(pos)
       self.set_message("Position marked.")
     # Escape + ' (Position hisoty walk forward)
-    elif keys == b'\x1b\x27':
+    elif keys in km.map['walk_forward']:
       pos = self.file.walk_pos_history(1)
       if pos:
         self.recall_pos(pos)
@@ -947,7 +972,7 @@ class editor:
         self.set_message("No more history")
    
     # Escape + ; (Position hisoty walk backward)
-    elif keys == b'\x1b;':
+    elif keys in km.map['walk_back']:
       pos = self.file.walk_pos_history(-1)
       if pos:
         self.recall_pos(pos)
@@ -955,11 +980,11 @@ class editor:
         self.set_message("No more history")
 
     # Escape + g : Go to input line #
-    elif keys == b'\x1bg':
+    elif keys in km.map['goto_line']:
       self.open_input_line_dialog("Go to line #","Line #",self.process_goto_line)
 
     # Escape + . : Go to function definition in Python mode, try to go link in md mode
-    elif keys in (b'\x1b.', b'\x1b/'):
+    elif keys in km.map['ref_def'] or keys in km.map['ref_sym']:
       pos, sym = self.file.get_symbol(self.file_row, self.file_col)
       #print(f'sym {sym}')
       if sym and self.file.mode == 'md':
@@ -991,13 +1016,13 @@ class editor:
             #self.set_message('Link not found')
             print(e)
         
-      if sym and self.file.mode == 'py':
+      elif sym and self.file.mode == 'py':
         pos = self.save_pos()
         self.file.push_pos_history(pos)
         self.mode = self.MODE_SEARCH
         self.search_info.start_search( (self.scroll_row, self.scroll_col, self.file_row, self.file_col),1)
         self.search_info.query_str = sym
-        if keys == b'\x1b.':
+        if keys in km.map['ref_def']:
           self.search_info.query_str = "def " + sym
           self.file_row = 0
           self.file_col = 0
@@ -1007,17 +1032,17 @@ class editor:
 
 
     # Escape + < : Go to the top
-    elif keys == b'\x1b<':
+    elif keys in km.map['top']:
       self.jump_to_position(0,0,1)
 
     # Escape + > : Go to the end
-    elif keys == b'\x1b>':
+    elif keys in km.map['bottom']:
       r = len(self.file.rows) -1
       c = self.file.rows[-1].get_len()
       self.jump_to_position(r,c,-1)
 
     # Escape + y : Select kill ring
-    elif keys == b'\x1by':
+    elif keys in km.map['recover_yank']:
       self.yankbuf.reset_buf()
       if len(self.yankbuf.bufs) == 0:
         self.set_message("No yank list")
@@ -1025,7 +1050,7 @@ class editor:
         self.open_select_dialog(self.yankbuf.bufs,5, "Yank list", self.process_yank_select)
 
     #Ctrl-a (Move to the start of the line)
-    elif keys in (b'\x01', b'\x1b[1~'):
+    elif keys in km.map['top_line']:
       # Stop at indent first
       if self.file.mode == "py":
         pos = self.file.get_indent(self.file_row)
@@ -1040,47 +1065,47 @@ class editor:
       self.update_scroll_for_curmove()
 
     #Ctrl-e (Move to the end of the line)
-    elif keys in (b'\x05', b'\x1b[4~'):
+    elif keys in km.map['bottom_line']:
       self.dmod = False
       self.file_col = self.file.rows[self.file_row].get_len()
       self.update_scroll_for_curmove()
     
     #Ctrl-k (Erase to the end of the line)
-    elif keys == b'\x0b':
+    elif keys in km.map['kill']:
       if not self.adding_yank:
         self.yankbuf.reset_buf()
       self.file.erase_to_the_end(self.file_row, self.file_col, self.yankbuf)
       self.adding_yank = True
 
     #Ctrl-y (Yank)
-    elif keys == b'\x19':
+    elif keys in km.map['yank']:
       self.file_row, self.file_col = self.file.yank(self.file_row, self.file_col, self.yankbuf)
       self.jump_to_position(self.file_row, self.file_col, -1)
 
-    elif keys == b'\x0c':
+    elif keys in km.map['redraw']:
       #print("center")
       self.jump_to_position(self.file_row, self.file_col, 1, False)
       self.dmod = True
 
     #Up
-    elif keys in (b'\x1b[A', b'\x10'):
+    elif keys in km.map['up']:
       self.dmod = False
       self.cursor_move(-1,0)
     #Down
-    elif keys in (b'\x1b[B', b'\x0e'):
+    elif keys in km.map['down']:
       self.dmod = False
       self.cursor_move(1,0)
     #Left
-    elif keys in (b'\x1b[D', b'\x02'):
+    elif keys in km.map['left']:
       self.dmod = False
       self.cursor_move(0,-1)
     #Right 
-    elif keys in (b'\x1b[C', b'\x06'):
+    elif keys in km.map['right']:
       self.dmod = False
       self.cursor_move(0,1)
 
     # Input method toggle
-    elif keys in (b'\x1b`', b'\x1b~'):
+    elif keys in km.map['ime_jp_toggle']:
       if self.file.input_method == self.IM_EN:
         self.file.input_method = self.IM_JP
         if not self.jpfont_loaded:
@@ -1095,9 +1120,8 @@ class editor:
           self.file.rows[self.file_row] = self.file.org_row
         self.file.org_row = None
 
-
     # Delete
-    elif keys in ( b'\x1b[3~', b'\x04'): 
+    elif keys in km.map['delete']:
       if not self.adding_yank:
         self.yankbuf.reset_buf()
       self.adding_yank = True
@@ -1105,16 +1129,16 @@ class editor:
       self.update_scroll_for_curmove()
 
     # Backspace
-    elif keys == b'\x08': 
+    elif keys in km.map['bs']: 
       self.file_row, self.file_col = self.file.delete_one_char_bs(self.file_row, self.file_col)
       self.update_scroll_for_curmove()
                     
     # Enter
-    elif keys in (b'\r',b'\x0a'):
+    elif keys in km.map['enter']:
       self.file_row, self.file_col = self.file.insert_return(self.file_row, self.file_col)
       self.update_scroll_for_curmove()
     #PageDown
-    elif keys ==  b'\x1b[6~':
+    elif keys in km.map['pagedown']:
       lnl = self.file.gen_line_num_list(self.file_row, self.line_num_list[self.d_row][2],0, self.file.h)
       if self.wished_d_col != -1:
         d_col = self.wished_d_col
@@ -1132,7 +1156,7 @@ class editor:
       #  self.render_main_text(True) #dry_run
       #  self.update_d_cursor()
     #PageUp
-    elif keys ==  b'\x1b[5~':
+    elif keys in km.map['pageup']:
       lnl = self.file.gen_line_num_list(self.file_row, self.line_num_list[self.d_row][2],-self.file.h,0)
       if self.wished_d_col != -1:
         d_col = self.wished_d_col
@@ -1182,6 +1206,13 @@ class editor:
     
     # Letters, etc..  
     else:
+      
+      # Custom command
+      for command in km.custom_map:
+        if keys in km.custom_map[command]:
+          eval(f"km.{command}(e)",{ "km" : km, "e" : self })
+          return 0
+
       if int(keys[0]) >= 0x20:
         self.file.insert_str(self.file_row, self.file_col, keys)
         mresult = self.match_parenthesis(self.file_row,self.file_col)
@@ -1263,6 +1294,27 @@ class editor_file:
     self.w = w
     self.modified = False
     self.filename = filename
+
+
+  def open(self):
+    
+    resume_last_file = True
+    linenum = 0
+    colnum = 0
+    filename = self.filename
+    
+    if hasattr(km,'resume_last_file'):
+      resume_last_file=km.resume_last_file
+    if resume_last_file and self.filename == None:
+      if self.file_exists('/config/pem_filelist.txt'):
+        with open('/config/pem_filelist.txt', "r") as f:
+          first_line = f.read().split('\n')[0]
+          if ',' in first_line:
+            filename, linenum, colnum = first_line.split(',')
+            linenum = int(linenum)
+            colnum = int(colnum)
+            self.filename = filename
+
     self.mode = "txt"
     self.num_updated = 0
     self.period_regex = {}
@@ -1282,10 +1334,14 @@ class editor_file:
               else:
                 line = line[:-1]
             self.rows.append(erow(line.encode('utf-8'), self.tab_size))
+        #self.jump_to_position(linenum, colnum, 1, False)
+        #self.save_last_filename(linenum, colnum)
       except:
         self.rows.append(erow(b"", self.tab_size))
     else:
       self.rows.append(erow(b"", self.tab_size))
+    
+    return linenum, colnum      
 
   def background_update(self):
     if self.num_updated < len(self.rows):
@@ -1333,6 +1389,20 @@ class editor_file:
     except OSError:
       return False
 
+  def save_last_filename(self, row, col):
+    resume_last_file = True
+    if hasattr(km,'resume_last_file'):
+      resume_last_file=km.resume_last_file
+    if resume_last_file:
+      if self.filename == None:
+        return
+      with open('/config/pem_filelist.txt', "wb") as f:
+        try:
+          f.write(self.filename)
+          f.write(',' + str(row) + ',' + str(col))
+          f.write('\n')
+        except Exception as e:
+          print(e)
 
   def save(self):
     if self.filename == None:
@@ -1607,14 +1677,15 @@ class editor_file:
       comp_list = list(set(comp_list))
     return comp_list
 
-  def get_symbol(self, r,c):
+  def get_symbol(self, r,c, search_list = None):
     line = self.rows[r]
-    if self.mode == 'py':
-      search_list = ( b".",b"(",b" ",b"+",b"/",b"-",b"~",b"=",b">",b"<",b"?",b",",b".",b"{",b"}",b"[",b"]",b"|")
-    elif self.mode == 'md':
-      search_list = ( b"(",b"+",b"-",b"~",b"=",b">",b"<",b"?",b",",b"{",b"}",b"[",b"]",b"|")
-    else:
-      return None
+    if not search_list:
+      if self.mode == 'py':
+        search_list = ( b".",b"(",b" ",b"+",b"/",b"-",b"~",b"=",b">",b"<",b"?",b",",b".",b"{",b"}",b"[",b"]",b"|")
+      elif self.mode == 'md':
+        search_list = ( b"(",b"+",b"-",b"~",b"=",b">",b"<",b"?",b",",b"{",b"}",b"[",b"]",b"|")
+      else:
+        return None
       
     period = None
     sep_ch = None
@@ -2143,21 +2214,22 @@ def main(vs, args_in):
   # Get a virtual screen (No argument = current)
   v = screen_interface(vs)
   parser = argparse.ArgumentParser( description = "pem")
-  parser.add_argument("filename")
-  if len(args_in) > 1:
-    args = parser.parse_args(args_in[1:])
-  else:
-    class obj: pass
-    args = obj()
-    args.filename = None
+  parser.add_argument('-j','--japanese', action='store_true',help='Set Japansese font at launching') 
+  if len(args_in) > 1 and args_in[-1][0] != '-':
+    parser.add_argument("filename", default=None)
+    
+  args = parser.parse_args(args_in[1:])
+
+  filename=None
+  try:
+    filename=args.filename
+  except Exception as e:
     pass
-    #v.print("Specify filename\r\n")
-    #return
 
   try: 
-    e = editor(v)
-    e.open(args.filename)
+    e = editor(v, args.japanese)
     e.setup_screen()
+    e.open(filename)
     e.refresh_screen()
     while True:
       ret = e.process_key()

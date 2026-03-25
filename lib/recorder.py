@@ -71,21 +71,20 @@ class stream_record:
     self.total_read += readsize
     #print(f"callback {index}")
 
-  def record(self, filename, maxsample):
+  def record(self, filename, maxsample, num_channels=2):
     self.total_read = 0
     #print(f"len = {len(self.buf[0]) >> 2}")
+    self.num_channels = num_channels
     numsample = maxsample
-    audio.stream_setup(1, SAMPLE_RATE , 2, numsample,self.recv_callback)
+    audio.stream_setup(1, audio.sample_rate(), self.num_channels, numsample, self.recv_callback)
     audio.stream_setdata(1, 0, self.buf[0])
     audio.stream_setdata(1, 1, self.buf[1])
     
     self.f = open(filename, 'wb')
-    self.gen_header(2, SAMPLE_RATE , 16, numsample)
+    self.gen_header(self.num_channels, audio.sample_rate(), 16, numsample)
     self.f.write(bytes(self.chunkRIFF))
     self.f.write(bytes(self.chunkfmt))
     self.f.write(bytes(self.chunkdata))
-    print(bytes(self.chunkRIFF))
-    print(bytes(self.chunkfmt))
     audio.stream_record(True)
 
   def stop(self):
@@ -96,11 +95,13 @@ class stream_record:
     print(f"num_samples = {num_samples}, total_read = {self.total_read}") 
     
     #Write remaining data
-    if (num_samples << 2) - self.total_read > 0:
-      self.f.write(self.buf[1 - self.last_index][:((num_samples << 2) - self.total_read)])
+    bytes_per_sample = 2 * self.num_channels
+    remaining = (num_samples * bytes_per_sample) - self.total_read
+    if remaining > 0:
+      self.f.write(self.buf[1 - self.last_index][:remaining])
     
     #Rewrite the header
-    self.chunkdata[1] = (num_samples * 16*2) // 8
+    self.chunkdata[1] = (num_samples * 16 * self.num_channels) // 8
     self.f.seek(0)
     self.f.write(bytes(self.chunkRIFF)) 
     self.f.write(bytes(self.chunkfmt))

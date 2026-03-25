@@ -35,6 +35,19 @@ def set_mic_gain(value = None):
 
   return 0
   
+def set_mic_auto_gain(value = None):
+  
+  ## Mic auto gain
+  
+  if value != None:
+    codec_config.set_agc(value)
+  
+  if set_audio_power():
+    enabled, target_level = codec_config.get_agc()
+    return enabled
+
+  return 0
+  
 def format_audio_volume(value):
   return f'{value}dB'
 
@@ -54,9 +67,13 @@ def set_audio_volume(value = None):
 def set_speaker_out(value = None):
   if value != None:
     if value:
-      codec_config.set_lpf(cutoff_freq=9000)
+      codec_config.set_lpf(cutoff_freq=5000, biquad_idx='A')
+      codec_config.set_hpf(cutoff_freq=150, biquad_idx='B')
+      codec_config.set_hpf(cutoff_freq=100, biquad_idx='C')
     else:
-      codec_config.set_pass_through()
+      codec_config.set_pass_through(biquad_idx='A')
+      codec_config.set_pass_through(biquad_idx='B')
+      codec_config.set_pass_through(biquad_idx='C')
       
     codec_config.toggle_lo(value)
   if set_audio_power():
@@ -151,6 +168,13 @@ menu_list = [
      'value' : set_mic_gain(),
      'format' : format_mic_gain,
      'callback' : set_mic_gain
+     }
+   ],
+  [ 'Mic Auto gain' ,
+     { 'description': 'Mic auto gain',
+     'type' : 'switch',
+     'value' : set_mic_auto_gain(),
+     'callback' : set_mic_auto_gain
      }
    ],
   [ 'Power' ,
