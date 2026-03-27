@@ -245,6 +245,10 @@
             "types.mpy"
         ],
         [
+            "update_updater.py",
+            "update_updater.py"
+        ],
+        [
             "uping.py",
             "uping.py"
         ],
