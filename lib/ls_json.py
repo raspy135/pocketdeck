@@ -15,7 +15,7 @@ def list_files(directory="."):
             # Skip hidden files
             if file.startswith('.'):
                 continue
-            if file in ( "package.json", "ls_json.py"):
+            if file in ( "package.json", "ls_json.py", "postprocess.sh"):
                 continue
             
             # Get relative path

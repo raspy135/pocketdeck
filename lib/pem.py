@@ -53,6 +53,14 @@ def _dirname(p):
         return "."
     return p[:i] or "/"
 
+def file_exists(name):
+  if name == None:
+    return False
+  try:
+    os.stat(name)
+    return True
+  except OSError:
+    return False
 
 class editor:
   def __init__(self,v, japanese):
@@ -123,9 +131,9 @@ class editor:
     self.v.print(el.raw_mode(False))
     #self.v.print(el.wraparound_mode(False))
     
-  def open(self, filename):
+  def open(self, filename, linenum=0, colnum=0):
     self.file = editor_file(self.v, filename, self.text_height, self.text_width - 1, self.tab_size)
-    self.file_row, self.file_col = self.file.open()
+    self.file_row, self.file_col = self.file.open(linenum, colnum)
     self.v.background_update=self.file.background_update
     #self.render_main_text(True)
     #self.jump_to_position(self.file_row, self.file_col, 1, False)
@@ -1296,25 +1304,10 @@ class editor_file:
     self.filename = filename
 
 
-  def open(self):
+  def open(self, linenum = 0, colnum = 0):
     
-    resume_last_file = True
-    linenum = 0
-    colnum = 0
     filename = self.filename
     
-    if hasattr(km,'resume_last_file'):
-      resume_last_file=km.resume_last_file
-    if resume_last_file and self.filename == None:
-      if self.file_exists('/config/pem_filelist.txt'):
-        with open('/config/pem_filelist.txt', "r") as f:
-          first_line = f.read().split('\n')[0]
-          if ',' in first_line:
-            filename, linenum, colnum = first_line.split(',')
-            linenum = int(linenum)
-            colnum = int(colnum)
-            self.filename = filename
-
     self.mode = "txt"
     self.num_updated = 0
     self.period_regex = {}
@@ -1324,7 +1317,7 @@ class editor_file:
       self.mode = "md"
     elif self.filename != None and self.filename[-3:] == ".py":
       self.mode = "py"
-    if self.file_exists(filename):
+    if file_exists(filename):
       try:
         with open(filename, "r") as f:
           for line in f:
@@ -1380,14 +1373,6 @@ class editor_file:
     self.phistory_cur += step
     return self.pos_history[self.phistory_cur]
 
-  def file_exists(self,name):
-    if name == None:
-      return False
-    try:
-      os.stat(name)
-      return True
-    except OSError:
-      return False
 
   def save_last_filename(self, row, col):
     resume_last_file = True
@@ -2215,6 +2200,8 @@ def main(vs, args_in):
   v = screen_interface(vs)
   parser = argparse.ArgumentParser( description = "pem")
   parser.add_argument('-j','--japanese', action='store_true',help='Set Japansese font at launching') 
+  parser.add_argument('-n','--new-file', action='store_true',help='Do not open the last edited file') 
+  
   if len(args_in) > 1 and args_in[-1][0] != '-':
     parser.add_argument("filename", default=None)
     
@@ -2226,10 +2213,28 @@ def main(vs, args_in):
   except Exception as e:
     pass
 
+  resume_last_file = not args.new_file
+
+  linenum = 0
+  colnum = 0
+  if resume_last_file and hasattr(km,'resume_last_file'):
+    resume_last_file=km.resume_last_file
+
+  if resume_last_file and filename == None:
+    if file_exists('/config/pem_filelist.txt'):
+      with open('/config/pem_filelist.txt', "r") as f:
+        first_line = f.read().split('\n')[0]
+        if ',' in first_line:
+          filename, linenum, colnum = first_line.split(',')
+          linenum = int(linenum)
+          colnum = int(colnum)
+
+
+
   try: 
     e = editor(v, args.japanese)
     e.setup_screen()
-    e.open(filename)
+    e.open(filename, linenum, colnum)
     e.refresh_screen()
     while True:
       ret = e.process_key()
