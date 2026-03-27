@@ -7,12 +7,15 @@
 pdeck_enabled = True
 
 import sys
+
+import pem_keymap_default as km
+
 try:
-  if not 'loaded' in locals():
-    del sys.modules['pem_keymap']
-  import pem_keymap as km
+  import pem_keymap as custom_keymap
+  custom_keymap.init_custom(km)
 except Exception as e:
-  import pem_keymap_default as km
+  print(e)
+  pass
 
 loaded = True
 

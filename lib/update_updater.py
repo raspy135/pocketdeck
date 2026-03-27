@@ -48,14 +48,20 @@ def download_updater_bin(vs):
   station = network.WLAN(network.STA_IF)
   if not station.isconnected():
     print("WiFi is not connected.", file=vs)
-    return
+    return False
 
   print("Downloading the latest firmware", file=vs)
 
   github_get.download_file("https://github.com/raspy135/pocketdeck/blob/main/firmware/updater.bin","/sd")
   os.sync()
+  return True
 
 def main(vs, args):
+  if len(args) != 2 or args[1] != '-f':
+    print("This operation might break firmware updater and it could cause permanent damage to the device. Execute with '-f' option to proceed", file=vs)
+    return
+
   bin_file = "/sd/updater.bin"
-  download_updater_bin(vs)
+  if not download_updater_bin(vs):
+    return
   update_updater_partition(vs, bin_file)

@@ -1,4 +1,3 @@
-
 resume_last_file = True
 
 ext_keys = [ b'\x18',b'\x03' ]
