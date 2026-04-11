@@ -24,9 +24,9 @@ class tasks_card:
     self.scroll_head = 0
     self.mode = 'list'
     self.icons = {}
-    self.icons['ACTIVE'] = xbmreader.read_xbmr("/sd/data/active.xbmr")
-    self.icons['RSPN'] = xbmreader.read_xbmr("/sd/data/response.xbmr")
-    self.icons['DONE'] = xbmreader.read_xbmr("/sd/data/checked.xbmr")
+    self.icons['ACTIVE'] = xbmreader.read_xbmr("/sd/lib/data/active.xbmr")
+    self.icons['RSPN'] = xbmreader.read_xbmr("/sd/lib/data/response.xbmr")
+    self.icons['DONE'] = xbmreader.read_xbmr("/sd/lib/data/checked.xbmr")
     
   def parse_tasks(self,filename):
     self.filename = filename

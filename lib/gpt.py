@@ -146,7 +146,7 @@ class chatgpt_util:
         'Authorization': 'Bearer ' + self.api_key
     }
     
-    print("Uploading to STT...", file=self.vs)
+    print("Uploading audio to STT...", file=self.vs)
     res = requests.post(self.stt_url, headers=headers, data=body)
     if res.status_code == 200:
       text = res.json().get('text')

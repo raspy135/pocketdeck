@@ -106,10 +106,10 @@ class analog_clock:
     self.update_shifted_day()
     
     self.catimage = []
-    self.catimage.append(xbmreader.read("/sd/data/cat1.xbm"))
-    self.catimage.append(xbmreader.read("/sd/data/cat2.xbm"))
-    self.catimage.append(xbmreader.read("/sd/data/cat3.xbm"))
-    self.catimage.append(xbmreader.read("/sd/data/cat4.xbm"))
+    self.catimage.append(xbmreader.read("/sd/lib/data/cat1.xbm"))
+    self.catimage.append(xbmreader.read("/sd/lib/data/cat2.xbm"))
+    self.catimage.append(xbmreader.read("/sd/lib/data/cat3.xbm"))
+    self.catimage.append(xbmreader.read("/sd/lib/data/cat4.xbm"))
     self.cat_anm_goal = 0
     self.cat_anm_ct = 0
     self.cat_x = 0

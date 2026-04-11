@@ -10,7 +10,7 @@ Pocket deck is designed for standalone use. You don't need PC for application de
 
 Internet connectivity allows you to ask questions to AI, sync with a PC for file transfer, copy and paste, screen casting, and cloud storage integration with Google Drive.
 
-![Product image](../images/pocketdeck.jpg)
+![Product image](images/pocketdeck.jpg)
 
 # Purchase
 
@@ -56,12 +56,14 @@ To check the connection, switch screen to 9.
 
 ### LiPo battery (Optional, recommended)
 
-There is JST-PH connector on the main PCB. You can install LiPo battery. LiPo has to be 1 cell(3.7V). 3000mAh or more capacity is recommended. 
+There is JST-PH connector on the main PCB. You can install LiPo battery. LiPo has to be 1 cell(3.7V). 3000mAh or more capacity is recommended.
 
 Battery operation is recommended.
 
-Example:
+Examples:
 https://a.co/d/06c7H5FC
+https://a.co/d/07asqJnc
+
 
 ### Magsafe stand (Optional, recommended)
 
@@ -273,6 +275,9 @@ There are two typical scenario to use the app, one is aircheck, and another one 
 - `-s` : Sample rate, default is 24k. Select 48k(48000) for high quality recording.
 - `-l` : Specify the record length, default is one hour. It's useful when you know the length of audio.
 
+### voicerecorder
+
+`voicerecorder` is the simple wrapper application of `recoarder`. It uses 8k sample rate, mono channel. It's great for recording meeting for Speak To Text (`stt`).
 
 ### gpt
 
@@ -288,6 +293,16 @@ You need an OpenAI API key to use the app. Save your API key to `/config/openapi
 - `-n`: Do not save the result
 - `-j`: Answer in Japanese. You need to execute the `setuni` command to use Unicode characters in the terminal font.
 - `-q`: Specify the content explicitly, for example after the `-f` option you need to use `-q` to mark the start of the question.
+
+### stt 
+
+`stt` is Speak-To-Text program, which requires OpenAI API key (See `gpt` document for details). It's useful with `voicerecorder`.
+
+```
+stt [input_wav_file]
+```
+
+It will enter recording mode when input_wav_file is not specified.
 
 ### dic
 
