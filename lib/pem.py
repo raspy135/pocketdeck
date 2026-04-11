@@ -10,6 +10,8 @@ import sys
 
 import pem_keymap_default as km
 
+open_pending_list= []
+
 try:
   import pem_keymap as custom_keymap
   custom_keymap.init_custom(km)
@@ -243,6 +245,7 @@ class editor:
     bm.add_bench('render')
     self.update_d_cursor()
     bm.add_bench('update_d')
+
     #status bar
     self.v.print(el.move_cursor(self.text_height + 1, 1))
 
@@ -258,9 +261,13 @@ class editor:
         filename = self.file.filename
         if filename == None:
           filename = '** New file **'
-        if len(filename) > 20:
-          filename = filename[:20]
-        filestat = f"{filename} {'*' if self.file.modified else '-'} L:{self.file_row+1}/{len(self.file.rows)} C:{self.file_col+1}"
+        filestat = f"{'*' if self.file.modified else '-'} L:{self.file_row+1}/{len(self.file.rows)} C:{self.file_col+1}"
+
+        max_filename_length = self.file.w - (len(filestat) + 5 + 2 + 2 + 1 + 1)
+        if len(filename) > max_filename_length:
+          filename = filename[:max_filename_length]
+        filestat = filename + " " + filestat
+        
         filestat_left = f"Mode:{'EN' if self.file.input_method == self.IM_EN else 'JP'},{self.file.mode}"
         statline = filestat + " " * (self.text_width - len(filestat) - len(filestat_left)) + filestat_left
         #self.v.print(statline)
@@ -361,6 +368,10 @@ class editor:
       self.cursor_move(row,col)
 
   def update_scroll_for_curmove(self, offset = 0):
+    while self.update_scroll_for_curmove_one(offset):
+      self.line_num_list = self.file.line_num_list = self.file.gen_line_num_list(self.scroll_row, self.scroll_col ,0, self.file.h - 1)
+        
+  def update_scroll_for_curmove_one(self, offset = 0):
     file_col = self.file_col + offset
     range = self.file.in_screen(self.file_row,file_col)
     if range == -1:
@@ -369,6 +380,7 @@ class editor:
       lnl = self.file.gen_line_num_list(self.line_num_list[0][1],self.line_num_list[0][2], -1,0)
       self.scroll_row = lnl[0][1]
       self.scroll_col = lnl[0][2]
+      return True
       
     if range == 1:
       self.dmod = True
@@ -377,7 +389,9 @@ class editor:
       self.scroll_row = lnl[1][1]
       self.scroll_col = lnl[1][2]
       #print(lnl)
-
+      return True
+    
+    return False
       
   def match_parenthesis(self, r_in, c_in):
     p_close = bytes(self.file.rows[r_in].at(c_in))
@@ -530,8 +544,14 @@ class editor:
     #self.open_input_line_dialog('Open file','Filename', self.process_open_file, answer_list = None, default_str=item.encode('utf-8'))
     self.process_open_file(item.encode('utf-8'))
     
-  def process_open_file(self, name):
+  def process_open_file(self, name, linenum = 0, colnum = 0):
     #print(f"Opening.. file={name.decode()}")
+
+    if name.decode() == self.file.filename or self.switch_buf_if_exists(name.decode()):
+      self.render_main_text(True)
+      self.jump_to_position(self.file_row, self.file_col, 1, False)
+      return
+
     filename = name.decode()
     filename = None if filename == '' else filename
     
@@ -543,7 +563,7 @@ class editor:
     self.scroll_col = 0
     self.file = editor_file(self.v, filename, self.text_height, self.text_width, self.tab_size)
     
-    self.file_row, self.file_col = self.file.open()
+    self.file_row, self.file_col = self.file.open(linenum, colnum)
     
     self.render_main_text(True)
     self.jump_to_position(self.file_row, self.file_col, 1, False)
@@ -814,8 +834,7 @@ class editor:
   
   def process_key(self):
     keys = self.v.read(1)
-
-
+      
     tw, th = self.v.get_terminal_size()
     if tw != self.text_width or th-self.h_diff != self.text_height:
       print(f'ow,oh,nw,nh = {self.text_width},{self.text_height},{tw},{th}')
@@ -835,6 +854,8 @@ class editor:
       seq.append( self.v.read(1) )
       keys = b''.join(seq)
    
+
+
     # C- x C-c to exit
     if keys in km.map['quit']:
       return 1
@@ -923,8 +944,12 @@ class editor:
 
     # C-x C-f to open file
     if keys in km.map['open']:
-      
-      self.open_input_line_dialog("Open file in "+os.getcwd(),"Filename",self.process_open_file)
+      if len(open_pending_list) > 0:
+        filename, linenum, colnum = open_pending_list.pop()
+        self.process_open_file(filename.encode('utf-8'), linenum-1, colnum-1)
+
+      else:
+        self.open_input_line_dialog("Open file in "+os.getcwd(),"Filename",self.process_open_file)
 
     # C-x k to close file
     if keys in km.map['close']:
@@ -1073,6 +1098,7 @@ class editor:
       else:
         self.dmod = False
         self.file_col = 0
+
       self.update_scroll_for_curmove()
 
     #Ctrl-e (Move to the end of the line)
@@ -1675,13 +1701,11 @@ class editor_file:
       else:
         return None
       
-    period = None
-    sep_ch = None
+    period = 0
     for ch in range(c-1,-1,-1):
       for search_ch in search_list:
         if line.at(ch) == search_ch:
           period = ch
-          sep_ch = search_ch
           break
       if period:
         break
@@ -2143,6 +2167,8 @@ if pdeck_enabled:
       ret = None
       while True:
         ret = self.v.read_nb(1)
+        if len(open_pending_list) > 0:
+          return km.map['open'][0]
         if ret:
           if ret[0] > 0:
             break

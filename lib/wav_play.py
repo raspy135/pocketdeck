@@ -105,13 +105,19 @@ class wav_play:
     #print(f"callback {index}")
 
   def get_position(self):
-    return (audio.stream_position(0), self.h_data_chunkSize>>2)
+    bytes_per_sample = (self.h_fmt_bitsPerSample // 8) * self.h_fmt_numOfChannels
+    return (audio.stream_position(0) + self.play_offset, self.h_data_chunkSize // bytes_per_sample)
 
   def open_stream(self, stream, isstreaming=True):
     self.isstreaming = isstreaming
     self.stop_next = False
     self.f = stream
     self.read_header(self.f)
+    try:
+      self.data_start = self.f.tell()
+    except Exception as e:
+      pass
+
     print(f" sample_rate {self.h_fmt_sampleRate}, bps {self.h_fmt_bitsPerSample}")
     self.total_read = 0
     
@@ -121,10 +127,29 @@ class wav_play:
 
 
     num_samples = self.h_data_chunkSize // bytes_per_sample
+
+    self.play_offset = 0
     
     self.total_read += self.f.readinto(self.buf[0])
     self.total_read += self.f.readinto(self.buf[1])
     
+    audio.stream_setup(0, self.h_fmt_sampleRate, self.h_fmt_numOfChannels, num_samples, self.send_callback)
+
+  def seek(self, pos):
+    
+    print(f"seek to {pos}")
+    bytes_per_sample = (self.h_fmt_bitsPerSample // 8) * self.h_fmt_numOfChannels
+
+    self.total_read = pos * bytes_per_sample
+    self.play_offset = pos
+    self.stop()
+
+    num_samples = self.h_data_chunkSize // bytes_per_sample - pos
+    
+    self.f.seek(self.data_start + pos * bytes_per_sample,0)
+    
+    self.total_read += self.f.readinto(self.buf[0])
+    self.total_read += self.f.readinto(self.buf[1])
     audio.stream_setup(0, self.h_fmt_sampleRate, self.h_fmt_numOfChannels, num_samples, self.send_callback)
 
   def open(self,filename):

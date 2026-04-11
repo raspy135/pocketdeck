@@ -16,7 +16,7 @@ KEY_RIGHT = b'\x1b[C'
 KEY_LEFT = b'\x1b[D'
 KEY_ENTER = b'\x0d'
 KEY_BS = b'\b'
-
+KEY_SPACE = b' '
 
 
 class MusicGUI:
@@ -111,12 +111,15 @@ class MusicGUI:
 
   def toggle_pause(self):
     if not self.playing:
-      self.play_selected()
       return
-    self.stop()
-    self.paused = True
-    self.message = "Stopped"
-    self.message_life = 40
+    if not self.paused:
+      self.wp.stop()
+      self.paused = True
+    else:
+      self.wp.play()
+      self.paused = False
+      #self.message = "Stopped"
+      #self.message_life = 40
 
   def next_track(self):
     ret = self.menu_ui.move_cursor(1)
@@ -151,7 +154,7 @@ class MusicGUI:
 
 
   def draw_play_animation(self, x, y):
-    if self.playing:
+    if not self.paused and self.playing:
       pos = ((self.current_tick // 1000) % 1000) // 40
       self.v.draw_box(4, 4, pos, 25)
       self.v.draw_box(8 + pos, 4, 25 - pos, 25)
@@ -243,11 +246,23 @@ class MusicGUI:
       self.menu_ui.goup_item()
     elif k == KEY_RIGHT:
       if self.menu_ui.depth == 1:
-        self.next_track()
+        if self.playing:
+          pos, total = self.wp.get_position()
+          pos += 60 * self.wp.h_fmt_sampleRate
+          if pos < total:
+            self.wp.seek(pos)
+            self.wp.play()
+          
     elif k == KEY_LEFT:
       if self.menu_ui.depth == 1:
-        self.prev_track()
-      
+        if self.playing:
+          pos, total = self.wp.get_position()
+          pos -= 60 * self.wp.h_fmt_sampleRate
+          if pos > 0:
+            self.wp.seek(pos)
+            self.wp.play()
+    elif k == KEY_SPACE:
+      self.toggle_pause()
     elif k == KEY_ENTER:
       item = self.menu_ui.get_current_item()[1]
       if item == None:
@@ -269,7 +284,7 @@ class MusicGUI:
     # main input loop; callback handles drawing
     while True:
       # if track finishes, auto-advance
-      if self.playing and not audio.stream_play():
+      if not self.paused and self.playing and not audio.stream_play():
         # end reached
         self.playing = False
         if self.menu_ui.depth == 1:

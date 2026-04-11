@@ -4,8 +4,7 @@ import array
 import time
 import os
 import pdeck_utils as pu
-
-pu.reimport('wav_play')
+import wav_play
 
 def main(vs, args):
   tracknum = 0

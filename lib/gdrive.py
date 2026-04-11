@@ -7,11 +7,12 @@ from machine import Pin
 import gc
 import argparse
 import sys
-
+import urllib.urequest
 
 # Google OAuth Configuration (from your Google Cloud Console)
-CLIENT_ID = "410521312052-b7im4ugrl7ifjdb9dcpe5v4tk391uq3s.apps.googleusercontent.com"
+CLIENT_ID = "381393619363-uoi288u5ir5pb4o5sltts2lr4681nm82.apps.googleusercontent.com"
 SCOPES = "https://www.googleapis.com/auth/drive.file"  # Limited scope
+#SCOPES = "https://www.googleapis.com/auth/drive.file"
 
 # Endpoints
 DEVICE_CODE_URL = "https://oauth2.googleapis.com/device/code"
@@ -22,328 +23,443 @@ TOKEN_FILE = "/config/google_tokens.json"
 
 vs = None
 
-def print_vs(str,end='\n'):
+def print_vs(str, end='\n'):
   print(str, file=vs, end=end)
 
 def get_device_code():
-    """Step 1: Get device code and user verification URL"""
-    print_vs("Requesting device code...")
+  """Step 1: Get device code and user verification URL"""
+  print_vs("Requesting device code...")
+  
+  payload = {
+    "client_id": CLIENT_ID,
+    "scope": SCOPES
+  }
+  
+  headers = {"Content-Type": "application/json"}
+  
+  try:
+    response = urequests.post(DEVICE_CODE_URL, json=payload, headers=headers)
+    data = response.json()
+    print(data)
+    response.close()
     
-    payload = {
-        "client_id": CLIENT_ID,
-        "scope": SCOPES
-    }
-    
-    headers = {"Content-Type": "application/json"}
-    
-    try:
-        response = urequests.post(DEVICE_CODE_URL, json=payload, headers=headers)
-        data = response.json()
-        response.close()
-        
-        if "device_code" in data:
-            print_vs("\n" + "="*40)
-            print_vs(f"Go to:{data["verification_url"]}")
-            print_vs(f"Enter code:{data["user_code"]}")
-            print_vs("="*40 + "\n")
-            
-            return {
-                "device_code": data["device_code"],
-                "user_code": data["user_code"],
-                "verification_url": data["verification_url"],
-                "interval": data.get("interval", 5),  # Polling interval
-                "expires_in": data.get("expires_in", 1800)  # 30 minutes
-            }
-        else:
-            print_vs("Error getting device code:", data)
-            return None
-            
-    except Exception as e:
-        print_vs(f"Request failed:{e}")
-        return None
-
-def poll_for_tokens(device_code, interval=5, timeout=120):
-    """Step 2: Poll for access token"""
-    print_vs("Waiting for authorization...")
-    print_vs("(User needs to enter the code on Google's site)")
-    
-    payload = {
-        "client_id": CLIENT_ID,
-        "device_code": device_code,
-        "grant_type": "urn:ietf:params:oauth:grant-type:device_code"
-    }
-    
-    start_time = time.time()
-
- 
-    while time.time() - start_time < timeout:
-        try:
-            response = googleapi_posts.post(TOKEN_URL, json=payload)
-            data = response.json()
-            response.close()
-            
-            if "access_token" in data:
-                print_vs("Authorization successful!")
-                return data  # Contains access_token, refresh_token, expires_in
-            elif "error" in data:
-                if data["error"] == "authorization_pending":
-                    print_vs(".",end='')
-                elif data["error"] == "slow_down":
-                    interval += 5  # Google says to slow down
-                else:
-                    print_vs("Error:", data["error"])
-                    break
-        
-        except Exception as e:
-            print_vs(f"Poll error:{e}")
-        
-        time.sleep(interval)
-    
-    print_vs("\n❌ Authorization timed out or failed")
+    if "device_code" in data:
+      print_vs("\n" + "="*40)
+      print_vs(f"Go to:{data["verification_url"]}")
+      print_vs(f"Enter code:{data["user_code"]}")
+      print_vs("="*40 + "\n")
+      
+      return {
+        "device_code": data["device_code"],
+        "user_code": data["user_code"],
+        "verification_url": data["verification_url"],
+        "interval": data.get("interval", 5),  # Polling interval
+        "expires_in": data.get("expires_in", 1800)  # 30 minutes
+      }
+    else:
+      print_vs("Error getting device code:", data)
+      return None
+      
+  except Exception as e:
+    print_vs(f"Request failed:{e}")
     return None
 
-def save_tokens(tokens):
-    tokens["expires_at"] = time.time() + tokens["expires_in"]
-    """Save tokens to file"""
+def poll_for_tokens(device_code, interval=5, timeout=120):
+  """Step 2: Poll for access token"""
+  print_vs("Waiting for authorization...")
+  print_vs("(User needs to enter the code on Google's site)")
+  
+  payload = {
+    "client_id": CLIENT_ID,
+    "device_code": device_code,
+    #"client_secret" : CLIENT_SECRET,
+    "grant_type": "urn:ietf:params:oauth:grant-type:device_code"
+  }
+  
+  start_time = time.time()
+
+  while time.time() - start_time < timeout:
     try:
-        with open(TOKEN_FILE, "w") as f:
-            ujson.dump(tokens, f)
-        print_vs("Tokens saved")
-        return True
+      response = googleapi_posts.post(TOKEN_URL, json=payload)
+      data = response.json()
+      response.close()
+      
+      if "access_token" in data:
+        print_vs("Authorization successful!")
+        return data  # Contains access_token, refresh_token, expires_in
+      elif "error" in data:
+        if data["error"] == "authorization_pending":
+          print_vs(".", end='')
+        elif data["error"] == "slow_down":
+          interval += 5  # Google says to slow down
+        else:
+          print_vs("Error:", data["error"])
+          break
+    
     except Exception as e:
-        print_vs("Failed to save tokens:", e)
-        return False
+      print_vs(f"Poll error:{e}")
+    
+    time.sleep(interval)
+  
+  print_vs("\n❌ Authorization timed out or failed")
+  return None
+
+def save_tokens(tokens):
+  tokens["expires_at"] = time.time() + tokens["expires_in"]
+  """Save tokens to file"""
+  try:
+    with open(TOKEN_FILE, "w") as f:
+      ujson.dump(tokens, f)
+    print_vs("Tokens saved")
+    return True
+  except Exception as e:
+    print_vs("Failed to save tokens:", e)
+    return False
 
 def load_tokens():
-    """Load tokens from file"""
-    try:
-        with open(TOKEN_FILE, "r") as f:
-            return ujson.load(f)
-    except:
-        return None
+  """Load tokens from file"""
+  try:
+    with open(TOKEN_FILE, "r") as f:
+      return ujson.load(f)
+  except:
+    return None
 
 def refresh_access_token(refresh_token):
-    """Refresh expired access token"""
-    print_vs("Refreshing access token...")
+  """Refresh expired access token"""
+  print_vs("Refreshing access token...")
+  
+  payload = {
+    "client_id": CLIENT_ID,
+    #"client_secret": CLIENT_SECRET,
+    "refresh_token": refresh_token,
+    "grant_type": "refresh_token"
+  }
+  
+  try:
+    response = googleapi_posts.post(TOKEN_URL, json=payload)
+    data = response.json()
+    response.close()
     
-    payload = {
-        "client_id": CLIENT_ID,
-        #"client_secret": CLIENT_SECRET,
-        "refresh_token": refresh_token,
-        "grant_type": "refresh_token"
-    }
-    
-    try:
-        response = googleapi_posts.post(TOKEN_URL, json=payload)
-        data = response.json()
-        response.close()
-        
-        if "access_token" in data:
-            # Update stored tokens
-            tokens = load_tokens() or {}
-            tokens["access_token"] = data["access_token"]
-            tokens["expires_in"] = data.get("expires_in", 3600)
-            tokens["token_type"] = data.get("token_type", "Bearer")
-            save_tokens(tokens)
-            
-            print_vs("Token refreshed")
-            return data["access_token"]
-        else:
-            print_vs("Refresh failed:", data)
-            return None
-            
-    except Exception as e:
-        print_vs("Refresh error:", e)
-        return None
-
-def upload_file_to_drive(file_path, drive_filename=None):
-    """Upload a file to Google Drive"""
-    tokens = load_tokens()
-    
-    if not tokens or "access_token" not in tokens:
-        print_vs("No valid tokens. Need to authenticate first.")
-        return False
-    
-    # Check if token needs refresh
-    if tokens.get("expires_at", 0) < time.time():
-        print_vs("Token expired, refreshing...")
-        new_token = refresh_access_token(tokens.get("refresh_token"))
-        if not new_token:
-            return False
-        access_token = new_token
+    if "access_token" in data:
+      # Update stored tokens
+      tokens = load_tokens() or {}
+      tokens["access_token"] = data["access_token"]
+      tokens["expires_in"] = data.get("expires_in", 3600)
+      tokens["token_type"] = data.get("token_type", "Bearer")
+      save_tokens(tokens)
+      
+      print_vs("Token refreshed")
+      return data["access_token"]
     else:
-        access_token = tokens["access_token"]
+      print_vs("Refresh failed:", data)
+      return None
+      
+  except Exception as e:
+    print_vs("Refresh error:", e)
+    return None
+
+def get_access_token():
+  tokens = load_tokens()
+  
+  if not tokens or "access_token" not in tokens:
+    print_vs("No valid tokens. Need to authenticate first.")
+    return False
+  
+  # Check if token needs refresh
+  if tokens.get("expires_at", 0) < time.time():
+    print_vs("Token expired, refreshing...")
+    new_token = refresh_access_token(tokens.get("refresh_token"))
+    if not new_token:
+      return False
+    access_token = new_token
+  else:
+    access_token = tokens["access_token"]
+
+  return access_token
     
-    # Prepare file
-    if not drive_filename:
-        drive_filename = file_path.split("/")[-1]
+def upload_file_to_drive(file_path, drive_filename=None):
+  """Upload a file to Google Drive"""
+  access_token = get_access_token()
+  if not access_token:
+    return access_token
+  
+  # Prepare file
+  if not drive_filename:
+    drive_filename = file_path.split("/")[-1]
+  
+  try:
+    with open(file_path, "rb") as f:
+      file_content = f.read()
+  except Exception as e:
+    print_vs("Failed to read file:", e)
+    return False
+  
+  # Create metadata
+  metadata = {
+    "name": drive_filename,
+    "mimeType": "application/octet-stream"
+  }
+  
+  # Upload file
+  headers = {
+    "Authorization": f"Bearer {access_token}",
+    "Content-Type": "application/json; charset=UTF-8"
+  }
+  
+  # Create file metadata first
+  try:
+    # Method 1: Simple upload (for small files < 5MB)
+    url = "https://www.googleapis.com/upload/drive/v3/files?uploadType=media"
     
-    try:
-        with open(file_path, "rb") as f:
-            file_content = f.read()
-    except Exception as e:
-        print_vs("Failed to read file:", e)
-        return False
-    
-    # Create metadata
-    metadata = {
-        "name": drive_filename,
-        "mimeType": "application/octet-stream"
-    }
-    
-    # Upload file
-    headers = {
+    # First set metadata
+    meta_response = urequests.post(
+      "https://www.googleapis.com/drive/v3/files",
+      headers={
         "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json; charset=UTF-8"
-    }
-    
-    # Create file metadata first
-    try:
-        # Method 1: Simple upload (for small files < 5MB)
-        url = "https://www.googleapis.com/upload/drive/v3/files?uploadType=media"
-        
-        # First set metadata
-        meta_response = urequests.post(
-            "https://www.googleapis.com/drive/v3/files",
-            headers={
-                "Authorization": f"Bearer {access_token}",
-                "Content-Type": "application/json"
-            },
-            json=metadata
-        )
-        
-        if meta_response.status_code == 200:
-            file_data = meta_response.json()
-            file_id = file_data["id"]
-            meta_response.close()
-            
-            # Now upload content
-            upload_headers = {
-                "Authorization": f"Bearer {access_token}",
-                "Content-Type": "application/octet-stream"
-            }
-            
-            upload_url = f"https://www.googleapis.com/upload/drive/v3/files/{file_id}?uploadType=media"
-            upload_response = urequests.patch(upload_url, headers=upload_headers, data=file_content)
-            
-            if upload_response.status_code in [200, 201]:
-                print_vs(f"File uploaded: {drive_filename}")
-                upload_response.close()
-                return True
-            else:
-                print_vs("Upload failed:", upload_response.text)
-                upload_response.close()
-                return False
-        else:
-            print_vs("Metadata creation failed:", meta_response.text)
-            meta_response.close()
-            return False
-            
-    except Exception as e:
-        print_vs(f"Upload error: {e}")
-        return False
-
-def list_drive_files():
-    """List files in Google Drive"""
-    tokens = load_tokens()
-    
-    if not tokens or "access_token" not in tokens:
-        return []
-    
-    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
-    
-    try:
-        response = urequests.get(
-            "https://www.googleapis.com/drive/v3/files?pageSize=10",
-            headers=headers
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            response.close()
-            
-            files = []
-            for item in data.get("files", []):
-                files.append(f"{item['name']} ({item['id']})")
-            return files
-        else:
-            print_vs("List failed:", response.text)
-            response.close()
-            return []
-            
-    except Exception as e:
-        print_vs("List error:", e)
-        return []
-
-def oauth_setup():
-    """Complete OAuth setup flow"""
-    print_vs("Checking OAuth status..")
-    
-    # Check if already authenticated
-    tokens = load_tokens()
-    if tokens and "access_token" in tokens:
-        #print_vs("Already authenticated!")
-        return ''
-    
-    # Get device code
-    device_data = get_device_code()
-    if not device_data:
-        return False
-    
-    # Poll for authorization
-    tokens = poll_for_tokens(
-        device_data["device_code"],
-        device_data["interval"],
-        device_data["expires_in"]
+        "Content-Type": "application/json"
+      },
+      json=metadata
     )
     
-    if tokens:
-        save_tokens(tokens)
-        return "Setup Completed"
-    else:
+    if meta_response.status_code == 200:
+      file_data = meta_response.json()
+      file_id = file_data["id"]
+      meta_response.close()
+      
+      # Now upload content
+      upload_headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/octet-stream"
+      }
+      
+      upload_url = f"https://www.googleapis.com/upload/drive/v3/files/{file_id}?uploadType=media"
+      upload_response = urequests.patch(upload_url, headers=upload_headers, data=file_content)
+      
+      if upload_response.status_code in [200, 201]:
+        print_vs(f"File uploaded: {drive_filename}")
+        upload_response.close()
+        return True
+      else:
+        print_vs("Upload failed:", upload_response.text)
+        upload_response.close()
         return False
+    else:
+      print_vs("Metadata creation failed:", meta_response.text)
+      meta_response.close()
+      return False
+      
+  except Exception as e:
+    print_vs(f"Upload error: {e}")
+    return False
+
+def list_drive_files():
+  """List files in Google Drive"""
+  access_token = get_access_token()
+  if not access_token:
+    return access_token
+  
+  #if not tokens or "access_token" not in tokens:
+  #    return []
+  
+  headers = {"Authorization": f"Bearer {access_token}"}
+  
+  try:
+    response = urequests.get(
+      "https://www.googleapis.com/drive/v3/files?pageSize=10",
+      headers=headers
+    )
+    
+    if response.status_code == 200:
+      data = response.json()
+      response.close()
+      
+      files = []
+      for item in data.get("files", []):
+        files.append(f"{item['name']} ({item['id']})")
+      return files
+    else:
+      print_vs("List failed:", response.text)
+      response.close()
+      return []
+      
+  except Exception as e:
+    print_vs("List error:", e)
+    return []
+
+def _url_encode_query(s):
+  try:
+    from urllib.parse import quote_plus
+    return quote_plus(s)
+  except:
+    # Simple fallback for MicroPython environments without urllib.parse
+    safe = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~"
+    out = []
+    for ch in s:
+      if ch in safe:
+        out.append(ch)
+      elif ch == " ":
+        out.append("+")
+      else:
+        out.append("%{:02X}".format(ord(ch)))
+    return "".join(out)
+
+def find_file_by_name(filename):
+  """Find first file by exact name and return its id/name."""
+  access_token = get_access_token()
+  if not access_token:
+    return None
+
+  headers = {"Authorization": "Bearer {}".format(access_token)}
+
+  try:
+    q = "name='{}' and trashed=false".format(filename.replace("'", "\\'"))
+    q_encoded = _url_encode_query(q)
+    url = "https://www.googleapis.com/drive/v3/files?q={}&fields=files(id,name,mimeType,size)".format(q_encoded)
+
+    response = urequests.get(url, headers=headers)
+    if response.status_code == 200:
+      data = response.json()
+      response.close()
+      files = data.get("files", [])
+      if files:
+        return files[0]
+      return None
+    else:
+      print_vs("Search failed: {}".format(response.text))
+      response.close()
+      return None
+  except Exception as e:
+    print_vs("Search error: {}".format(e))
+    return None
+
+def download_file_from_drive(file_id, local_path=None):
+  """Download a file from Google Drive by file ID."""
+  access_token = get_access_token()
+  if not access_token:
+    return False
+
+  headers = {
+    "Authorization": "Bearer {}".format(access_token)
+  }
+
+  if not local_path:
+    local_path = file_id
+
+  try:
+    url = "https://www.googleapis.com/drive/v3/files/{}?alt=media".format(file_id)
+    response = urequests.get(url, headers=headers)
+
+    if response.status_code == 200:
+      content = response.content
+      response.close()
+
+      with open(local_path, "wb") as f:
+        f.write(content)
+
+      print_vs("Downloaded to: {}".format(local_path))
+      return True
+    else:
+      print_vs("Download failed: {}".format(response.text))
+      response.close()
+      return False
+
+  except Exception as e:
+    print_vs("Download error: {}".format(e))
+    return False
+
+def oauth_setup():
+  """Complete OAuth setup flow"""
+  print_vs("Checking OAuth status..")
+  
+  # Check if already authenticated
+  tokens = load_tokens()
+  if tokens and "access_token" in tokens:
+    #print_vs("Already authenticated!")
+    return ''
+  
+  # Get device code
+  device_data = get_device_code()
+  if not device_data:
+    return False
+  
+  # Poll for authorization
+  tokens = poll_for_tokens(
+    device_data["device_code"],
+    device_data["interval"],
+    device_data["expires_in"]
+  )
+  
+  if tokens:
+    save_tokens(tokens)
+    return "Setup Completed"
+  else:
+    return False
 
 def main(vs_arg, args_in):
-    global vs
-    vs = vs_arg
-    """Main program"""
-    parser = argparse.ArgumentParser( description = "Google drive")
-    parser.add_argument('-l','--list', type=bool, help = 'list', default=False)    
+  global vs
+  vs = vs_arg
 
-    parser.add_argument("src_file", nargs='?')
-    parser.add_argument("dst_file", nargs='?')
-    #print(args_in, file=vs)
+  parser = argparse.ArgumentParser(description="Google drive")
+  parser.add_argument('-l', '--list', action='store_true', help='list', default=False)
+  parser.add_argument('--download', help='download by file id', default=None)
+  parser.add_argument('--download-name', help='download by exact file name', default=None)
 
-    args = parser.parse_args(args_in[1:])
-    #print(args)
+  parser.add_argument("src_file", nargs='?')
+  parser.add_argument("dst_file", nargs='?')
 
-    res =  oauth_setup()
-    if res == False:
-      res = "Setup Failed"
-    if res != '':
-        print_vs(res)
-        if res == 'Setup Failed':
-          return
+  args = parser.parse_args(args_in[1:])
 
-    dst_file = args.dst_file
-    if args.src_file and not args.dst_file:
-      fname = args.src_file.split('/')[-1]
-      dst_file = fname
+  res = oauth_setup()
+  if res == False:
+    res = "Setup Failed"
+  if res != '':
+    print_vs(res)
+    if res == 'Setup Failed':
+      return
 
-    if (not args.list) and args.src_file != None:
-        
-      print(f'src file {args.src_file}', file=vs)
-      if upload_file_to_drive(args.src_file, dst_file):
-        print_vs("Upload successful!")
-      else:
-        print_vs("Upload failed")
+  # Download by ID
+  if args.download:
+    out_name = args.src_file if args.src_file else None
+    if download_file_from_drive(args.download, out_name):
+      print_vs("Download successful!")
     else:
-      files = list_drive_files()
-      if files:
-        print_vs("Files in Drive:")
-        for f in files:
-          print_vs(f"  {f}")
-      else:
-        print_vs("No files or failed to list")
-                
+      print_vs("Download failed")
+    return
+
+  # Download by exact filename
+  if args.download_name:
+    file_info = find_file_by_name(args.download_name)
+    if not file_info:
+      print_vs("File not found: {}".format(args.download_name))
+      return
+
+    file_id = file_info["id"]
+    print(args.src_file)
+    out_name = args.src_file if args.src_file else file_info.get("name", args.download_name)
+    if download_file_from_drive(file_id, out_name):
+      print_vs("Download successful!")
+    else:
+      print_vs("Download failed")
+    return
+
+  # Upload
+  dst_file = args.dst_file
+  if args.src_file and not args.dst_file:
+    fname = args.src_file.split('/')[-1]
+    dst_file = fname
+
+  if (not args.list) and args.src_file is not None:
+    print("src file {}".format(args.src_file), file=vs)
+    if upload_file_to_drive(args.src_file, dst_file):
+      print_vs("Upload successful!")
+    else:
+      print_vs("Upload failed")
+  else:
+    files = list_drive_files()
+    if files:
+      print_vs("Files in Drive:")
+      for f in files:
+        print_vs("  {}".format(f))
+    else:
+      print_vs("No files or failed to list")
 

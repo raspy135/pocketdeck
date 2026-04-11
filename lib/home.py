@@ -67,10 +67,12 @@ def set_audio_volume(value = None):
 def set_speaker_out(value = None):
   if value != None:
     if value:
-      codec_config.set_lpf(cutoff_freq=5000, biquad_idx='A')
+      #pass
+      codec_config.set_lpf(cutoff_freq=3000, biquad_idx='A')
       codec_config.set_hpf(cutoff_freq=150, biquad_idx='B')
-      codec_config.set_hpf(cutoff_freq=100, biquad_idx='C')
+      codec_config.set_hpf(cutoff_freq=80, biquad_idx='C')
     else:
+      #pass
       codec_config.set_pass_through(biquad_idx='A')
       codec_config.set_pass_through(biquad_idx='B')
       codec_config.set_pass_through(biquad_idx='C')
@@ -328,23 +330,30 @@ class setting():
       print(e)
       pass
       
-  def search_free_screen(self,launched):
-    scnum = 2
+  def search_free_screen(self,launched, scnum = None):
+    loop = True
+    if scnum == None:
+      scnum = 2
+    else:
+      loop = False
+      
     while True:
       if not pdeck.cmd_exists(scnum) and scnum not in launched:
         break
+      if not loop:
+        return -1
       scnum = scnum + 1
       if scnum == 10:
         return -1
     return scnum
     
-  def launch_app(self,command):
+  def launch_app(self,command, pref_scnum = None):
 
     #pdeck.cmd_execute(' '.join(command), 1, scnum)
     first = True
     launched = []
     for one in command:
-      scnum = self.search_free_screen(launched)
+      scnum = self.search_free_screen(launched, pref_scnum)
       launched.append(scnum)
       if scnum == - 1:
         break
@@ -476,7 +485,8 @@ class setting():
             self.save_settings()
             self.menu_ui.set_message('Setting saved.')
           if item['type'] == 'program':
-            self.launch_app(item['command'])
+            pref_scnum = item.get('screen_number')
+            self.launch_app(item['command'], pref_scnum)
           if item['type'] == 'quit':
             break
         if isinstance(item,list):

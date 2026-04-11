@@ -5,21 +5,22 @@ import time
 import pdeck_utils as pu
 import codec_config
 import wav_play
+import argparse
 
-SAMPLE_RATE = 24000
+#SAMPLE_RATE = 24000
 
 class stream_record:
-  def __init__(self, filename, stream):
+
+  def __init__(self, filename, stream, bufsize = 200000):
     self.filename = filename
     self.last_index = 1
     self.vs = stream
     #self.open(filename)
     self.total_read = 0
     self.buf = []    
-    self.buf.append(memoryview(bytearray(200000)))
-    self.buf.append(memoryview(bytearray(200000)))
-    #self.buf.append(memoryview(bytearray(50000)))
-    #self.buf.append(memoryview(bytearray(50000)))
+    self.buf.append(memoryview(bytearray(bufsize)))
+    self.buf.append(memoryview(bytearray(bufsize)))
+    self.time_silent = 0
     
   def u4(self, data):
     return array.array('I', data)[0]
@@ -45,27 +46,39 @@ class stream_record:
     self.chunkdata[1] = (num_samples * bitspersample * num_channel) // 8
 
   @micropython.viper
-  def check_clip(self, buf_in, buflen:int) -> int:
+  def check_silent(self, buf_in, buflen:int, max_level:int, threshold_length:int, skip_sample:int) -> int:
     buf = ptr16(buf_in) 
-    for i in range(0, buflen,100):
+    count:int = 0
+    i = 0
+    while i < buflen:
       data:int = buf[i]
       if data >= 0x8000:
-        data &= 0x7fff
-        if data < 0x10:
-          return 1
+        pass
       else:
-        if data > 0x7ff0:
-          return data
+        if data > max_level:
+          count = 0
+          i += skip_sample
+          continue
+      count += 1
+      if count >= threshold_length:
+        return 1
+      i += skip_sample
+
     return 0
     
   def recv_callback(self, index):
     self.last_index = index
     readsize = len(self.buf[index])
+   
+    #silent = self.check_silent(self.buf[index], readsize, 1000, 8000, 4)
+    #if silent and (self.time_silent&1) == 1:
+    #  self.time_silent += 1
+    #  print(f'silent {self.time_silent}')
 
-    clip = self.check_clip(self.buf[index], readsize)
-    #if clip != 0:
-    #  print(f"level clipped {clip}", file=self.vs)
-      
+    #if not silent and (self.time_silent&1) == 0:
+    #  self.time_silent += 1
+    #  print(f'silent {self.time_silent}')
+
     #self.f.write(self.buf[index][:readsize])
     self.f.write(memoryview(self.buf[index]))
     self.total_read += readsize
@@ -108,11 +121,20 @@ class stream_record:
     self.f.write(bytes(self.chunkdata))
     self.f.close()
  
-def main(vs, args):
+def main(vs, args_in):
+  
   cc = codec_config.codec_config()
   filename = "/sd/work/rec.wav"
-  if len(args) == 2:
-    filename = args[1]
+  parser = argparse.ArgumentParser(
+            description='Sound recorder' )
+  parser.add_argument('-s', '--sample_rate',action='store', default='24000', help='Sample rate')
+  parser.add_argument('-l', '--length',action='store', default='3600', help='Length in second, you can also specify by minutes like 100m')
+  parser.add_argument('filename',default='/sd/work/rec.wav', help='Filename to record')
+  
+  args = parser.parse_args(args_in[1:])
+
+  filename = args.filename
+  
   print("turn on input monitoring? y or n", file=vs)
   answer = vs.read(1)
   monitoring = False
@@ -127,12 +149,18 @@ def main(vs, args):
     vs.read(1)
 
   print(f"Recording to {filename}, press q to stop recording", file=vs)
-  #audio.sample_rate(44100)
-  audio.sample_rate(SAMPLE_RATE)
-  #audio.sample_rate(24000)
-  rec = stream_record('dummy',vs)
+  
+  sample_rate = int(args.sample_rate)
+  
+  audio.sample_rate(sample_rate)
+
+  rec = stream_record('dummy',vs, 150000)
   print("recording", file = vs)
-  rec.record(filename, SAMPLE_RATE * 60*5)
+  time.sleep(0.2)
+  # Set one hour as maximum recording time
+  
+  length = int(args.length) if args.length[-1] != 'm' else int(args.length[:-1])*60
+  rec.record(filename, sample_rate * length)
   while(audio.stream_record()):
     pdeck.delay_tick(5)
     ret = vs.v.read_nb(1)

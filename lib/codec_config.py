@@ -124,7 +124,7 @@ class codec_config:
     val = self.ic.readfrom_mem(self.address, 0x34, 1)[0]
     self.ic.writeto_mem(self.address, 0x0, b'\x00')
     #print(f"val{val}")   
-    if val == 0x80:
+    if val == 0xC0:
       return True
     else:
       return False
@@ -133,8 +133,8 @@ class codec_config:
     self.ic.writeto_mem(self.address, 0x0, b'\x01')
     if val:
       # Enable line in (In 1)
-      self.ic.writeto_mem(self.address, 0x34, b'\x80')
-      self.ic.writeto_mem(self.address, 0x37, b'\x80')
+      self.ic.writeto_mem(self.address, 0x34, b'\xC0')
+      self.ic.writeto_mem(self.address, 0x37, b'\xC0')
       self.ic.writeto_mem(self.address, 0x33, b'\x00')
     else:
       # Enable Microphone (In 2)
@@ -199,7 +199,6 @@ class codec_config:
     return enabled, target_db
 
   def set_pass_through(self, biquad_idx='A'):
-    """Sets specified Biquad to unity gain (bypass/pass-through) for testing."""
     self.set_filter_raw(1.0, 0, 0, 0, 0, biquad_idx=biquad_idx)
 
   def set_lpf(self, cutoff_freq, q=0.707, sample_rate=44100, biquad_idx='A'):
@@ -276,20 +275,19 @@ class codec_config:
     return (1+cs)/(2*a0), -(1+cs)/a0, (1+cs)/(2*a0), (-2*cs)/a0, (1-alpha)/a0
 
   def _float_to_coeff_int(self, val):
-    """Convert float to 24-bit 1.23 signed integer."""
+    # Convert float to 24-bit 1.23 signed integer.
     scaled = int(val * (2**23))
     if scaled > 8388607: scaled = 8388607
     elif scaled < -8388608: scaled = -8388608
     return scaled & 0xFFFFFF
 
   def _write_coefficient_24bit(self, channel, biquad_idx, coef_name, val):
-    """Writes a 24-bit coefficient to 3 consecutive registers."""
+    # Writes a 24-bit coefficient to 3 consecutive registers.
     # AIC3204 Biquads are 20 bytes (5 coeffs * 4 bytes) apart
     biquad_offset = (ord(biquad_idx) - ord('A')) * 20
     
     m = self.biquad_map[channel]
     reg = m['base'] + biquad_offset + self.coef_offsets[coef_name]
-    
     self.ic.writeto_mem(self.address, 0x00, bytes([m['page']]))
     # AIC3204 expects MSB first (Big-Endian) in consecutive registers
     self.ic.writeto_mem(self.address, reg, bytes([(val >> 16) & 0xFF, (val >> 8) & 0xFF, val & 0xFF]))

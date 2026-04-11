@@ -13,6 +13,14 @@
             "benchmark.py"
         ],
         [
+            "ble_kb.py",
+            "ble_kb.py"
+        ],
+        [
+            "ble_manager.py",
+            "ble_manager.py"
+        ],
+        [
             "cat.py",
             "cat.py"
         ],
@@ -111,6 +119,10 @@
         [
             "gpt.py",
             "gpt.py"
+        ],
+        [
+            "grep.py",
+            "grep.py"
         ],
         [
             "home.mpy",
@@ -233,12 +245,24 @@
             "rmdir.py"
         ],
         [
+            "setjpf.py",
+            "setjpf.py"
+        ],
+        [
+            "setuni.py",
+            "setuni.py"
+        ],
+        [
             "sound.py",
             "sound.py"
         ],
         [
             "stt.py",
             "stt.py"
+        ],
+        [
+            "tasks.py",
+            "tasks.py"
         ],
         [
             "types.mpy",
@@ -255,6 +279,10 @@
         [
             "wav_play.py",
             "wav_play.py"
+        ],
+        [
+            "wavfileplay.py",
+            "wavfileplay.py"
         ],
         [
             "wavplay.py",

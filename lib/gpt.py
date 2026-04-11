@@ -197,17 +197,19 @@ def record_audio(vs, filename, duration_sec=15):
   
   audio.sample_rate(sample_rate)
   print(f"Recording... (press any key to stop)", file=vs)
-  rec = recorder.stream_record('dummy', vs)
+  rec = recorder.stream_record('dummy', vs, 20000)
   # Use num_channels=1 for bandwidth savings as requested
   rec.record(filename, sample_rate * duration_sec, num_channels=1)
   
   # Wait for recording or keypress
   start = time.time()
   while audio.stream_record() and (time.time() - start) < duration_sec:
-    pdeck.delay_tick(5)
+    pdeck.delay_tick(10)
     ret = vs.v.read_nb(1)
     if ret and ret[0] > 0:
       break
+    #if rec.time_silent == 2:
+    #  break
   rec.stop()
   return filename
 
