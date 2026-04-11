@@ -1,7 +1,20 @@
 
-## Python application development
+# Pocket Deck Python application development guide
 
 Pocket deck uses Micropython as core development language, and graphics and sound library are written by C module for performance.
+
+### Limitations
+
+- Pocket deck supports multiple applications running at the same time, but it's just threads, there  are no protection between applications. So all applications must be trusted.
+- Pocket deck uses thread to handle multiple applications. Micropython does not allow using asyncio with thread. Do not use asyncio.
+
+### Examples
+
+Examples are located in /sd/lib/examples.
+
+### Screen specification
+
+Pocket deck has monochrome LCD. Resolution is 400 x240. Refresh rate can go more than 60 fps.
 
 ### Your first application
 
@@ -11,18 +24,42 @@ You can use Pem editor to create a new file. /sd/py is the standard path that Mi
 
 2. write basic application
 
-There are examples under /sd/lib/examples. 'hello_world' is the most basic application, and 'hello_grachic' is a simple graphic application.
+If you want to use existing examples as an application template, there are examples under /sd/lib/examples. [[/sd/lib/examples/hello_world.py]] is the most basic application, and [[/sd/lib/examples/hello_graphic.py]] is a simple graphic application. Copy one example that you want to try under /sd/py and edit as you like. /sd/py has priority than /sd/lib, so you can override the existing apps if you want.
+
+main() is the entry point of the application, it has to be defined. Here is minimal application for Pocket deck:
+
+python
+```
+def main(vs, args):
+  print("Hello Pocket deck", file=vs)
+```
+
+`vs` is vscreen_stream object for the app, and `args` are command arguments passed to the app.
+
+Once you finished editing, save the file.
+
+3. Run the application
+
+To run the application, go to command line and execute the command.
+
+If your filename is /sd/py/test.py, the command will be the following:
+
+```
+r test
+```
+
+`r` ensures reloading module, so it's useful for development. See `Reload Python module` section for detail.
 
 ## Pdeck Micropython module
 
 To interact with Pdeck graphical screen, use Pdeck module. Through Pdeck module, you have an access to Keyboard status, and virtual screen status. The graphic engine is u8g2.
 Pdeck also provides the interface to virtual screens. You can create your own app for Pocket deck and the process is straight forward, easy to port your existing apps.
 
-## Reload Python module
+## Reloading Python module
 
 By default, Micropython module won't be reloaded when it's invoked from command shell.
 
-It's good for stable applications, but you want to reload the application in development.
+It will save loading time for stable applications, but you want to reload the application while development.
 
 To reload the module, use 'r' command to reload the module. For example:
 
@@ -30,11 +67,26 @@ $ r hello_world
 
 Alternatively, you can use pdeck_utils.reimport() to reload module.
 
+If you develop multiple modules like one top module and sub modules, you need to reload all modules. It can be done by 'r' command, pdeck_utils.reimport().
+
+Alternatively, you can manually delete the key from sys.modules array to force reloading.
+
+The following code automates reloading sub module only when the module is loaded at the first time.
+
+```Python
+import sys
+if not 'loaded' in locals():
+  # Deleting item in sys.modules forces module reloading
+  del sys.modules['sub_module']
+import sub_module
+loaded = True
+```
+
 ## Error handling
 
-Python system error message and print() will be printed on screen 1(REPL). Red LED will be lit to notify there are  new messages. This redirection is useful when graphical application has errors.
+Python system error message and print() will be printed on screen 1(REPL). Red LED will be turned on to notify there are new messages. This redirection is useful when graphical application has errors.
 
-If the application becomes unresponsible, try S-C-d (Shift+Ctrl+D) to unsubscribe update() callback and quit the main app. 
+If the application becomes unresponsible, try C-S-q. In graphics application, it's safer to try C-S-d first to detatch graphic update callback.
 
 ```Python
 def main(vs, args):
@@ -51,7 +103,7 @@ Pdeck module controls Pocket Deck system features and peripherals.
 - `change_screen(screen)` Change screen to the given number.
 
 - `change_priority(priority)` Set current application as priority. This might cause system performance issue, basically it's not recommend to use. Priority is bool. True for priority task.
-- `clipboard_copy(string)` Copy string data to clipboard which can be used between applciations.
+- `clipboard_copy(string)` Copy string data to clipboard which can be used between applciations. (C-S-v to paste the data from clipboard)
 
 - `clipboard_paste()` Paste data from clipboard. Return: Data in the clipboard.
 
@@ -64,7 +116,7 @@ Usually it will be 1(0 based number) because command shell is always running on 
 
 - `get_screen_num()` Returns the current screen number.
 
-- `get_screen_size()` Returns a tuple of the screen size.
+- `get_screen_size()` Returns a tuple of the screen size. With the current display, it would be (400,240)
 
 - `init()`  Internal use, do not call.
 
@@ -82,6 +134,7 @@ Usually it will be 1(0 based number) because command shell is always running on 
 ## vscreen module reference
 
 vscreen represents virtual screen(0-10). All graphics APIs are implemented in this class.
+
 
 ### Graphics Operations (via vscreen object)
 
@@ -116,8 +169,8 @@ All drawing methods work when the vscreen is active (current screen). Basically 
 - `draw_frame(x, y, w, h)`
 - `draw_rframe(x, y, w, h, r)` - rounded frame
 - `draw_rbox(x, y, w, h, r)` - rounded box
-- `draw_circle(x, y, rad, opt)`
-- `draw_disc(x, y, rad, opt)`
+- `draw_circle(x, y, radius, opt)`
+- `draw_disc(x, y, radius, opt)`
 - `draw_triangle(x0, y0, x1, y1, x2, y2)`
 - `draw_arc(x, y, rad, start, end)`
 - `draw_ellipse(x, y, rx, ry, opt)`
@@ -134,7 +187,11 @@ All drawing methods work when the vscreen is active (current screen). Basically 
 
 **Bitmap Operations:**
 
-- `draw_xbm(x, y, w, h, xbm_data)` - This is tuned version for performance.
+Pocket deck supports XBM and the original XBMR format for image. XBMR is binary format, basically decoded XBM for performance, it also support multiple frames in one file.
+
+
+- `draw_image(x, y, image, frame)` - Higher level function to draw image. image is tuple returned by xbmreader.read() or read_xbmr(), which is (name, width, height, data, num_of_frames).
+- `draw_xbm(x, y, w, h, xbm_data)` - Draw XBM. xbm_data is binary data. This is tuned version for performance.
 - `capture_as_xbm(x, y, w, h, buffer)` - Capture screen area to XBM format
 
 **Font and Display Settings:**
@@ -149,7 +206,7 @@ All drawing methods work when the vscreen is active (current screen). Basically 
 - `set_draw_color(color)` - 0 is black, 1 is white, 2 is xor
 - `set_font_mode(mode)` 
 - `set_bitmap_mode(mode)` - 1 for transparent. 
-- `set_dither(dither_level)` - Set dither color level, 0 to 16.
+- `set_dither(dither_level)` - Set dither color level, 0 to 16. (0: empty/no drawing, 16: solid color).
 
 **Buffer Management:**
 
@@ -168,7 +225,7 @@ Pocket deck has two screen buffer. 0 is main buffer, and user can use buffer 1 a
 
 Callback function to be called for every frame update.
 
-- `callback(handler)` Register an update callback function. The handler will be called with a boolean parameter indicating if a screen change was requested.
+- `callback(handler)` Register an screen update callback function. The handler will be called with a boolean parameter indicating if a screen change was requested. This means if False is passed to update() callback, you don't need to draw full screen, you can just call `finished()` and return if you don't need to update screen. Calling `finished()` without any drawing functions saves power. See `tasks` application to see the real usage.
 
 - `callback_exists()` Check if the callback is still registered.
 
@@ -182,13 +239,31 @@ Callback function to be called for every frame update.
 
 - `send_key_event(key, modifier, event_type)` Send keyboard event.
 
-- `read_nb(max_bytes)` Read up to `max_bytes` from input. Returns tuple `(bytes_read, data)`. This is non-blocking function.
+- `read_nb(max_bytes)` Read up to `max_bytes` from keyboard input. Returns tuple `(bytes_read, data)`. This is non-blocking function. Special keys are recorded as escape sequence. For example, Up arrow key is b'\x1b[A'.
 
 - `poll()` Check if there's input available. Returns `True` if data is available.
 
-- `get_key_state(key_code)` Get the state of a specific key.
+- `get_key_state(key_code)` Get the state of a specific key. Key code is listed in [[hid_usage_keyboard.h]]
 
-- `get_tp_keys()` Get touchpad keys state as bytes.
+- `get_tp_keys()` Get low-level touchpad keys state as bytes. 
+byte | bit | Description
+-----------------------
+0 | 0-7 | Slider position, range is 0 to 40. It returns 0xFF if slider is not pressed.
+1 | 0-7 | Touchpad Y, range is 0 to 80. It returns 0xFF if touchpad is not pressed.
+2 | 0-7 | Touchpad X, range is 0 to 100. It returns 0xFF if touchpad is not pressed.
+3 | 0 | `B` Button
+3 | 1 | `A` Button
+4 | 0-7 | D-pad angle (It can detect the angle on D-pad), Range is 0 to 160.(160 means 360 degree). It returns 0xFF if D-pad is not pressed.
+5 | 0 | Up
+5 | 1 | Up-right
+5 | 2 | Right
+5 | 3 | Bottom-right
+5 | 4 | Bottom
+5 | 5 | Bottom-left
+5 | 6 | Left
+5 | 7 | Up-left
+6 | 0 | Bottom right button
+6 | 1 | Bottom left button
 
 ### Terminal Settings
 
@@ -223,7 +298,7 @@ pdeck_utils.launch(['pem','/sd/Documents/journal.md'],2)
 
 ## vscreen_stream class
 
-vscreen_stream is Python wrapper of vscreen object.  vscreen_stream provides stream object interface.
+vscreen_stream is Python wrapper of vscreen object.  vscreen_stream provides stream object interface. read(), write(), async_read(), ioctl() and poll() are supported.
 
 ```Python
 # vs is vscreen_stream object
@@ -234,8 +309,17 @@ def main(vs, args):
 
 - `v` vscreen object associated in the object. Application can get vscreen object by accessing the member.
 
+
+
 ```Python
 def main(vs,args):
   v = vs.v # Getting vscreen object for the app.
 ```
 
+## esclib module
+
+esclib module is a small utility to generate basic escape sequences.
+
+## misc_utils module
+
+misc_utils module is a small utility to support some functions. Currently it only supports input().

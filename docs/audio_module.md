@@ -1,9 +1,15 @@
 
 ## Audio module reference
 
-The `audio` module provides low-level control over sound synthesis, playback, and streaming. It includes two specialized classes: `sampler` for sample-based playback and `wavetable` for wavetable-based synthesis. It also has a `router` class for signal routing and an `effect` class for audio effects. Effects include `echo`, `filter`, `compressor`, `mixer`, and `delay`.
+The `audio` module provides low-level control over sound synthesis, playback, and streaming. It includes specialized classes: 
+  - `sampler` for sample-based playback 
+  - `wavetable` for wavetable-based synthesis
+It also has a `router` class for signal routing and an `effect` class for audio effects.
+Effects include `echo`, `filter`, `compressor`, `mixer`, and `delay`.
 
 Audio module supports 16-bit PCM audio data. Default sample rate is 24kHz. You can change the sample rate by `sample_rate(rate)` function.
+
+Streaming module is part of audio module. Two streaming is available, mod_index = 0 is for playback, 1 is for recording. Use `stream_*` functions to setup, play and record streaming. [[/sd/lib/wav_play.py]] and [[/sd/lib/recorder.py]] are good examples of use of the module.
 
 ### Module Level Functions
 
@@ -25,13 +31,16 @@ Audio module supports 16-bit PCM audio data. Default sample rate is 24kHz. You c
   - `callback`: A callback function called when a buffer is ready.
 
 - `stream_setdata(mod_index, index, buffer)`
-  Sets data for a specific buffer index in the stream.
+  Specify the data location for a specific buffer index in the stream.
+
+- `stream_update_length(mod_index, length)`
+  Update the length of the stream. It's useful when the buffer length is unknown at beginning such as streaming audio. In this case, set very long length with `stream_setup()` then use this function to update length when you want to finish the streaming.
 
 - `stream_play(state)`
-  Starts or stops playback. If no argument is provided, returns the playing status.
+  Starts or stops playback for playback stream(0). If no argument is provided, returns the playing status.
 
 - `stream_record(state)`
-  Starts or stops recording. If no argument is provided, returns the recording status.
+  Starts or stops recording for recording stream(1). If no argument is provided, returns the recording status.
 
 - `stream_position(mod_index)`
   Returns the current position in the stream for the specified module.
@@ -150,7 +159,17 @@ with audio.wavetable(4) as w:
   Sets or gets the morph position (0.0 to number of frames - 1.0) to interpolate between wavetable frames.
 
 - `set_adsr(slot, attack_ms, decay_ms, sustain_level, release_ms, [execute_at=0])`
-  Configures the ADSR envelope for the oscillator.
+  Configures the amplitude ADSR envelope for the oscillator.
+
+- `morph_adsr(slot, attack_ms, decay_ms, sustain_level, release_ms, [execute_at=0])`
+  Configures a dedicated ADSR envelope for wavetable morphing.
+
+- `morph_start(slot, value, [execute_at=0])`
+  Sets the baseline morph position for the ADSR envelope. The manual `morph()` setting acts as the **peak/destination** (Peak/Sustain level). The envelope sweeps **linearly** from `morph_start` towards the current `morph` value.
+  Example: `morph_start(0, 0.0)` with manual `morph(0, 0.8)` will sweep from frame 0 to 80% of the wavetable.
+
+- `morph_adsr_enable(slot, flag, [execute_at=0])`
+  Enables or disables the morph ADSR modulation for the specified oscillator. Default is `False`.
 
 - `is_playing(slot)`
   Returns `True` if the oscillator is active.
@@ -195,6 +214,7 @@ A stereo delay/echo effect with optional ping-pong mode and analog-style feedbac
 
 #### Methods
 
+- `active(flag)`: Set True to activate the module. Default is disabled.
 - `set_params(time_ms, feedback, [transition_ms=0, execute_at=0])`
 - `set_type(type)`
   - `"stereo"`: Standard stereo delay.
@@ -208,6 +228,7 @@ State Variable Filter (SVF) with smooth sweeps and high stability.
 
 #### Methods
 
+- `active(flag)`: Set True to activate the module. Default is disabled.
 - `set_params(cutoff, q, [transition_ms=0, execute_at=0])`
 - `set_type(type)`
   - `"lpf"`, `"hpf"`, `"bpf"`, `"notch"`, `"peak"`
@@ -220,5 +241,21 @@ Dynamic range compressor with warm soft-saturation (clipping).
 
 #### Methods
 
+- `active(flag)`: Set True to activate the module. Default is disabled.
 - `set_params(gain, reduction, [transition_ms=0, execute_at=0])`
   - `reduction`: 0.0 (no compression) to 1.0+ (heavy reduction).
+
+---
+
+### reverb class
+
+A high-quality plate reverb algorithm with modulated delay lines and feedback filtering.
+
+#### Methods
+
+- `active(flag)`: Set True to activate the module. Default is disabled.
+- `set_params(room_size, brightness, predelay_ms, mix, [transition_ms=0, execute_at=0])`
+  - `room_size`: Decay time (0.0 to 1.0).
+  - `brightness`: High-frequency damping filter.
+  - `predelay_ms`: Initial delay before reverb tail begins.
+  - `mix`: Dry/Wet balance (0.0 to 1.0).

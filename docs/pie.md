@@ -22,7 +22,8 @@ from pie import Pie, PieSampler
 import time
 
 def main(vs, args):
-    with Pie(bpm=120) as p, PieSampler(4) as drums:
+    p = Pie(bpm=120)
+    with p, PieSampler(4) as drums:
         drums.load_wav(0, "/sd/kick.wav")
         
         p.add(drums, "0 . . . 0 . . .") # Simple kick pattern
@@ -38,15 +39,27 @@ def main(vs, args):
 
 - `__init__(bpm=120, startup_delay_ms=100)`
 - `add(instrument, pattern)`
-  Adds an instrument and a pattern string to the mix. Returns an index for later updates.
+  Adds an instrument and a pattern (string or pre-configured `Pattern` object) to the mix. Returns an index for later updates.
+- `pattern(instrument, data)`
+  Creates a `Pattern` object for a specific instrument. You can apply pattern methods to modify the pattern.
 - `update(index, pattern)`
   Hot-swaps a pattern string for an existing track.
+- `Pattern` methods (can be chained):
+  - `slow(n)`: Stretches the pattern to last `n` cycles.
+  - `clip(n)`: Sets the note duration multiplier (default 0.9). Accepts a constant or a pattern string.
+  - `strum(amount)`: Adds an incremental delay to chord notes. Positive values strum "down" (lowest to highest), negative values strum "up" (highest to lowest). Accepts a constant or a pattern string.
+  - `scale(name)`: Sets the current musical scale for relative sequencing. Accepts a constant (e.g., `'Cmajor'`) or a pattern string (e.g., `'<Cmajor Gmajor>'`).
+  - `transpose(n)`: Shifts notes by `n` semitones. Works on MIDI numbers, note strings, and scale indices. Accepts a constant or a pattern string (e.g., `'<0 7 12>'`).
 - `remove(index)`
   Removes a track from the sequencer.
 - `process_event()`
   **Must be called in your main loop.** This processes timing and dispatches events to the audio engine.
 - `process_interactive(filename, loc)`: Standard interactive mode entry point.
 - `get_tick_from_cycle(cycle)`: Calculates the specific audio tick (sample count) for a given cycle. Useful for scheduling timed events with `master.add(module, tick)`.
+- `clear()`: Clears all tracks from the sequencer.
+- `start()`: Starts the sequencer manually, it's useful when `with` statement is not suitable.
+- `stop()`: Stops the sequencer manually, it's useful when `with` statement is not suitable.
+
 
 
 ---
@@ -155,7 +168,39 @@ with Pie(bpm=120) as p, PieFilter() as lpf:
 They are only available for `PieWavetable`.
 - **MIDI Numbers**: Integers (e.g., `60`).
 - **Note Strings**: Standard notation (e.g., `C4`, `F#3`).
-- **Chords**: Parsed into simultaneous notes (e.g., `Cmaj`).
+- **Chords**: Parsed into simultaneous notes (e.g., `Cmaj`, `Cm`).
+- **Chord Voicing (Inversions)**: Use `:n` suffix to rotate notes.
+  - `C4maj:1`: First inversion (move bottom note up an octave).
+  - `C4maj:2`: Second inversion.
+  - `C4maj:-1`: Move top note down an octave.
+- **Scale Indices**: When a scale is set via `.scale()`, integers are treated as scale degrees (e.g., `0 1 2`).
+
+### 7. Available Chords
+The following chord shorthands are supported. Intervals are relative to the root MIDI note.
+
+| Suffix | Intervals | Type |
+| :--- | :--- | :--- |
+| `maj` | `0, 4, 7` | Major Triad |
+| `m` | `0, 3, 7` | Minor Triad |
+| `maj7` | `0, 4, 7, 11` | Major 7th |
+| `m7`, `min7` | `0, 3, 7, 10` | Minor 7th |
+| `7`, `sev` | `0, 4, 7, 10` | Dominant 7th |
+| `6` | `0, 4, 7, 9` | Major 6th |
+| `m6` | `0, 3, 7, 9` | Minor 6th |
+| `9`, `dom9` | `0, 4, 7, 10, 14` | Dominant 9th |
+| `add9` | `0, 4, 7, 14` | Added 9th |
+| `sus2` | `0, 2, 7` | Suspended 2nd |
+| `sus4` | `0, 5, 7` | Suspended 4th |
+| `dim` | `0, 3, 6` | Diminished Triad |
+| `dim7` | `0, 3, 6, 9` | Diminished 7th |
+| `aug` | `0, 4, 8` | Augmented Triad |
+
+### 8. Scales
+Pie supports a variety of common scales. You can apply them to influence how relative notes (integers) are mapped to actual frequencies.
+
+- **Available Scales**: `maj`, `m`, `pent_maj`, `pent_m`, `chrom`.
+- **Usage**: `pat.scale("Cmajor")` or `pat.scale("Cm")`
+- **Dynamic Scales**: `<Cmajor Dm>` rotates the scale per cycle.
 
 ### 7. Instrument Automation
 Each instrument supports specific commands that can be used in the `command:value:transition` syntax.
@@ -174,6 +219,43 @@ Each instrument supports specific commands that can be used in the `command:valu
 | **PieMixer** | `vol` | Volume (0.0 to 1.0) |
 | | `pan` | Panning (-1.0 to 1.0) |
 
+
+### 9. Pattern Examples
+Practical examples of combining patterns with the Pie API:
+
+```python
+# drums are PieSampler instances
+# synth is PieWavetable instance
+
+# 1. Simple drum sequence (assuming 0 is kick, 1 is snare)
+p.add(drums, "[0 1 0 1]")
+
+# 2. Simple drum sequence with hihat (assuming 0 is kick, 1 is snare, 2 is hihat)
+p.add(drums, "[0 1 0 1], [2 2 2 2]")
+
+# 3. Transposed chord (moves C3maj down an octave)
+p.add(synth, p.pattern(synth, "C3maj").transpose(-12))
+
+# 4. Chained configuration: Clipping + Scale
+pat = p.pattern(synth, "0 2 4 6").scale("Ebmaj").clip("0.5 1.0")
+p.add(synth, pat)
+
+# 5. Multi-cycle rotation (Note alternates every cycle)
+p.add(synth, "[<c4 g4> e4]")
+
+# 6. Weighted sequence (C4m is 3x longer than G3maj) with struming
+p.add(synth, p.pattern(synth, "C4m@3 G3maj@1").strum(0.02))
+
+# 7. First inversion drop voicing
+p.add(synth, "C4m:1")
+
+# 8. Fast repetition within a step
+p.add(synth, "60 67 [60 62 64 65]*2")
+
+# 9. Voicing by inversions
+p.add(synth, "<A2m C2maj:2 D2maj:1 F2maj A2m E2maj:1 A2m E27:1>")
+
+```
 
 ---
 

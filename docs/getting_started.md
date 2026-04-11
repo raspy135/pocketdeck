@@ -62,8 +62,8 @@ If you press 'c', then current date will be copied to system clipboard. You can 
 
 ## File sync with google drive
 
-TBD
+gdrive local_file remote_file
 
-## Other applications
+to upload file to Google drive. You need to authorize the access at the first time.
 
-- gpt is an application to talk ChatGPT. You need to modify the code to put your API key.
+

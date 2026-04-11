@@ -15,6 +15,18 @@ PEM edit is designed for Pocket deck system, 100% written by MicroPython, good f
 - Completion
 - Compact design for small display
 
+## Command line options
+
+```
+pem [options] filename
+```
+
+`-j` loads Japanese(CJK) font when launching the app. 
+
+## Auto resume
+
+Pem has auto resume feature, it will load the last edited file at launch. To disable the feature, change `resume_last_file` parameter to False in pem_keymap.py. See `Customizing` section for detail.
+
 ## Reference
 
 - `C-x` means press Control + x
@@ -55,6 +67,7 @@ PEM has similar concept of Eamcs's Yanking (Kill ring). It can be used like inst
 - `Del` or `C-d`: Delete one char and store it to Yank buffer. (So del, del, del, del.. then `C-y` can restore the deletion)
 - `C-y` : Yank (Paste the latest buffer)
 - `M-y` : Open Yank list
+- `C-c v` : Copy system clipboard to yank buffer.  It's useful when copy long data.
 
 In yank list,
 
@@ -81,7 +94,7 @@ In search mode,
 
 ### Jump history
 
-PEM has an unique concept called jump history. It records the cursor position when you jump (by searching, go to line, etc.). You can go back previous positions when you need.
+PEM has an unique concept called jump history. It records the cursor position when you jump (by searching, go to line, etc.). You can go back previous positions when you need. It acts like web browser's back and forward.
 
 - `M-;` : Jump history walking backward
 - `M-'` : Jump history walking forward
@@ -89,12 +102,39 @@ PEM has an unique concept called jump history. It records the cursor position wh
 
 ### Completion and symbol reference
 
-It has basic symbol completion, only available with Python mode. Python mode is activated when it opens with .py extension.
+It has basic symbol completion, only available with Python mode. Python mode is activated when it opens with .py extension. In markdown mode, `M-.` works as jumping to linked document.
 
 - `TAB` : Perform completion
-- `M-.` : Trying to find a definition of the symbol at the cursor. (Simply it will find "def " + symbol.
+- `M-.` : In Python mode, the command tries to find a definition of the symbol at the cursor. (Simply it will find "def " + symbol. In Markdown mode, jumping to the link. For example, if you press `M-.` on the link `[[pem_readme]]`, pem_readme will be opened.
 - `M-/` : Start search with the symbol at the cursor.
 
+## Loading file from other applications
+
+pem module has a list called `open_pending_list` and it is used to load files from other applications.
+
+```python
+import pem
+# This will open test.md in the existing PEM instance. Arduments are `[filename, line_number, column_number]`. line and column numbers are 1-based.
+pem.open_pending_list.append(['test.md',1,1])
+```
+
+## Customizing
+
+Pem has a config file, and this is located at /sd/lib/pem_keymap.py. 
+
+If you want to customize keymap or some settings, copy the file under /sd/py. /sd/py has a priority over /sd/lib.
+
+init_custom() is called at initialization. km stores pem_keymap_default module instance.
+
+Here is an example to change some key mapping
+
+```python
+def init_custom(km):
+  # remove Ctrl-f from right
+  km.map['right'] = [ b'\x1b[C' ]
+  # Change search shortcut to Ctrl-f
+  km.map['search'] = [  b'\x06' ]
+```
 
 ## Japanese input
 
