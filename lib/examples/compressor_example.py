@@ -1,16 +1,20 @@
 import audio
 import time
 import wav_loader
+import download_drumkit_uzu
+
 from pie import Pie, PieSampler, PieCompressor, PieRouter
 
 def main(vs, args):
     # Initialize audio
     audio.power(True)
+    if not download_drumkit_uzu.check(vs):
+      return
     
     # Load a drum loop or samples
     try:
         # We'll use the kick sample for testing peak reduction
-        kick, ch_kick = wav_loader.load_wav("/sd/data/samples/KMRBI_SJ_kick_one_shot_billington.wav")
+        kick, ch_kick = wav_loader.load_wav("/sd/data/uzu-drumkit/11_bd_mot4i.wav")
     except Exception as e:
         print(f"Warning: Sample not found {e}", file=vs)
         return
@@ -30,6 +34,7 @@ def main(vs, args):
                 # 1. No Compression
                 print("1. Playing without compression...", file=vs)
                 comp.set_params(gain=1.0, reduction=0.0)
+                comp.dev.active(True)
                 for _ in range(2):
                     s.play(0)
                     time.sleep(0.5)

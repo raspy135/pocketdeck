@@ -28,10 +28,10 @@ class hello_graphic():
     self.wt.frequency(0,440)
     self.current_tick = time.ticks_us()
     
-    self.ghost1 = xbmreader.read_xbmr("/sd/data/ghost1.xbmr")
+    self.ghost1 = xbmreader.read_xbmr("/sd/lib/data/ghost1.xbmr")
     self.ghost1 = xbmreader.scale(self.ghost1,2)
     
-    self.fireball = xbmreader.read_xbmr("/sd/data/fireball.xbmr")
+    self.fireball = xbmreader.read_xbmr("/sd/lib/data/fireball.xbmr")
     self.g_pos = [20, 100]
     self.g_force = [0,0]
     self.touch_ground = 0

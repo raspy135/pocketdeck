@@ -10,9 +10,6 @@ def main(vs, args):
   tracknum = 0
   folder_name = 'rasmus'
     
-  #audio.sample_rate(44100)
-  #wp = wav_play("/sd/data/Project_12.wav")
-  #wp = wav_play("/sd/data/tape3.wav")
   wp = wav_play.wav_play(20000)
   
   if len(args) >= 2:

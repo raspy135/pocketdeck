@@ -34,8 +34,8 @@ def main(vs, args):
     master.add(comp)
     comp.set_params(1.2, 2.0)
 
-    #frames = wv.load_wavetable(0, "/sd/data/square.wav", stride=2, max_frames=32, frame_size = 256)
-    frames = wv.load_wavetable(0, "/sd/data/guitar_wt.wav", stride=5, max_frames=32, frame_size = 256)
+    #frames = wv.load_wavetable(0, "/sd/lib/data/square.wav", stride=2, max_frames=32, frame_size = 256)
+    frames = wv.load_wavetable(0, "/sd/lib/data/guitar_wt.wav", stride=5, max_frames=32, frame_size = 256)
     print(f"{frames} frames", file=vs)
     wv.morph(0,0)
     for i in range(5):

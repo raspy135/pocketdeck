@@ -129,16 +129,18 @@ def main(vs, args_in):
             description='Sound recorder' )
   parser.add_argument('-s', '--sample_rate',action='store', default='24000', help='Sample rate')
   parser.add_argument('-l', '--length',action='store', default='3600', help='Length in second, you can also specify by minutes like 100m')
-  parser.add_argument('filename',default='/sd/work/rec.wav', help='Filename to record')
+  parser.add_argument('-c', '--channel',action='store', default='2', help='Channel')
+  parser.add_argument('-m', '--monitor',action='store_true', help='Input monitoring')
+  parser.add_argument('filename',default='/sd/work/rec.wav', nargs='?', help='Filename to record')
   
   args = parser.parse_args(args_in[1:])
 
   filename = args.filename
   
-  print("turn on input monitoring? y or n", file=vs)
-  answer = vs.read(1)
+  #print("turn on input monitoring? y or n", file=vs)
+  #answer = vs.read(1)
   monitoring = False
-  if answer == 'y':
+  if args.monitor:
     cc.set_input_mixer(15)
     monitoring = True
   else:
@@ -160,7 +162,7 @@ def main(vs, args_in):
   # Set one hour as maximum recording time
   
   length = int(args.length) if args.length[-1] != 'm' else int(args.length[:-1])*60
-  rec.record(filename, sample_rate * length)
+  rec.record(filename, sample_rate * length, int(args.channel))
   while(audio.stream_record()):
     pdeck.delay_tick(5)
     ret = vs.v.read_nb(1)

@@ -10,7 +10,7 @@ class hello_graphic():
     self.vs = vs
     self.v = vs.v
     
-    self.ghost1 = xbmreader.read("/sd/data/ghost1.xbm")
+    self.ghost1 = xbmreader.read("/sd/lib/data/ghost1.xbm")
     self.ghost1 = xbmreader.scale(self.ghost1,2)
     self.ghost_x = 20
 

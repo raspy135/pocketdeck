@@ -2,16 +2,20 @@ import audio
 import time
 import math
 import wav_loader
+import download_drumkit_uzu
 
 def main(vs, args):
   # Initialize audio
   audio.power(True)
+  if not download_drumkit_uzu.check(vs):
+    return
 
   # Load some samples
   try:
     # Assuming samples are in the same directory or relative to it
-    kick, ch_kick = wav_loader.load_wav("/sd/data/samples/KMRBI_SJ_kick_one_shot_billington.wav")
-    snare, ch_snare = wav_loader.load_wav('/sd/data/samples/MCS_snare_super_bright.wav')
+    kick, ch_kick = wav_loader.load_wav("/sd/data/uzu-drumkit/11_bd_mot4i.wav")
+
+    snare, ch_snare = wav_loader.load_wav('/sd/data/uzu-drumkit/11_sd_switchangel_3.wav')
   except Exception as e:
     # Fallback if samples not found
     print(f"Warning: Samples not found {e}", file=vs)
@@ -34,8 +38,9 @@ def main(vs, args):
         # This will filter everything already in the drums_router mix buffer
         with audio.filter() as lpf:
           lpf.set_type("lpf")
-          lpf.set_params(3000, 1.0)
+          lpf.set_params(4000, 1.0)
           drums_router.add(lpf)
+          lpf.active(True)
           #return
           
           print("Routing: Sampler -> Drums Router (aggregated) -> LPF Filter -> Master Router", file=vs)

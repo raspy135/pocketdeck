@@ -45,12 +45,104 @@
             "cpmv.py"
         ],
         [
+            "data/active.xbmr",
+            "data/active.xbmr"
+        ],
+        [
+            "data/block.xbmr",
+            "data/block.xbmr"
+        ],
+        [
+            "data/cat1.xbm",
+            "data/cat1.xbm"
+        ],
+        [
+            "data/cat2.xbm",
+            "data/cat2.xbm"
+        ],
+        [
+            "data/cat3.xbm",
+            "data/cat3.xbm"
+        ],
+        [
+            "data/cat4.xbm",
+            "data/cat4.xbm"
+        ],
+        [
+            "data/checked.xbmr",
+            "data/checked.xbmr"
+        ],
+        [
+            "data/fireball.xbmr",
+            "data/fireball.xbmr"
+        ],
+        [
+            "data/ghost1.xbm",
+            "data/ghost1.xbm"
+        ],
+        [
+            "data/ghost1.xbmr",
+            "data/ghost1.xbmr"
+        ],
+        [
+            "data/ghost2.xbm",
+            "data/ghost2.xbm"
+        ],
+        [
+            "data/guitar_wt.wav",
+            "data/guitar_wt.wav"
+        ],
+        [
+            "data/lofi_girl-studying.xbm",
+            "data/lofi_girl-studying.xbm"
+        ],
+        [
+            "data/nunomo_logo.xbmr",
+            "data/nunomo_logo.xbmr"
+        ],
+        [
+            "data/piano_a2.wav",
+            "data/piano_a2.wav"
+        ],
+        [
+            "data/response.xbmr",
+            "data/response.xbmr"
+        ],
+        [
+            "data/saw_wt.wav",
+            "data/saw_wt.wav"
+        ],
+        [
+            "data/speaker-icon-disabled.xbm",
+            "data/speaker-icon-disabled.xbm"
+        ],
+        [
+            "data/speaker-icon.xbm",
+            "data/speaker-icon.xbm"
+        ],
+        [
+            "data/square.wav",
+            "data/square.wav"
+        ],
+        [
+            "data/wifi-icon-disabled.xbm",
+            "data/wifi-icon-disabled.xbm"
+        ],
+        [
+            "data/wifi-icon.xbm",
+            "data/wifi-icon.xbm"
+        ],
+        [
             "datetime.mpy",
             "datetime.mpy"
         ],
         [
             "dic.py",
             "dic.py"
+        ],
+        [
+            "download_drumkit_uzu.py",
+            "download_drumkit_uzu.py"
         ],
         [
             "dsp_utils.py",
@@ -95,6 +187,10 @@
         [
             "examples/mixer_delay_example.py",
             "examples/mixer_delay_example.py"
+        ],
+        [
+            "examples/pattern_example.py",
+            "examples/pattern_example.py"
         ],
         [
             "examples/reverb_example.py",
@@ -189,10 +285,6 @@
             "pathlib.mpy"
         ],
         [
-            "pattern_example.py",
-            "pattern_example.py"
-        ],
-        [
             "pem.mpy",
             "pem.mpy"
         ],
@@ -275,6 +367,10 @@
         [
             "uping.py",
             "uping.py"
+        ],
+        [
+            "voicerecorder.py",
+            "voicerecorder.py"
         ],
         [
             "wav_play.py",

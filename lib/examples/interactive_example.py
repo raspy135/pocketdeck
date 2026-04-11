@@ -1,9 +1,13 @@
 import audio
+import download_drumkit_uzu
+
 from pie import Pie, PieWavetable, PieSampler, Pattern, PieRouter, PieCompressor
 from codec_config import codec_config
 import time
 
 def main(vs, args):
+    if not download_drumkit_uzu.check(vs):
+      return
     audio.sample_rate(24000)
     # 1. Initialize Pie and Wavetable
     # codec_config is handled by the base software
@@ -21,18 +25,18 @@ def main(vs, args):
         #return
         
         
-        synth.load_wavetable(0, "/sd/data/wavetable/Instruments/ESW Real - World Japanese Guitar.wav", stride=4, max_frames=16)
+        synth.load_wavetable(0, "/sd/lib/data/guitar_wt.wav", stride=4, max_frames=16, frame_size=256)
         synth.copy_table(1,0)
         synth.copy_table(2,0)
         synth.copy_table(3,0)
         for i in range(0,3):
-          synth.dev.volume(i,0.8)
+          synth.dev.volume(i,0.1)
           synth.dev.set_adsr(i,10,1300,0.05,400)
         
         print("Loading sampler instruments...", file=vs)
-        sampler.load_wav(0, "/sd/data/samples/KMRBI_SJ_kick_one_shot_billington.wav")
-        sampler.load_wav(1, '/sd/data/samples/MCS_snare_super_bright.wav')
-        sampler.load_wav(2, '/sd/data/samples/TS_HP_hats_crispy.wav')
+        sampler.load_wav(0, "/sd/data/uzu-drumkit/11_bd_mot4i.wav")
+        sampler.load_wav(1, '/sd/data/uzu-drumkit/11_sd_switchangel_3.wav')
+        sampler.load_wav(2, '/sd/data/uzu-drumkit/11_hh_mot4i.wav')
         print("Starting sequence...", file=vs)
 
         comp.detach()

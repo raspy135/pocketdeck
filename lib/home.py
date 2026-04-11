@@ -263,7 +263,7 @@ class setting():
     self.current_tick=0
     if not skiplogo:
       self.splash_count = 400
-      self.logo = xbmreader.read_xbmr("/sd/data/nunomo_logo.xbmr")
+      self.logo = xbmreader.read_xbmr("/sd/lib/data/nunomo_logo.xbmr")
     else:
       self.splash_count = 0
     self.boxes = []

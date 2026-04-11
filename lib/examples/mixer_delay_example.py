@@ -2,11 +2,15 @@ import pie
 import time
 import audio
 import wav_loader
+import download_drumkit_uzu
+
 from pie import Pie, PieSampler, PieMixer, PieEcho, PieRouter
 
 def main(vs, args):
   # Initialize audio
   audio.power(True)
+  if not download_drumkit_uzu.check(vs):
+    return
   
   print("Mixer & Echo Example: Panning and Echo Automation", file=vs)
 
@@ -21,14 +25,15 @@ def main(vs, args):
           master.add(echo)
           
           # Mock data for demonstration
-          kick, ch_kick = wav_loader.load_wav("/sd/data/samples/KMRBI_SJ_kick_one_shot_billington.wav")
-          snare, ch_snare = wav_loader.load_wav('/sd/data/samples/MCS_snare_super_bright.wav')
+          kick, ch_kick = wav_loader.load_wav("/sd/data/uzu-drumkit/11_bd_mot4i.wav")
+          snare, ch_snare = wav_loader.load_wav('/sd/data/uzu-drumkit/11_sd_switchangel_3.wav')
           sampler.load(0, kick, ch_kick)
           sampler.load(1, snare, ch_snare)
 
           # Configure effects
           echo.set_type("stereo") #stereo or ping_pong
           echo.set_params(time_ms=125, feedback=0.2)
+          echo.dev.active(True)
           
           # Create sequencer
           pie = Pie(bpm=120)
