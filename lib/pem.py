@@ -2257,7 +2257,8 @@ def main(vs, args_in):
           filename, linenum, colnum = first_line.split(',')
           linenum = int(linenum)
           colnum = int(colnum)
-
+      if not file_exists(filename):
+        filename = None
 
 
   try: 
