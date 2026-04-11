@@ -10,7 +10,7 @@ Pocket deck is designed for standalone use. You don't need PC for application de
 
 Internet connectivity allows you to ask questions to AI, sync with a PC for file transfer, copy and paste, screen casting, and cloud storage integration with Google Drive.
 
-![Product image](images/pocketdeck.jpg)
+![Product image](../images/pocketdeck.jpg)
 
 # Purchase
 
