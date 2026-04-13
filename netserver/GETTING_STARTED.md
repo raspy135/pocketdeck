@@ -1,50 +1,50 @@
-# Getting Started with Pocket Cast
+# Netserver (Pocket deck gateway)
 
-Pocket Cast is a web-based screencast viewer for your ESP32 Pocket Computer. It allows you to view the device's screen on your computer via a smooth, high-performance web interface.
+Pocket deck provides netserver app, which can be used for screencast, clipboard sharing and file sharing.
 
-## Prerequisites
+There are two type of clients available. One is web app with Python, and another one is iOS app.
+
+## Prerequisites for web
 
 1.  **Python 3.7+**: Make sure Python is installed on your system.
 2.  **Web Browser**: A modern browser like Chrome, Firefox, or Edge.
-3.  **ESP32 Device**: Your custom ESP32 pocket computer running the screencast server (listening on port 12022).
 
-## Installation
+## Starting Netserver
 
-1.  Install the required Python library for the proxy server:
-    ```bash
-    pip install websockets
-    ```
+You need to start Netserver on Pocket Deck. To start Netserver, execute `netserver` in command line. You need to connect WiFi before you start Netserver.
 
-## Running the Application
+```
+wifi
+(Some messages)
+netserver [password]
+```
+password is saved to /config/netserver_password.  If no password is passed, then the stored password is used.
 
+Note the IP address from the result of `wifi` command.
+
+## Web client
+
+### Installation
+
+```bash
+pip install websockets
+```
 ### 1. Start the Proxy Server
-The web browser cannot connect directly to the ESP32's raw TCP socket. We use a lightweight Python proxy to bridge the connection.
-
+The web app needs proxy python script running.
 Run the proxy script:
+
 ```bash
 python py/proxy.py
 ```
-*By default, this attempts to connect to an ESP32 at `192.168.11.99`. If your device has a different IP, specify it as an argument:*
-```bash
-python py/proxy.py 192.168.1.50
-```
 
 ### 2. Open the Web Interface
-Open the `web/index.html` file in your web browser. You can typically double-click the file, or run a simple HTTP server:
-```bash
-# Optional: Serve via HTTP
-cd web
-python -m http.server 8080
-# Then open http://localhost:8080 in your browser
-```
+Open the `web/index.html` file in your web browser. 
 
 ### 3. Connect
-Click the **Connect** button in the web interface. You should see your ESP32's screen mirrored in real-time!
 
-## Troubleshooting
+Input IP address of Pocket deck and password, then click the **Connect device** button in the web interface.
 
--   **Connection Failed**: Ensure your computer and the ESP32 are on the same Wi-Fi network.
--   **Static/Snow**: If you don't have the device handy, you can run the mock device simulator to test the interface:
-    ```bash
-    python py/mock_device.py
-    ```
+## iOS app
+
+iOS app has the same features as web client. Download 'pocket deck gateway' app from app store.
+

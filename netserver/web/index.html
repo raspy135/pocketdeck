@@ -1,49 +1,310 @@
 <!DOCTYPE html>
-<html lang="en">
+<html class="light" lang="en">
 
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pocket Deck Screencast</title>
-    <link rel="stylesheet" href="style.css">
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport" />
+    <title>Pocket Deck | The Gateway</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,200..800;1,6..72,200..800&family=Work+Sans:wght@300;400;500;600&family=Space+Grotesk:wght@300;400;500;700&display=swap"
+        rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
+        rel="stylesheet" />
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-tertiary-container": "#3c5966",
+                        "on-surface": "#383831",
+                        "primary-fixed": "#e5e2e1",
+                        "surface-dim": "#e4e3d7",
+                        "on-tertiary": "#ffffff",
+                        "on-surface-variant": "#65655c",
+                        "on-error-container": "#752121",
+                        "surface-container-lowest": "#ffffff",
+                        "on-tertiary-fixed": "#2a4753",
+                        "surface-bright": "#fffcf7",
+                        "on-primary-fixed-variant": "#5c5b5b",
+                        "outline-variant": "#babab0",
+                        "on-primary-fixed": "#403f3f",
+                        "surface-container": "#f6f4ec",
+                        "on-secondary": "#ffffff",
+                        "secondary-container": "#cbe8e3",
+                        "tertiary-container": "#ceedfd",
+                        "background": "#fffcf7",
+                        "error-dim": "#4e0309",
+                        "surface": "#fffcf7",
+                        "secondary-fixed": "#cbe8e3",
+                        "tertiary": "#4c6876",
+                        "primary": "#5f5e5e",
+                        "surface-container-highest": "#eae8de",
+                        "on-primary-container": "#525151",
+                        "surface-tint": "#5f5e5e",
+                        "primary-fixed-dim": "#d6d4d3",
+                        "on-background": "#383831",
+                        "primary-container": "#e5e2e1",
+                        "outline": "#818178",
+                        "on-error": "#ffffff",
+                        "error-container": "#fe8983",
+                        "on-secondary-fixed": "#2a4441",
+                        "tertiary-fixed-dim": "#c0dfee",
+                        "secondary": "#4f6966",
+                        "error": "#a64542",
+                        "secondary-fixed-dim": "#bddad5",
+                        "tertiary-dim": "#3f5c69",
+                        "primary-dim": "#535252",
+                        "inverse-on-surface": "#9e9d98",
+                        "on-secondary-fixed-variant": "#46605d",
+                        "inverse-primary": "#ffffff",
+                        "inverse-surface": "#0e0e0c",
+                        "surface-container-low": "#fcf9f3",
+                        "surface-variant": "#eae8de",
+                        "on-tertiary-fixed-variant": "#466370",
+                        "tertiary-fixed": "#ceedfd",
+                        "on-primary": "#faf7f6",
+                        "secondary-dim": "#435d5a",
+                        "on-secondary-container": "#3c5753",
+                        "surface-container-high": "#f0eee5",
+                        "success": "#34C759",
+                        "error": "#FF3B30",
+                        "outline": "#8E8E93"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "9999px",
+                        "ios": "10px",
+                        "ios-lg": "14px"
+                    },
+                    "fontFamily": {
+                        "headline": ["Newsreader"],
+                        "body": ["Work Sans"],
+                        "label": ["Space Grotesk"]
+                    }
+                },
+            },
+        }
+    </script>
+    <style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+
+        .e-ink-filter {
+            filter: grayscale(1) contrast(1.2);
+        }
+
+        body {
+            background-color: #f2f2f7;
+            /* iOS System Background */
+            color: #383831;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .ios-large-title {
+            transition: all 0.3s ease;
+        }
+
+        .nav-scrolled .ios-large-title {
+            opacity: 0;
+            transform: translateY(-10px);
+            height: 0;
+            margin-bottom: 0;
+            pointer-events: none;
+        }
+
+        .nav-scrolled .ios-compact-title {
+            opacity: 1;
+        }
+
+        .ios-compact-title {
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .ios-grouped-list-section {
+            background: #fffcf7;
+            border-radius: 10px;
+            margin: 0 16px 24px;
+            overflow: hidden;
+        }
+
+        .ios-list-item {
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 0.5px solid rgba(0, 0, 0, 0.1);
+        }
+
+        .ios-list-item:last-child {
+            border-bottom: none;
+        }
+
+        canvas {
+            width: 100%;
+            height: auto;
+            image-rendering: pixelated;
+        }
+    </style>
 </head>
 
-<body>
-    <div class="container">
-        <header>
-            <h1>Pocket Deck Screencast</h1>
-            <div class="status-bar">
-                <span id="status-indicator" class="status-dot"></span>
-                <span id="status-text">Disconnected</span>
+<body class="font-body selection:bg-secondary-container selection:text-on-secondary-container min-h-screen">
+    <!-- Sticky Header (Compact Title) -->
+    <header
+        class="fixed top-0 left-1/2 -translate-x-1/2 w-full max-w-[600px] z-50 bg-[#fffcf7]/80 dark:bg-[#1A1A1A]/80 backdrop-blur-xl border-b border-black/5"
+        id="sticky-header">
+        <div class="h-[44px] flex items-center justify-between px-4">
+            <div class="w-10"></div>
+            <h2 class="ios-compact-title font-headline font-bold text-[17px] text-on-surface">Pocket Deck Gateway
+            </h2>
+            <div class="w-10 flex justify-end">
+                <span id="status-indicator"
+                    class="status-dot w-2.5 h-2.5 rounded-full bg-outline transition-all duration-300"></span>
             </div>
-        </header>
+        </div>
+    </header>
 
-        <main>
-            <div class="canvas-wrapper">
-                <canvas id="screenCanvas" width="400" height="240"></canvas>
+    <main class="pt-[44px] pb-32 max-w-[600px] mx-auto">
+        <!-- Large Title Section -->
+        <div class="px-4 pt-4 pb-2 ios-large-title">
+            <h1 class="font-headline text-[34px] font-extrabold tracking-tight text-on-surface">Pocket Deck Gateway
+            </h1>
+        </div>
+
+        <!-- Live Viewport Section (iOS style Card) -->
+        <section class="px-4 mt-4">
+            <div class="bg-on-surface p-2 rounded-ios-lg shadow-sm">
+                <div
+                    class="aspect-[5/3] bg-[#000] rounded-ios relative overflow-hidden flex items-center justify-center">
+                    <canvas id="screenCanvas" width="400" height="240"></canvas>
+                    <div
+                        class="absolute inset-0 opacity-10 pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/paper-fibers.png')]">
+                    </div>
+                </div>
+            </div>
+            <div class="flex justify-between items-center px-2 mt-3">
+                <p class="font-label text-[10px] uppercase tracking-widest text-outline">Viewport Live Stream</p>
+                <p class="font-label text-[10px] uppercase tracking-widest text-outline"><span id="fpsCounter">0</span>
+                    FPS</p>
+            </div>
+        </section>
+
+        <!-- Deck Identification -->
+        <section class="px-4 mt-8 flex flex-col gap-3">
+            <div class="ios-grouped-list-section !mx-0 border border-black/5 divide-y divide-black/5">
+                <div class="p-4 bg-surface-container-low">
+                    <p class="font-label text-[9px] uppercase tracking-widest text-outline/60 mb-1">Device IP Address
+                    </p>
+                    <input type="text" id="deviceIp" value="192.168.11.99" placeholder="192.168.1.1"
+                        class="w-full bg-transparent border-none p-0 font-body text-[17px] focus:ring-0 placeholder:text-outline/40">
+                </div>
+                <div class="p-4 bg-surface-container-low">
+                    <p class="font-label text-[9px] uppercase tracking-widest text-outline/60 mb-1">Passkey</p>
+                    <input type="password" id="netPassword" placeholder="Required for protocol access"
+                        class="w-full bg-transparent border-none p-0 font-body text-[17px] focus:ring-0 placeholder:text-outline/40">
+                </div>
             </div>
 
-            <div class="controls">
-                <div class="button-group" style="display: flex; gap: 0.5rem;">
-                    <button id="connectBtn" class="btn primary">Connect</button>
-                    <button id="castBtn" class="btn secondary" disabled>Start Cast</button>
-                </div>
-                <div class="info">
-                    <span class="label">FPS:</span> <span id="fpsCounter">0</span>
-                </div>
-            </div>
+            <button id="connectBtn"
+                class="bg-primary text-on-primary h-[50px] rounded-full flex items-center justify-center gap-2 transition-active active:opacity-70">
+                <span class="font-headline font-bold text-[17px]">Connect To Device</span>
+                <span class="material-symbols-outlined text-[20px]" data-icon="link">link</span>
+            </button>
+            <button id="castBtn"
+                class="bg-surface-container-high text-on-surface h-[50px] rounded-full flex items-center justify-center gap-2 transition-active active:opacity-70 disabled:opacity-30"
+                disabled>
+                <span class="font-headline font-semibold text-[17px]">Enter Stream</span>
+                <span class="material-symbols-outlined text-[20px]" data-icon="input">input</span>
+            </button>
+        </section>
 
-            <div class="clipboard-section">
-                <h3 class="section-title">Clipboard</h3>
-                <div class="clipboard-controls">
-                    <button id="copyToDevBtn" class="btn secondary">Send to Device</button>
-                    <button id="pasteFromDevBtn" class="btn secondary">Get from Device</button>
+        <!-- Manuscript Sync (Clipboard) -->
+        <section class="mt-12">
+            <h3 class="px-8 font-label text-[13px] uppercase tracking-wider text-outline mb-2">Clipboard Sync</h3>
+            <div class="ios-grouped-list-section shadow-sm border border-black/5">
+                <div class="p-4 bg-surface-container-low border-b border-black/5">
+                    <p class="font-body text-[15px] text-on-surface-variant">Clipboard sync with the device.</p>
+                </div>
+                <div class="p-4 flex gap-3">
+                    <button id="copyToDevBtn"
+                        class="flex-1 bg-on-surface text-surface py-2.5 rounded-ios font-label text-[12px] uppercase tracking-widest active:opacity-80">
+                        Send to Deck
+                    </button>
+                    <button id="pasteFromDevBtn"
+                        class="flex-1 bg-surface-container-highest text-on-surface py-2.5 rounded-ios font-label text-[12px] uppercase tracking-widest border border-outline-variant/15 active:bg-surface-variant">
+                        Fetch
+                    </button>
                 </div>
             </div>
-        </main>
+        </section>
+
+        <!-- Current Buffer (File list) -->
+        <section>
+            <div class="flex justify-between items-center px-8 mb-2">
+                <h3 class="font-label text-[13px] uppercase tracking-wider text-outline">Files</h3>
+                <button id="refreshFilesBtn" class="material-symbols-outlined text-outline text-[18px]">refresh</button>
+            </div>
+            <div class="ios-grouped-list-section shadow-sm border border-black/5">
+                <ul id="fileList" class="divide-y divide-black/5">
+                    <!-- Dynamic entries injected here -->
+                    <div class="p-8 text-center opacity-30">
+                        <span class="material-symbols-outlined text-[40px] block mb-2">folder_open</span>
+                        <p class="font-label text-[10px] uppercase tracking-widest">No files</p>
+                    </div>
+                </ul>
+                <div class="p-4 bg-surface-container-high/50">
+                    <div class="mb-3 px-3 py-2 bg-surface-container-low rounded-ios border border-black/5">
+                        <p class="font-label text-[9px] uppercase tracking-widest text-outline/60 mb-1">Destination Path
+                        </p>
+                        <input type="text" id="uploadPath" value="/sd/work/" placeholder="/sd/work/"
+                            class="w-full bg-transparent border-none p-0 font-body text-[14px] focus:ring-0 placeholder:text-outline/30">
+                    </div>
+                    <input type="file" id="uploadInput" style="display: none;">
+                    <button id="uploadBtn" onclick="document.getElementById('uploadInput').click()"
+                        class="w-full py-2.5 rounded-ios border border-dashed border-outline/30 font-label text-[11px] uppercase tracking-widest text-outline hover:bg-black/5 transition-colors active:bg-black/10">
+                        Inject file
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Deck Status -->
+        <section class="px-4 mt-4">
+            <div class="bg-secondary-container/30 p-4 rounded-ios-lg flex items-center gap-4">
+                <div class="bg-secondary text-on-secondary w-10 h-10 rounded-ios flex items-center justify-center">
+                    <span class="material-symbols-outlined text-[20px]" data-icon="auto_awesome">auto_awesome</span>
+                </div>
+                <div>
+                    <p class="font-label text-[11px] uppercase tracking-widest text-on-secondary-container opacity-70">
+                        Engine State</p>
+                    <p id="status-text"
+                        class="font-headline font-bold text-[17px] text-on-secondary-container tracking-tight">Idle</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Background Decorative Texture -->
+    <div
+        class="fixed inset-0 -z-10 opacity-[0.03] pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/natural-paper.png')]">
     </div>
 
     <script src="app.js"></script>
+    <script>
+        window.addEventListener('scroll', () => {
+            const body = document.body;
+            if (window.scrollY > 20) {
+                body.classList.add('nav-scrolled');
+            } else {
+                body.classList.remove('nav-scrolled');
+            }
+        });
+    </script>
 </body>
 
 </html>
