@@ -106,7 +106,7 @@ function updateFileList(listStr) {
         fileList.innerHTML = '<div class="p-8 text-center opacity-30"><p class="font-label text-[10px] uppercase tracking-widest">No Active Manuscripts</p></div>';
         return;
     }
-    const files = listStr.split(',');
+    const files = listStr.split(',').reverse();
     files.forEach(file => {
         if (!file.trim()) return;
         const fullpath = file.trim();
@@ -191,7 +191,7 @@ function connect() {
                     updateFileList(msg.substring(10));
                 } else if (msg.startsWith("clipboard_data:")) {
                     navigator.clipboard.writeText(msg.substring(15));
-                    console.info("Clipboard synchronized");
+                    alert("Clipboard synchronized:" + msg.substring(15));
                 } else if (msg.startsWith("file_start:")) {
                     const parts = msg.split(':');
                     pendingFileDownload = parts[1];

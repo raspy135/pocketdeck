@@ -1,4 +1,4 @@
-# Netserver (Pocket deck gateway)
+# Netserver
 
 Pocket deck provides netserver app, which can be used for screencast, clipboard sharing and file sharing.
 
@@ -46,5 +46,5 @@ Input IP address of Pocket deck and password, then click the **Connect device** 
 
 ## iOS app
 
-iOS app has the same features as web client. Download 'pocket deck gateway' app from app store.
+iOS app has the same features as web client. Download 'pocket deck' app from app store.
 
