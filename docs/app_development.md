@@ -245,9 +245,10 @@ Callback function to be called for every frame update.
 
 - `get_key_state(key_code)` Get the state of a specific key. Key code is listed in [[hid_usage_keyboard.h]]
 
-- `get_tp_keys()` Get low-level touchpad keys state as bytes. 
+- `get_tp_keys()` Get low-level touchpad keys state as bytes:
+
 byte | bit | Description
------------------------
+---- | --- | ------------
 0 | 0-7 | Slider position, range is 0 to 40. It returns 0xFF if slider is not pressed.
 1 | 0-7 | Touchpad Y, range is 0 to 80. It returns 0xFF if touchpad is not pressed.
 2 | 0-7 | Touchpad X, range is 0 to 100. It returns 0xFF if touchpad is not pressed.
