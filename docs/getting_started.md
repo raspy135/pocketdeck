@@ -25,13 +25,13 @@ to launch another command line shell in screen 3.
 
 PEM editor key bindings are influenced by Emacs editor, the key bind is unique. See pem_readme.md for full information. Here is basic commands:
 
-`C-x` `C-c` : Quit
-`C-x` `C-f` : Open file
-`C-x` `C-s` : Save file
-`C-x`  `b` : Switch between files
-`C-x` `k` : Close the current file
-`C-k` : Delete to the end of the line and save it to yank buffer
-`C-y` : paste yank buffer
+- `C-x` `C-c` : Quit
+- `C-x` `C-f` : Open file
+- `C-x` `C-s` : Save file
+- `C-x`  `b` : Switch between files
+- `C-x` `k` : Close the current file
+- `C-k` : Delete to the end of the line and save it to yank buffer
+- `C-y` : paste yank buffer
 
 For example, Ctrl-x then Ctrl-f to open new file.
 To quit the editor, C-x followed by C-c.
