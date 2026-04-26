@@ -397,7 +397,7 @@ class InvaderGame:
   def _init_bgm(self):
     try:
       self.bgm = wav_play.wav_play(10000)
-      self.bgm.open('/sd/data/invader.wav')
+      self.bgm.open('/sd/lib/data/invader.wav')
       #self.bgm_playing = True
       #self.bgm.play()
     except Exception as e:
