@@ -381,6 +381,10 @@
             "sound.py"
         ],
         [
+            "speaker_test.py",
+            "speaker_test.py"
+        ],
+        [
             "stt.py",
             "stt.py"
         ],
@@ -403,6 +407,10 @@
         [
             "voicerecorder.py",
             "voicerecorder.py"
+        ],
+        [
+            "wav_loader.py",
+            "wav_loader.py"
         ],
         [
             "wav_play.py",
