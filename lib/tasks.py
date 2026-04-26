@@ -7,6 +7,16 @@ import esclib as elib
 import xbmreader
 import fontloader
 import pdeck_utils
+import os
+
+def file_exists(name):
+  if name == None:
+    return False
+  try:
+    os.stat(name)
+    return True
+  except OSError:
+    return False
 
 class tasks_card:
   def __init__(self, vs):
@@ -34,7 +44,9 @@ class tasks_card:
     group = ""
     current = None
     due_re = re.compile("(DUE|DEADLINE): <(.+)>")
-
+    if not file_exists(filename):
+      print(f"{filename} not found", file=self.vs)
+      return False
     with open(filename, "r") as f:
       for raw in f:
         line = raw.rstrip("\n")
@@ -111,6 +123,7 @@ class tasks_card:
     self.tasks = tasks
     while self.tasks[self.selected]['group_title']:
       self.selected += 1
+    return True
 
   def draw_icon(self, status, x,y, flip = False):
     v = self.vs.v
@@ -275,17 +288,14 @@ def main(vs, args):
 
   obj = tasks_card(vs)
   
-  obj.parse_tasks(filename)
-  
+  if obj.parse_tasks(filename):
+    v.print(el.erase_screen())
+    v.print(el.home())
+    v.print(el.display_mode(False))
 
-  v.print(el.erase_screen())
-  v.print(el.home())
-  #v.print(el.raw_mode(True))
-  v.print(el.display_mode(False))
-
-  v.callback(obj.update)
-  obj.loop()
-  v.callback(None)
+    v.callback(obj.update)
+    obj.loop()
+    v.callback(None)
 
   v.print(el.display_mode(True))
   #v.print(el.raw_mode(False))

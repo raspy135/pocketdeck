@@ -11,13 +11,14 @@ def main(vs, args_in):
 
   parser = argparse.ArgumentParser(
             description='Speech to Text' )
-  parser.add_argument('filename',nargs='?', action='store', default=None, help='File to read')
+  parser.add_argument('input',nargs='?', action='store', default=None, help='WAV File to read')
+  parser.add_argument('-o', '--output', action='store', help='Text file to write')
 
   args = parser.parse_args(args_in[1:])
 
-  if args.filename:
+  if args.input:
     print("Transcribing...", file=vs)
-    message = gpt.stt(args.filename)
+    message = gpt.stt(args.input)
     print(f'"{message}"\n The result copied to clipboard', file=vs)
     pdeck.clipboard_copy(message)
     return
@@ -32,7 +33,12 @@ def main(vs, args_in):
     gptlib.record_audio(vs, rec_file)
     print("Transcribing...", file=vs)
     message = gpt.stt(rec_file)
-    print(f'"{message}"\n The result copied to clipboard', file=vs)
-    pdeck.clipboard_copy(message)
+    if args.output:
+      with open(args.output,"w") as f:
+        f.write(message)
+        print(f'The result saved to {args.output}', file=vs)
+    else:
+      print(f'"{message}"\n The result copied to clipboard', file=vs)
+      pdeck.clipboard_copy(message)
     
 

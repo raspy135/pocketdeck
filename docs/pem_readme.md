@@ -66,8 +66,9 @@ PEM has similar concept of Eamcs's Yanking (Kill ring). It can be used like inst
 - `C-k` : Delete chars to the end of the line, and store it to Yank buffer.
 - `Del` or `C-d`: Delete one char and store it to Yank buffer. (So del, del, del, del.. then `C-y` can restore the deletion)
 - `C-y` : Yank (Paste the latest buffer)
+- `C-c v` : (This is an example of custom command) Copy system clipboard to yank buffer.  It's useful when copy long data.
+- `C-c d` : (This is an example of custom command) insert today's date
 - `M-y` : Open Yank list
-- `C-c v` : Copy system clipboard to yank buffer.  It's useful when copy long data.
 
 In yank list,
 

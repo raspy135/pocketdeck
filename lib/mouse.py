@@ -23,7 +23,6 @@ class mouse:
     self.limit_low = [0,0]
     self.limit_high = list(pdeck.get_screen_size())
     
-  @micropython.native
   def update(self):
     keys = self.v.get_tp_keys()
     if not keys:
@@ -40,6 +39,8 @@ class mouse:
     self.last_button = keys[3]
     
     touching = not (x == 255 or y == 255)
+    
+    self.active = touching or self.lbutton ==1 or self.rbutton == 1 or self.lclick == 1 or self.rclick == 1
     
     if not touching:
       if self.touched and self.timer < 8 and abs(self.mousebase[0] - self.point[0] < 10) and abs(self.mousebase[1] - self.point[1]) < 10:
@@ -63,20 +64,15 @@ class mouse:
       
       diff_x = x - self.lastpoint[0]
       diff_y = y - self.lastpoint[1]
-      #if abs(self.touchbase[0] - x) > 20 or abs(self.touchbase[1] - y) > 20:
-      #  diff_x = int(diff_x *1.5) #<< (abs(diff_x) >> 3)
-      #  diff_y = int(diff_y *1.5) #<< (abs(diff_y) >> 3)
-        
-      #if abs(diff_x+diff_y) < 1:
-      #  self.touchbase[0] = x
-      #  self.touchbase[1] = y
-      #  if self.timer > 15:
-      #    self.timer = 15
-      #  self.timer -= 2
-      #  if self.timer < 0:
-      #    self.timer = 0
+      speed = abs(diff_x) + abs(diff_y)
+      if speed > 2:
+        accel = 256 + (speed - 2) * 25
+        if accel > 768:
+          accel = 768
+        diff_x = (diff_x * accel) // 256
+        diff_y = (diff_y * accel) // 256
 
-      if abs(self.touchbase[0] - x) < 20 and abs(self.touchbase[1] - y) < 20 and self.timer < 4:
+      if abs(self.touchbase[0] - x) < 20 and abs(self.touchbase[1] - y) < 20 and self.timer < 10:
         diff_x = 0
         diff_y = 0
 
@@ -94,7 +90,7 @@ class mouse:
       self.lastpoint[0] = x
       self.lastpoint[1] = y
     
-  @micropython.native
+  #@micropython.native
   # Get the points of the mouse.
   # Return is (x, y, buttons)
   # button indicates:

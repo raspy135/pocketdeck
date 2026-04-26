@@ -106,10 +106,10 @@ class analog_clock:
     self.update_shifted_day()
     
     self.catimage = []
-    self.catimage.append(xbmreader.read("/sd/lib/data/cat1.xbm"))
-    self.catimage.append(xbmreader.read("/sd/lib/data/cat2.xbm"))
-    self.catimage.append(xbmreader.read("/sd/lib/data/cat3.xbm"))
-    self.catimage.append(xbmreader.read("/sd/lib/data/cat4.xbm"))
+    self.catimage.append(xbmreader.read_xbmr("/sd/lib/data/cat1.xbmr"))
+    self.catimage.append(xbmreader.read_xbmr("/sd/lib/data/cat2.xbmr"))
+    self.catimage.append(xbmreader.read_xbmr("/sd/lib/data/cat3.xbmr"))
+    self.catimage.append(xbmreader.read_xbmr("/sd/lib/data/cat4.xbmr"))
     self.cat_anm_goal = 0
     self.cat_anm_ct = 0
     self.cat_x = 0
@@ -129,6 +129,7 @@ class analog_clock:
         self.wavbuf_click[i] = int(math.sin(i*0.001)*3000)
     self.sampler.set_sample(0, self.wavbuf)
     self.sampler.set_sample(1, self.wavbuf_click)
+    self.op_second = None
       
   def wavplay_alarm(self):
     self.sampler.play(0)
@@ -159,7 +160,7 @@ class analog_clock:
     #self.draw_edge()
     self.update_timer()
     
-    if not e and self.cat_anm_ct >= 12 and not self.key_event and not self.kt.touched and self.last_second == self.second:
+    if False and not e and self.cat_anm_ct >= 12 and not self.key_event and not self.kt.touched and self.last_second == self.second:
 
       if self.message_life > 0:
         self.message_life -= 1
@@ -266,12 +267,12 @@ class analog_clock:
 
     if kt.touched:
       dial_distance = dial - kt.dial_base
-      if dial_distance > 80:
+      if dial_distance > 30:
         dial_distance = dial - (kt.dial_base + 160)
-      elif dial_distance < -80:
+      elif dial_distance < -30:
         dial_distance = (dial+160) - kt.dial_base
       last_minute = kt.minute
-      kt.minute += int(dial_distance / 20)
+      kt.minute += int(dial_distance / 10)
       if kt.minute < 0:
         kt.minute = 0
       if last_minute != kt.minute:
@@ -292,7 +293,7 @@ class analog_clock:
         image_index = 3 - (self.cat_anm_ct >> 3)
       self.cat_anm_ct += 1
     else:      
-      if random.randint(0,10) == 0:
+      if random.randint(0,50) == 0:
         self.cat_anm_goal = 3 - self.cat_anm_goal
         self.cat_anm_ct = 0
       
@@ -468,15 +469,39 @@ class analog_clock:
     self.draw_poly(angle, point_pair)
 
   def draw_secondhand(self):
-    h = self.second + self.micro * dc["1/1000000"]
+    if self.op_second == None:
+      self.op_second = self.second
+    speed = 0
+    if self.op_second - self.second > 30:
+      self.op_second -= 60
+    # preventing jumping when the app resumes
+    if abs(self.op_second - self.second) > 1.1:
+      self.op_second = self.second
+      
+    if self.op_second > self.second:
+      speed = (self.op_second - self.second) / 3
+      if speed < 0.03:
+        speed = 0
+        self.op_second = self.second
+      elif speed < 0.1: speed = 0.1
+      speed = - speed
+    if self.op_second < self.second:
+      speed = (self.second - self.op_second) / 1.3      
+      #print(f'{speed}')
+      if speed < 0.03:
+        speed = 0
+        self.op_second = self.second
+      elif speed < 0.4: speed = 0.4
+    self.op_second += speed
+
+    h = self.op_second + self.micro * 0.000001
+    
     angle = h * dc["pi * 2 / 60"]
     
     point_pair = ( \
       ( -3, 3 ), \
       ( 2,  3 ), \
       ( 0, -self.secondhand_size ))
-    #  ( -3, 3))
-      
     self.draw_poly(angle, point_pair)
     
   def draw_poly(self, angle, point_pair, color=0):
@@ -621,7 +646,6 @@ class analog_clock:
 
       if self.page == 'timer':
         if keys == b'q':
-          print('quit')
           break
         if keys == b'\x0d':
           self.wavplay_click()
@@ -699,10 +723,9 @@ el = elib.esclib()
 def main(vs, args):
   v = vs.v
   v.print(el.erase_screen())
-  v.print(el.display_mode(False))
   v.print(el.home())
+  v.print(el.display_mode(False))
 
-  v.unsubscribe_callback()
   sampler = audio.sampler(2)
   with sampler:
     clock = analog_clock(v, vs, sampler)

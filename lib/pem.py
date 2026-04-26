@@ -263,7 +263,7 @@ class editor:
           filename = '** New file **'
         filestat = f"{'*' if self.file.modified else '-'} L:{self.file_row+1}/{len(self.file.rows)} C:{self.file_col+1}"
 
-        max_filename_length = self.file.w - (len(filestat) + 5 + 2 + 2 + 1 + 1)
+        max_filename_length = self.file.w - (len(filestat) + 5 + 2 + 2 + 1 + 2)
         if len(filename) > max_filename_length:
           filename = filename[:max_filename_length]
         filestat = filename + " " + filestat
@@ -1332,7 +1332,6 @@ class editor_file:
     self.modified = False
     self.filename = filename
 
-
   def open(self, linenum = 0, colnum = 0):
     
     filename = self.filename
@@ -1347,6 +1346,8 @@ class editor_file:
     elif self.filename != None and self.filename[-3:] == ".py":
       self.mode = "py"
     if file_exists(filename):
+      if pdeck_enabled:
+        pdeck.shared_filelist(filename)
       try:
         with open(filename, "r") as f:
           for line in f:

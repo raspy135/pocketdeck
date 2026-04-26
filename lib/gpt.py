@@ -16,6 +16,15 @@ import re
 
 API_KEY_FILENAME = "/config/openai_api_key"
 
+def file_exists(name):
+  if name == None:
+    return False
+  try:
+    os.stat(name)
+    return True
+  except OSError:
+    return False
+
 class chatgpt_util:
   def __init__(self,vs):
     self.vs = vs
@@ -44,7 +53,7 @@ class chatgpt_util:
 
 
 
-  def make_json(self, message, references, images=None, model="gpt-5.2", instructions = None):
+  def make_json(self, message, references, images=None, model="gpt-5.5", instructions = None):
     content_items = []
     
     # Add text message
@@ -122,40 +131,98 @@ class chatgpt_util:
     return None
 
   def stt(self, filename):
-    """Transcribes audio using Whisper"""
+    """Transcribes audio using Whisper (Stream Upload)"""
     boundary = "----MicroPythonPdeckBoundary"
     try:
-      with open(filename, 'rb') as f:
-        content = f.read()
+      file_size = os.stat(filename)[6]
     except Exception as e:
-      print(f"STT Error reading file: {e}", file=self.vs)
+      print(f"STT Error reading file stat: {e}", file=self.vs)
       return None
     
-    body = (
+    header_bytes = (
         '--' + boundary + '\r\n' +
         'Content-Disposition: form-data; name="file"; filename="audio.wav"\r\n' +
         'Content-Type: audio/wav\r\n\r\n'
-    ).encode('utf-8') + content + (
+    ).encode('utf-8')
+    
+        #'Content-Disposition: form-data; name="model"\r\n\r\nwhisper-1\r\n' +
+    footer_bytes = (
         '\r\n--' + boundary + '\r\n' +
-        'Content-Disposition: form-data; name="model"\r\n\r\nwhisper-1\r\n' +
+        'Content-Disposition: form-data; name="model"\r\n\r\ngpt-4o-mini-transcribe\r\n' +
         '--' + boundary + '--\r\n'
     ).encode('utf-8')
     
-    headers = {
-        'Content-Type': 'multipart/form-data; boundary=' + boundary,
-        'Authorization': 'Bearer ' + self.api_key
-    }
-    
-    print("Uploading audio to STT...", file=self.vs)
-    res = requests.post(self.stt_url, headers=headers, data=body)
-    if res.status_code == 200:
-      text = res.json().get('text')
-      res.close()
-      return text
-    else:
-      print(f"STT Error: {res.status_code} {res.text}", file=self.vs)
-      res.close()
+    content_length = len(header_bytes) + file_size + len(footer_bytes)
+    print("Uploading audio to STT (streaming)...", file=self.vs)
+
+    import usocket
+    try:
+      import ussl as ssl
+    except ImportError:
+      import ssl
+
+    addr = usocket.getaddrinfo("api.openai.com", 443)[0][-1]
+    s = usocket.socket()
+    try:
+      s.connect(addr)
+      try:
+        s = ssl.wrap_socket(s, server_hostname="api.openai.com")
+      except TypeError:
+        s = ssl.wrap_socket(s)
+        
+      req_head = (
+          "POST /v1/audio/transcriptions HTTP/1.0\r\n"
+          "Host: api.openai.com\r\n"
+          "Connection: close\r\n"
+          f"Content-Type: multipart/form-data; boundary={boundary}\r\n"
+          f"Content-Length: {content_length}\r\n"
+          f"Authorization: Bearer {self.api_key}\r\n\r\n"
+      ).encode('utf-8')
+
+      s.write(req_head)
+      s.write(header_bytes)
+
+      buf = bytearray(16384)
+      with open(filename, 'rb') as f:
+        while True:
+          sz = f.readinto(buf)
+          if not sz:
+            break
+          s.write(memoryview(buf)[:sz])
+          
+      s.write(footer_bytes)
+
+      l = s.readline()
+      if not l:
+        print("STT Error: Empty response", file=self.vs)
+        return None
+        
+      status_code = int(l.split(None, 2)[1])
+      
+      while True:
+        line = s.readline()
+        if not line or line == b"\r\n":
+          break
+          
+      body_chunks = []
+      while True:
+        sz = s.readinto(buf)
+        if not sz:
+          break
+        body_chunks.append(bytes(memoryview(buf)[:sz]))
+      body = b"".join(body_chunks)
+
+      if status_code == 200:
+        return ujson.loads(body).get('text')
+      else:
+        print(f"STT Error: {status_code} {body.decode('utf-8')}", file=self.vs)
+        return None
+
+    except Exception as e:
+      print(f"STT Socket Error: {e}", file=self.vs)
       return None
+    finally:
+      s.close()
 
   def tts(self, text, filename, voice='alloy'):
     """Converts text to speech"""
@@ -288,7 +355,7 @@ def main(vs, args_in):
   parser.add_argument('-v', '--voice',action='store_true',help='Use voice mode (STT and TTS)')
   parser.add_argument('-vt', '--voice-type',action='store',default='coral',help='Voice type for TTS (alloy, coral, echo, fable, onyx, nova, shimmer)')
   parser.add_argument('content', nargs='*',help='Content to ask')
-  parser.add_argument('-q', nargs='+',help='Content to ask, use this when you want to specify content explicitly.')
+  parser.add_argument('-q', nargs='+',help='Content to ask, use this when you want to specify content explicitly. If you specify a filename, it uses file content as a main content.')
 
   args = parser.parse_args(args_in[1:])
 
@@ -316,7 +383,11 @@ def main(vs, args_in):
     if args.content:
       message += ' '.join(args.content)
     if args.q:
-      message += ' '.join(args.q)
+      if len(args.q) == 1 and file_exists(args.q[0]):
+        with open( args.q[0],"r") as f:
+          message = f.read()
+      else:
+        message += ' '.join(args.q)
   if len(message) == 0:
     return
 
@@ -388,6 +459,7 @@ def main(vs, args_in):
       return
     ctime = time.gmtime(time.time()-pu.timezone)
     filename = f"/sd/log/gptlog{ctime[1]:02}{ctime[2]:02}_{ctime[3]:02}{ctime[4]:02}"
+    pdeck.shared_filelist(filename)
     pdeck.clipboard_copy(filename)      
     with open(filename,"w") as f:
       f.write(message)

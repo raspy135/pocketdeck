@@ -205,9 +205,9 @@ command | summary
 `mkdir dir_name` | Create a directory
 `rmdir dir_name` | Delete a directory
 `cat file` | Print file contents
-`cd [dir]` | Change the working directory. Note that this is a global value shared between shells and applications. Applications such as the Pem editor do not know about the change.
+`cd [dir]` | Change the working directory. **Note** unlike other OSes, this is a global value shared between shells and applications. Sometimes it makes confusing result.
 `pwd` | Get the current working directory. The default working directory is `/sd/Documents`.
-`netserver` | Launch a network server to provide services. It provides screencasting and clipboard sharing. See `[[netserver/GETTING_STARTED]]` for details.
+`netserver [password]` | Launch a network server to provide services. It provides screencasting, clipboard and file sharing. See `[[../netserver/GETTING_STARTED]]` for details.
 `setuni` | Change the terminal font to a CJK Unicode font
 `setjpf` | Change the terminal font to Japanese. It is lighter than `setuni`
 
@@ -319,6 +319,18 @@ dic squeeze
 
 `gdrive src dst`
 
+### Reader
+
+`reader` is E-book reader. It remebers position per file. It also supports Japanese vertical layout.
+
+`reader [options] filename`
+
+- `-v` : Vertical layout, good for Japanese book.
+
+arrow keys : navigate
+touch pad : scroll
+buttom buttons : page up, page down
+`B` button : quit
 
 ### Zen chamber
 

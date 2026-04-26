@@ -1,4 +1,5 @@
 import os
+import mouse
 import sys
 import re
 import datetime
@@ -10,11 +11,22 @@ import pdeck_utils
 
 DAY_SEC = 60 * 60 * 24
 
+def file_exists(name):
+  if name == None:
+    return False
+  try:
+    os.stat(name)
+    return True
+  except OSError:
+    return False
+
 class graph_diary:
   def __init__(self, vs):
     self.vs = vs
     self.v = vs.v
-
+    self.reversed = 1
+    self.mouse = mouse.mouse(self.v)
+    self.last_mouse_active = False
     self.month_list = (
       "", "January", "Febrary", "March", "April",
       "May", "June", "July", "August", "September",
@@ -67,6 +79,8 @@ class graph_diary:
 
   def find_last_date(self, filename):
     curdate = None
+    if not file_exists(filename):
+      return False
     with open(filename, 'r') as file:
       for line in file:
         if not line.startswith('#'):
@@ -80,6 +94,7 @@ class graph_diary:
 
     if curdate:
       self.shifted_day = datetime.date(curdate.year, curdate.month, 1)
+    return True
 
   # ---------------------------
   # Parsing
@@ -122,14 +137,10 @@ class graph_diary:
   def _store_numeric(self, task_name, date_key, fval):
     if task_name not in self.n_task_list:
       self.n_task_list[task_name] = {}
-      self.n_task_list_keys.append(task_name)
-      if self.cur_n_task is None:
-        self.cur_n_task = task_name
 
     # special-case conversion for weight
     if task_name == 'Weight' and (not isinstance(fval, tuple)) and fval < 100:
       fval *= 2.204
-
     self.n_task_list[task_name][date_key] = fval
 
   def _store_text(self, task_name, date_key, result):
@@ -139,11 +150,29 @@ class graph_diary:
 
   def parse_file(self, filename):
     self._reset_state_for_parse(filename)
-
+    self.date_list = []
     curdate = None
     month_found = False
-
     with open(filename, 'r') as file:
+
+      #pass 1 get date
+      for line in file:
+        if len(line) == 0:
+          continue
+        # date header
+        if line.startswith('#'):
+          head = self.re_date.search(line)
+          if head:
+            date_string = head.group(2)
+            curdate = datetime.date.fromisoformat(date_string[0:10])
+            self.date_list.append(curdate)
+          continue
+      if len(self.date_list) > 1 and self.date_list[0] < self.date_list[1]:
+        #self.date_list.reverse()
+        self.reversed = -1
+      # pass 2
+      file.seek(0,0)
+      ct = -1
       for line in file:
         if len(line) == 0:
           continue
@@ -154,6 +183,7 @@ class graph_diary:
           if head:
             date_string = head.group(2)
             curdate = datetime.date.fromisoformat(date_string[0:10])
+            ct += 1
           continue
 
         if not curdate:
@@ -176,16 +206,23 @@ class graph_diary:
 
         result = match.group(1)
         task_name = match.group(2)
-
-        date_key = self._date_key(curdate)
-        fval = self._parse_value(result)
-
-        if fval is None:
-          self._store_text(task_name, date_key, result)
-        else:
-          self._store_numeric(task_name, date_key, fval)
-
+        result_list = result.split(",")
+        for i, result in enumerate(result_list):
+          #if i+ct > len(self.date_list):
+          #  continue
+          offset = i if self.reversed else -i
+          date_key = self._date_key(curdate - datetime.timedelta(days = offset))
+          #date_key = self._date_key(curdate)
+          fval = self._parse_value(result)
+          if fval is None:
+            self._store_text(task_name, date_key, result)
+          else:
+            self._store_numeric(task_name, date_key, fval)
+    #print(self.n_task_list)
     self.loaded = True
+    self.n_task_list_keys = sorted(self.n_task_list)
+    #print(self.n_task_list_keys)
+    #print(self.n_task_list)
 
   # ---------------------------
   # Rendering helpers
@@ -221,9 +258,14 @@ class graph_diary:
       self.v.finished()
       return
     
-    if (not e) and (self.loaded_updated or not self.loaded):
+    self.mouse.update()
+    self.point = self.mouse.get_point()
+
+    if (not e) and (self.loaded_updated or not self.loaded) and self.mouse.active == self.last_mouse_active and not self.mouse.active:
       self.v.finished()
       return
+
+    
 
     shifted_day = self.shifted_day
     d = time.mktime((shifted_day.year, shifted_day.month, 1, 0, 0, 0, 0, 0))
@@ -232,12 +274,20 @@ class graph_diary:
     self.draw_tasklist(d)
     self.draw_graph(d)
 
+    if self.mouse.active:
+      x = self.point[0] // 10 * 10 +85
+      self.v.draw_str(x+3,16,f"{self.point[0]//10 + 1}")
+      self.v.set_dither(10)
+      self.v.draw_line(x, 0, x, 240)
+      self.v.set_dither(16)
+    self.last_mouse_active = self.mouse.active
+
     if self.loaded:
       self.loaded_updated = True
     self.v.finished()
 
   def draw_graph(self, d):
-    if len(self.n_task_list) == 0 or self.cur_n_task is None:
+    if len(self.n_task_list) == 0: #or self.cur_n_task is None:
       return
 
     self.v.set_font("u8g2_font_profont15_mf")
@@ -251,10 +301,13 @@ class graph_diary:
     # pass 1: min/max per numeric task for this month
     while True:
       dt, _ = self.get_date_key(d, month)
+      #print(dt)
       if not dt:
         break
 
       for task in tl:
+        if self.cur_n_task is None:
+          self.cur_n_task = task
         if dt not in self.n_task_list[task]:
           continue
         entry = self.extract_entry(self.n_task_list[task][dt])
@@ -269,7 +322,6 @@ class graph_diary:
             mm_list[task][1] = entry
 
       d += DAY_SEC
-
     # pass 2: task tabs + plot
     size = 60
     last_point = [0, 0]
@@ -277,7 +329,8 @@ class graph_diary:
 
     # task tabs
     i = 0
-    for key in mm_list_keys:
+    #for key in mm_list_keys:
+    for key in tl:
       self.v.draw_str(self.groffset[0] + 20 + i * 90, self.groffset[1] + 14, key[:10])
       if self.cur_n_task == key:
         self.v.set_draw_color(2)
@@ -305,7 +358,7 @@ class graph_diary:
         else:
           y = size - int((entry['value'] - minmax[0]['value']) * (size / (minmax[1]['value'] - minmax[0]['value'])))
 
-        new_point = [self.groffset[0] + 70 + day * 10, self.groffset[1] + y + 20]
+        new_point = [self.groffset[0] + 70 + day * 10+4, self.groffset[1] + y + 20]
 
         if last_point[0] != 0:
           self.v.set_dither(8)
@@ -320,7 +373,6 @@ class graph_diary:
   def draw_tasklist(self, d):
     self.v.set_font("u8g2_font_profont15_mf")
     tl = sorted(self.task_list)
-
     for i, task in enumerate(tl):
       self.v.draw_str(self.goffset[0] + 3, self.goffset[1] + i * 16 + 40 + 14, task[:10])
 
@@ -438,20 +490,22 @@ def main(vs, args):
   el = elib.esclib()
   obj = graph_diary(vs)
 
-  v.print(el.erase_screen())
-  v.print(el.home())
-  v.print(el.display_mode(False))
+  if obj.find_last_date(org_filename):
 
-  obj.find_last_date(org_filename)
-  if obj.shifted_day is None:
-    # fallback: current month if file had no date header
-    obj.shifted_day = datetime.date(obj.year, obj.month, 1)
+    v.print(el.erase_screen())
+    v.print(el.home())
+    v.print(el.display_mode(False))
 
-  obj.parse_file(org_filename)
+    if obj.shifted_day is None:
+      # fallback: current month if file had no date header
+      obj.shifted_day = datetime.date(obj.year, obj.month, 1)
 
-  v.callback(obj.update)
-  obj.keyevent_loop()
+    obj.parse_file(org_filename)
 
+    v.callback(obj.update)
+    obj.keyevent_loop()
+  else:
+    print(f"{org_filename} was not found", file=vs)
   v.callback(None)
   v.print(el.display_mode(True))
 

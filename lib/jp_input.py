@@ -2,6 +2,7 @@ import network
 import socket
 import json
 import esclib as elib
+import pdeck
 
 ROMAJI_TABLE = {
     "a":"あ","i":"い","u":"う","e":"え","o":"お",
@@ -183,7 +184,8 @@ def get_henkan_result(result, word_index, color = True, space = True):
         out += '[' + el.set_font_color(7) + word[1][0] + el.set_font_color(0) + ']'
       else:
         if space:
-          out += '[' + word[1][0] + el.set_font_color(0) + ']'
+          #out += '[' + word[1][0] + el.set_font_color(0) + ']'
+          out += '[' + word[1][0] + ']'
         else:
           out += word[1][0]
       #out += '[' + word[1][0] + ']' 
@@ -266,10 +268,7 @@ el = elib.esclib()
 def get_utf8width(s):
   total = 0
   for ch in s:
-    if ord(ch) > 0x80:
-      total += 2
-    else:
-      total += 1
+    total += pdeck.get_utf8_width(ch)
   return total
 
 

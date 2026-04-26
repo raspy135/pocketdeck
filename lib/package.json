@@ -57,16 +57,32 @@
             "data/cat1.xbm"
         ],
         [
+            "data/cat1.xbmr",
+            "data/cat1.xbmr"
+        ],
+        [
             "data/cat2.xbm",
             "data/cat2.xbm"
+        ],
+        [
+            "data/cat2.xbmr",
+            "data/cat2.xbmr"
         ],
         [
             "data/cat3.xbm",
             "data/cat3.xbm"
         ],
         [
+            "data/cat3.xbmr",
+            "data/cat3.xbmr"
+        ],
+        [
             "data/cat4.xbm",
             "data/cat4.xbm"
+        ],
+        [
+            "data/cat4.xbmr",
+            "data/cat4.xbmr"
         ],
         [
             "data/checked.xbmr",
@@ -91,6 +107,10 @@
         [
             "data/guitar_wt.wav",
             "data/guitar_wt.wav"
+        ],
+        [
+            "data/invader.wav",
+            "data/invader.wav"
         ],
         [
             "data/lofi_girl-studying.xbm",
@@ -233,6 +253,10 @@
             "imagelib.py"
         ],
         [
+            "invader.py",
+            "invader.py"
+        ],
+        [
             "journal.py",
             "journal.py"
         ],
@@ -281,6 +305,10 @@
             "ntptime.mpy"
         ],
         [
+            "overlay.py",
+            "overlay.py"
+        ],
+        [
             "pathlib.mpy",
             "pathlib.mpy"
         ],
@@ -323,6 +351,10 @@
         [
             "re_findall.py",
             "re_findall.py"
+        ],
+        [
+            "reader.py",
+            "reader.py"
         ],
         [
             "recorder.py",

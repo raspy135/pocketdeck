@@ -138,9 +138,9 @@ class codec_config:
       self.ic.writeto_mem(self.address, 0x33, b'\x00')
     else:
       # Enable Microphone (In 2)
-      self.ic.writeto_mem(self.address, 0x34, b'\x20')
-      self.ic.writeto_mem(self.address, 0x37, b'\x20')
-      self.ic.writeto_mem(self.address, 0x33, b'\x50')
+      self.ic.writeto_mem(self.address, 0x34, b'\x30')
+      self.ic.writeto_mem(self.address, 0x37, b'\x30')
+      self.ic.writeto_mem(self.address, 0x33, b'\x00')
       
     self.ic.writeto_mem(self.address, 0x0, b'\x00')
 

@@ -20,10 +20,10 @@ class Box:
     self.w = random.randint(10,60)
     self.h = random.randint(10,60)
     self.r = 0
-    self.off_x = random.randint(40,380)
-    self.off_y = random.randint(40,220)
+    self.off_x = random.randint(-40,380)
+    self.off_y = random.randint(-40,220)
     self.dither = random.randint(1,16)
-    self.rspeed = random.randint(-300,300) / 20000.0
+    self.rspeed = random.randint(-400,400) / 20000.0
     self.points = array.array('h', bytearray(2*8))
 
 class utest():
@@ -64,7 +64,7 @@ class utest():
     num_p = len(points) >> 1
     self.rotate_pos_s16(points, num_p, angle)
       
-  @micropython.native
+  #@micropython.native
   def update(self,e):
     if not self.v.active:
       self.v.finished()

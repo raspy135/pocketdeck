@@ -14,6 +14,7 @@ journal [filename]
 `r`: Reload chart
 Up and Down: Move to previous or next month
 Left or Right: Change graph
+mouse : Show date indicator
 'q': Quit
 
 ## Markdown Syntax
@@ -40,13 +41,16 @@ You can write anything here.
 - [169] Weight
 - [7:40] Wake Up
 
-One journal file has multiple entries in one file.
 ```
+
+The script expects One journal file has multiple entries.
 
 ### Date
 
 Header with date recognizes as a journal entry.
 The date format is <yyyy-mm-dd>. `analog_clock` has a feature to copy date to clipboard.
+
+Date order can be both (Recent entry is the top of the file, or the last of the file)
 
 ### Achievement chart
 
@@ -55,6 +59,13 @@ When you write a list with a checkbox, it appears as an Achievement chart. For e
 ```
   - [X] Running
 ```
+
+Optionally you can fill multiple entries for past dates. The following example fills today and last two days.
+
+```
+ - [X,X,X] gym
+```
+
 
 ### Graph
 

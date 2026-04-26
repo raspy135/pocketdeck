@@ -123,11 +123,13 @@ class MusicGUI:
 
   def next_track(self):
     ret = self.menu_ui.move_cursor(1)
-    self.play_selected()
+    if ret:
+      self.play_selected()
 
   def prev_track(self):
     ret = self.menu_ui.move_cursor(-1)
-    self.play_selected()
+    if ret:
+      self.play_selected()
 
 
   def draw_header(self):
@@ -288,7 +290,7 @@ class MusicGUI:
         # end reached
         self.playing = False
         if self.menu_ui.depth == 1:
-          if self.menu_ui.get_cursor_pos() < self.menu_ui.get_current_list_len():
+          if self.menu_ui.get_cursor_pos() < self.menu_ui.get_current_list_len()-1:
             self.menu_ui.move_cursor(1)
             self.play_selected()
 

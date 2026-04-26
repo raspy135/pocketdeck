@@ -63,7 +63,7 @@ class wav_play:
     print(f"headerdata = {str(self.h_chunkIDdata)}, size={self.h_data_chunkSize}")
 
 
-  @micropython.native
+  #@micropython.native
   def send_callback(self, index):
     #print(f"index {index} , {len(self.buf[index])}")
     num_try = 2

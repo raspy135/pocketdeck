@@ -4,6 +4,7 @@ ext_keys = [ b'\x18',b'\x03' ]
 
 custom_map = {
   'dic' : [ b'\x03r' ],
+  'today' : [ b'\x03d' ],
 }
 
 map = {
