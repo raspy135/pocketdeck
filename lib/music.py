@@ -28,7 +28,7 @@ class MusicGUI:
     #self.mode = "albums"  # "albums" or "tracks"
 
     # Playback
-    self.wp = wav_play.wav_play(20000)  # same as ref 2
+    self.wp = wav_play.wav_play(80000)  # same as ref 2
     self.playing = False
     self.paused = False
 
