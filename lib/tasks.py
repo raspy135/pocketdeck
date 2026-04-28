@@ -179,6 +179,16 @@ class tasks_card:
             due = True
           else:
             num_loop = t['due'] // 24
+          while num_loop >=28:
+            v.draw_box(x,y-25,20,10)
+            num_loop -= 28
+            x+=24
+          
+          while num_loop >=7:
+            v.draw_box(x,y-20,10,5)
+            num_loop -= 7
+            x+=16
+          
           while num_loop > 0:
             v.draw_disc(x,y-20,4,0xf)
             num_loop -= 1
