@@ -15,6 +15,8 @@ open_pending_list= []
 try:
   import pem_keymap as custom_keymap
   custom_keymap.init_custom(km)
+  import pem_extra
+  pem_extra.init_custom(km)
 except Exception as e:
   print(e)
   pass

@@ -177,6 +177,10 @@
             "examples/compressor_example.py"
         ],
         [
+            "examples/cube_test.py",
+            "examples/cube_test.py"
+        ],
+        [
             "examples/dither_test.py",
             "examples/dither_test.py"
         ],
@@ -219,6 +223,14 @@
         [
             "examples/routing_example.py",
             "examples/routing_example.py"
+        ],
+        [
+            "examples/sphere_test.py",
+            "examples/sphere_test.py"
+        ],
+        [
+            "examples/square_test.py",
+            "examples/square_test.py"
         ],
         [
             "examples/techno_example.py",
@@ -319,6 +331,10 @@
         [
             "pem.py",
             "pem.py"
+        ],
+        [
+            "pem_extra.py",
+            "pem_extra.py"
         ],
         [
             "pem_keymap.py",

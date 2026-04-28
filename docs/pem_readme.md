@@ -67,7 +67,6 @@ PEM has similar concept of Eamcs's Yanking (Kill ring). It can be used like inst
 - `Del` or `C-d`: Delete one char and store it to Yank buffer. (So del, del, del, del.. then `C-y` can restore the deletion)
 - `C-y` : Yank (Paste the latest buffer)
 - `C-c v` : (This is an example of custom command) Copy system clipboard to yank buffer.  It's useful when copy long data.
-- `C-c d` : (This is an example of custom command) insert today's date
 - `M-y` : Open Yank list
 
 In yank list,
@@ -108,6 +107,12 @@ It has basic symbol completion, only available with Python mode. Python mode is 
 - `TAB` : Perform completion
 - `M-.` : In Python mode, the command tries to find a definition of the symbol at the cursor. (Simply it will find "def " + symbol. In Markdown mode, jumping to the link. For example, if you press `M-.` on the link `[[pem_readme]]`, pem_readme will be opened.
 - `M-/` : Start search with the symbol at the cursor.
+
+### Miscellaneous commands
+
+- `C-c d` : (This is an example of custom command) insert today's date
+- `C-c l` : Toggle checkbox . Format is `[ ]`.
+
 
 ## Loading file from other applications
 

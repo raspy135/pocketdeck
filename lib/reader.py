@@ -149,6 +149,7 @@ class Reader:
       self.line_height = 25
       self.margin_x = 5
     elif font == 'uni':
+      self.pre=20
       fontname = 'unifont_large'
       fontloader.load(fontname)
       self.font = fontloader.font_list[fontname]
@@ -178,8 +179,8 @@ class Reader:
     self.status = ""
     self.status_life = 0
 
-    self.raw_text = ""
-    self.lines = []
+    #self.raw_text = ""
+    #self.lines = []
     self.wrapped_lines = []
     self.total_height = 0
     self.current_path = None
@@ -201,14 +202,14 @@ class Reader:
   def load_file(self, path):
     #print(path)
     self.current_key = self._state_key(path)
-    self.raw_text = _read_text_file(path)
+    raw_text = _read_text_file(path)
 
     self.v.set_font(self.font)
 
     max_width = self.screen_w - self.margin_x * 2
-    self.lines = _split_lines(self.raw_text)
+    lines = _split_lines(raw_text)
     self.wrapped_lines = []
-    for line in self.lines:
+    for line in lines:
       self.wrapped_lines.extend(_wrap_line(self.v, line, 16, max_width, self.vertical, self.pre, self.fontname))
 
     self.total_height = len(self.wrapped_lines) * self.line_height

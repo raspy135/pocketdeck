@@ -397,7 +397,7 @@ class InvaderGame:
   def _init_bgm(self):
     try:
       self.bgm = wav_play.wav_play(10000)
-      self.bgm.open('/sd/lib/data/invader.wav')
+      self.bgm.open('/sd/data/invader.wav')
       #self.bgm_playing = True
       #self.bgm.play()
     except Exception as e:
@@ -1085,9 +1085,7 @@ class InvaderGame:
       self.v.set_font("u8g2_font_profont29_mf")
       self.v.draw_str(72, 90, "PD INVADeR")
       self.v.set_font("u8g2_font_profont15_mf")
-      self.v.draw_str(74, 120, "A: start   L Buttom: quit")
-      self.v.draw_str(22, 140, "Move with left/right arrows, shoot with A")
-      self.v.draw_str(16, 164, "Item drops upgrade ship firepower")
+      self.v.draw_str(74, 120, "R bottom: start   L bottom: quit")
     elif self.state == "gameover":
       self.v.set_dither(16)
       self.v.set_font("u8g2_font_profont29_mf")
