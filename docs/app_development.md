@@ -34,7 +34,7 @@ def main(vs, args):
   print("Hello Pocket deck", file=vs)
 ```
 
-`vs` is vscreen_stream object for the app, and `args` are command arguments passed to the app.
+`vs` is vscreen_stream object for the app, and `args` are command arguments passed to the app. args[0] is always the command name itself.
 
 Once you finished editing, save the file.
 
@@ -120,7 +120,7 @@ Usually it will be 1(0 based number) because command shell is always running on 
 
 - `init()`  Internal use, do not call.
 
-- `led(led_index, brightness)` Light up LED. led_index 1,2,3 can be used for user applications. brightness is 0 to 254.
+- `led(led_index, brightness)` Light up LED. led_index 1,2,3,4 can be used for user applications. brightness is 0 to 254.
 
 - `rtc(tuple)` Set or get built-in RTC time. Tuple format is (year, month, day, weekday, hour, minute, second). Normally the date and time will be synchronized when you connect to Internet.
 
@@ -144,7 +144,7 @@ Normally you can get vscreen object via vscreen_stream
 
 ```python
 def main(vs, args):
-	v = vs.v #v is vscreen object
+	v = vs.v #v is vscreen object, don't get confused, vs is vscrreen_strem object.
 ```
 
 Or 
@@ -258,7 +258,7 @@ Callback function to be called for every frame update.
 
 - `send_key_event(key, modifier, event_type)` Send keyboard event.
 
-- `read_nb(max_bytes)` Read up to `max_bytes` from keyboard input. Returns tuple `(bytes_read, data)`. This is non-blocking function. Special keys are recorded as escape sequence. For example, Up arrow key is b'\x1b[A'.
+- `read_nb(max_bytes)` Read up to `max_bytes` from keyboard input. Returns tuple `(bytes_read, data)`. Return data type is string. If you want to convert it to bytes, use `encode('ascii')`. This is non-blocking function. Special keys are recorded as escape sequence. For example, Up arrow key is b'\x1b[A'.
 
 - `poll()` Check if there's input available. Returns `True` if data is available.
 
@@ -399,6 +399,4 @@ See 3D examples under `/sd/lib/examples/`.
 
 esclib module is a small utility to generate basic escape sequences.
 
-## misc_utils module
 
-misc_utils module is a small utility to support some functions. Currently it only supports input().

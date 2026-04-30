@@ -171,6 +171,9 @@ Press the button twice, like a double click, to shut down the device.
 - `/sd/lib` : Built Python applications
 - `/sd/lib/examples` : Python application examples
 - `/sd/py` : Python application folder for user apps
+- `/sd/work` : A folder for temporarily files.
+- `/sd/music` : A folder to store music
+
 
 ## Getting started
 
@@ -199,7 +202,7 @@ Here are some basic commands written by Python.
 
 command | summary
 --------|---------
-`ls [file]` | List files
+`ls [file]` | List files. `-l` will show more information such as file size and date.
 `cp src dst` | Copy a file
 `mv src dst` | Move a file
 `mkdir dir_name` | Create a directory
@@ -210,7 +213,7 @@ command | summary
 `netserver [password]` | Launch a network server to provide services. It provides screencasting, clipboard and file sharing. See `[[../netserver/GETTING_STARTED]]` for details.
 `setuni` | Change the terminal font to a CJK Unicode font
 `setjpf` | Change the terminal font to Japanese. It is lighter than `setuni`
-
+`grep [query] [path]` | Grep query under path. `-r` enables recursive search. `-e` enables regex search. `-n` adds line numbers. `-i` ignore cases. `-l` shows filenames only.
 
 ## Basic applications
 

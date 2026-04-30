@@ -1,0 +1,53 @@
+{
+    "urls": [
+        [
+            "README.md",
+            "README.md"
+        ],
+        [
+            "app_development.md",
+            "app_development.md"
+        ],
+        [
+            "audio_module.md",
+            "audio_module.md"
+        ],
+        [
+            "getting_started.md",
+            "getting_started.md"
+        ],
+        [
+            "gpt_output_rules.md",
+            "gpt_output_rules.md"
+        ],
+        [
+            "hid_usage_keyboard.h",
+            "hid_usage_keyboard.h"
+        ],
+        [
+            "journal_readme.md",
+            "journal_readme.md"
+        ],
+        [
+            "music_readme.md",
+            "music_readme.md"
+        ],
+        [
+            "pem_readme.md",
+            "pem_readme.md"
+        ],
+        [
+            "pie.md",
+            "pie.md"
+        ],
+        [
+            "ssh_scp_readme.md",
+            "ssh_scp_readme.md"
+        ],
+        [
+            "tasks_readme.md",
+            "tasks_readme.md"
+        ]
+    ],
+    "version": "1.0"
+}

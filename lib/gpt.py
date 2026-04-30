@@ -345,6 +345,7 @@ def main(vs, args_in):
   #vs = pu.vscreen_stream()
   parser = argparse.ArgumentParser(
             description='ChatGPT query' )
+  parser.add_argument('-a', '--agent', action='store_true', help='Enable Agent Mode')
   parser.add_argument('-n', '--nosave',action='store_true',help='do not save the result')
   parser.add_argument('-nf', '--no-format',action='store_true',help='do not format text (No bold)')
   parser.add_argument('-c', '--clipboard', action='store_true', help='use clipboard as reference text')
@@ -395,6 +396,37 @@ def main(vs, args_in):
   message = message + ex1
 
   references = []
+  
+  if args.agent:
+    idx = 0
+    while True:
+        start = message.find('[[', idx)
+        if start == -1:
+            break
+        end = message.find(']]', start)
+        if end == -1:
+            break
+        match = message[start+2:end]
+        idx = end + 2
+        if file_exists(match):
+            try:
+                with open(match, 'r') as f:
+                    references.append("---- " + match + " ----\n" + f.read())
+            except Exception as e:
+                print(f"Agent Mode: Error reading {match}: {e}", file=vs)
+        else:
+            print(f"Agent Mode: File {match} not found", file=vs)
+            
+    for auto_file in ["/sd/lib/data/agent_mode.md", "/sd/Documents/pd/README.md"]:
+        if file_exists(auto_file):
+            try:
+                with open(auto_file, 'r') as f:
+                    references.append("---- " + auto_file + " ----\n" + f.read())
+            except Exception:
+                pass
+                
+    message += "\n\nGenerate codeblocks by following rules in agent_mode.md. You can use `python:filename`, `python:execute` and `iterate` special code blocks as needed."
+
   if args.file:
     files = args.file
     for file in files:
@@ -457,7 +489,7 @@ def main(vs, args_in):
 
     if args.nosave:
       return
-    ctime = time.gmtime(time.time()-pu.timezone)
+    ctime = time.gmtime(time.time()+pu.timezone*60*15)
     filename = f"/sd/log/gptlog{ctime[1]:02}{ctime[2]:02}_{ctime[3]:02}{ctime[4]:02}"
     pdeck.shared_filelist(filename)
     pdeck.clipboard_copy(filename)      
@@ -468,4 +500,64 @@ def main(vs, args_in):
     
     print(f"Saved to {filename} and the filename copied to clipboard", file = vs)
       
-  
+  if args.agent:
+    idx = 0
+    while True:
+      start = raw_response.find("```", idx)
+      if start == -1:
+        break
+      end = raw_response.find("```", start + 3)
+      if end == -1:
+        break
+        
+      block = raw_response[start+3:end]
+      idx = end + 3
+      
+      first_nl = block.find('\n')
+      if first_nl == -1:
+        continue
+        
+      lang_tag = block[:first_nl].strip()
+      code = block[first_nl+1:]
+      
+      if lang_tag.startswith("python:") and lang_tag != "python:execute":
+        out_filename = lang_tag.split(":", 1)[1].strip()
+        print(f"{el.set_font_color(1)}Agent: Saving to {out_filename}{el.reset_font_color()}", file=vs)
+        
+        if file_exists(out_filename):
+          try:
+            os.stat("/sd/backup")
+          except OSError:
+            try:
+              os.mkdir("/sd/backup")
+            except:
+              pass
+          base = out_filename.split("/")[-1]
+          ctime = time.gmtime(time.time()+pu.timezone*60*15)
+          backup_name = f"/sd/backup/{base}_{ctime[1]:02}{ctime[2]:02}_{ctime[3]:02}{ctime[4]:02}"
+          try:
+            os.rename(out_filename, backup_name)
+            print(f"{el.set_font_color(1)}Agent: Backing up original file to {backup_name}{el.reset_font_color()}", file=vs)
+          except:
+            pass
+            
+        try:
+          with open(out_filename, "w") as f:
+            f.write(code)
+        except Exception as e:
+          print(f"{el.set_font_color(1)}Agent: Failed to write {out_filename}: {e}{el.reset_font_color()}", file=vs)
+          
+      elif lang_tag == "python:execute":
+        print(f"{el.set_font_color(1)}Agent: Executing python block...{el.reset_font_color()}", file=vs)
+        try:
+          exec_locals = {'vs': vs, 'pdeck': pdeck}
+          exec(code, globals(), exec_locals)
+        except Exception as e:
+          print(f"{el.set_font_color(1)}Agent: Execution Error: {e}{el.reset_font_color()}", file=vs)
+          
+      elif lang_tag == "iterate":
+        print(  f"{el.set_font_color(1)}Agent: Iterating...{el.reset_font_color()}", file=vs)
+        iter_args = ['gpt'] + code.split()
+        print(f"{el.set_font_color(1)}Agent: Calling main with {iter_args}{el.reset_font_color()}", file=vs)
+        main(vs, iter_args)
+
