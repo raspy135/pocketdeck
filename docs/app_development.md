@@ -140,7 +140,8 @@ vscreen represents virtual screen(0-10). All graphics APIs are implemented in th
 
 #### Creating a vscreen object
 
-Normally you can get vscreen object via vscreen_stream
+Normally you can get vscreen object via vscreen_stream, passed to main(). 
+`vs` is not vscreen object. `vs.v` is a vscreen object.
 
 ```python
 def main(vs, args):
