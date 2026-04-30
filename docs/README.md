@@ -1,4 +1,4 @@
-# Pocket Deck overview
+    # Pocket Deck overview
 
 Pocket Deck is a tiny, customizable computer designed for everyday productivity and creative tinkering. It's great for fast text writing, personal organization, and small life-improvement utilities. 
 
@@ -10,11 +10,15 @@ Pocket deck is designed for standalone use. You don't need PC for application de
 
 Internet connectivity allows you to ask questions to AI, sync with a PC for file transfer, copy and paste, screen casting, and cloud storage integration with Google Drive.
 
-![Product image](images/pocketdeck.jpg)
+![Product image](../images/pocketdeck.jpg)
 
 # Purchase
 
 https://shop.nunomo.net
+
+# Discord
+
+https://discord.gg/58DWVVTP
 
 # Features
 
