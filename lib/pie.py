@@ -953,6 +953,7 @@ class Pie:
     self.bpm = bpm
     self.startup_delay_ms = startup_delay_ms
     self.patterns = [] # List of (Instrument, Pattern)
+    self._scheduled_events = [] # List of (cycle, callback, args)
     self._running = False
     self._sample_rate = audio.sample_rate()
     self._cycle_duration_samples = int(self._sample_rate * 60 / bpm * 4)
@@ -1023,8 +1024,31 @@ class Pie:
       return index
     return -1
 
+  def schedule_update(self, cycle, index, pattern):
+    if index < len(self.patterns):
+      inst = self.patterns[index][0]
+      if isinstance(pattern, str):
+        preprocess = None
+        if hasattr(inst, "_preprocess"):
+          preprocess = inst._preprocess
+        pattern = Pattern.create(pattern, preprocess=preprocess)
+        if pattern is None:
+          return
+      elif not isinstance(pattern, Pattern):
+        pattern = Pattern.create(pattern)
+        if pattern is None:
+          return
+      
+      self._scheduled_events.append((cycle, self.update, (index, pattern)))
+      self._scheduled_events.sort(key=lambda x: x[0])
+
+  def schedule_remove(self, cycle, index):
+    self._scheduled_events.append((cycle, self.remove, (index,)))
+    self._scheduled_events.sort(key=lambda x: x[0])
+
   def clear(self):
     self.patterns = []
+    self._scheduled_events = []
 
   def process_event(self):
     current_tick = audio.get_current_tick()
@@ -1034,6 +1058,10 @@ class Pie:
     while self._scheduled_until_tick < current_tick + self._lookahead_samples:
       cycle_start_tick = self._scheduled_until_tick
       cycle_idx = (cycle_start_tick - self._base_tick) // self._cycle_duration_samples
+      
+      while self._scheduled_events and self._scheduled_events[0][0] <= cycle_idx:
+        _, cb, args = self._scheduled_events.pop(0)
+        cb(*args)
       
       for inst, pat in self.patterns:
         events = pat.get_events(cycle_idx)

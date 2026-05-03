@@ -4,6 +4,11 @@ Welcome to Pocket deck!
 
 Here is the getting started guide.
 
+## Highly suggested hardware setup
+
+- Get a lipo battery. [[README.md]] for detail.
+- Put a Magsafe ring.
+
 ## The first document
 
 When you power on the device, home app will be shown up. Select 'Launch apps', and select Pem editor to launch text editor.
@@ -62,8 +67,32 @@ If you press 'c', then current date will be copied to system clipboard. You can 
 
 ## File sync with google drive
 
-gdrive local_file remote_file
+`gdrive local_file remote_file`
 
 to upload file to Google drive. You need to authorize the access at the first time.
 
+## Setup OpenAI API
 
+Pocket Deck has powerful OpenAI API client called `gpt`. To use the command, you need to get OpenAI  API key. Save the key to `/config/openai_api_key`.
+
+Here are several ways to use gpt command:
+
+```
+## You can put a question inline.
+gpt This is a test.
+```
+
+```
+## You can attach files (-q to separate filenames and message content)
+gpt -f pd/README.md pd/pem_readme.md -q Tell me the PEM command to revert buffer
+```
+
+```
+## Voice mode with attached file. It can recognize multiple languages without specifying it.
+gpt -f tasks.md -v
+```
+
+```
+## -a enables Agent mode, AI is granted to execute commands, iterate prompt.
+gpt -a Combine test.md and test2.md under /sd/Documents and save it to merged.md. Correct misspells.
+```

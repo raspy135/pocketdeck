@@ -1,234 +1,128 @@
-# cp.py (MicroPython)
-# Usage:
-#   cp SRC... DST
-# Options:
-#   -r, -R   recursive (copy directories)
-#   * and ?  basic wildcards in SRC (glob-like)
-#
-# Notes:
-# - Wildcards are supported only in SRC arguments (not in DST).
-# - If multiple sources (or wildcard expands to multiple), DST must be a directory.
-# - Copies file data in chunks (good for small RAM boards).
-
 import os
-
-try:
-    from uerrno import EISDIR
-except ImportError:
-    EISDIR = 21  # fallback
-
-# --------- small helpers ---------
+import argparse
+import ls
 
 def _is_dir(path):
-    try:
-        st = os.stat(path)
-        return (st[0] & 0x4000) != 0  # stat.S_IFDIR (MicroPython uses bitmask)
-    except OSError:
-        return False
+  try:
+    st = os.stat(path)
+    return (st[0] & 0x4000) != 0
+  except OSError:
+    return False
 
-def _exists(path):
-    try:
-        os.stat(path)
-        return True
-    except OSError:
-        return False
+def _join_path(base, name):
+  if base == '/':
+    return '/' + name
+  if base == '' or base == '.':
+    return name
+  return base + '/' + name
 
-def _join(a, b):
-    if not a or a.endswith("/"):
-        return a + b
-    return a + "/" + b
+def _basename(path):
+  if path == '/':
+    return '/'
+  parts = path.split('/')
+  while len(parts) > 1 and parts[-1] == '':
+    parts.pop()
+  if len(parts) == 0:
+    return path
+  return parts[-1]
 
-def _basename(p):
-    if p.endswith("/") and p != "/":
-        p = p[:-1]
-    i = p.rfind("/")
-    return p if i < 0 else p[i + 1 :]
-
-def _dirname(p):
-    if p.endswith("/") and p != "/":
-        p = p[:-1]
-    i = p.rfind("/")
-    if i < 0:
-        return ""
-    return p[:i] or "/"
-
-def _mkdirs(path):
-    # mkdir -p behavior
-    if not path or path == "/":
-        return
-    parts = []
-    while path and path not in ("/", ""):
-        parts.append(path)
-        path = _dirname(path)
-    for p in reversed(parts):
-        if not _exists(p):
-            try:
-                os.mkdir(p)
-            except OSError:
-                pass
-
-def _write(vs, s):
-    try:
-        vs.write(s)
-    except TypeError:
-        vs.write(s.encode())
-
-# --------- wildcard matching and expansion ---------
-
-def _match(pat, name):
-    # supports '*' and '?'
-    pi = ni = 0
-    star = -1
-    mark = 0
-    while ni < len(name):
-        if pi < len(pat) and (pat[pi] == "?" or pat[pi] == name[ni]):
-            pi += 1
-            ni += 1
-        elif pi < len(pat) and pat[pi] == "*":
-            star = pi
-            pi += 1
-            mark = ni
-        elif star != -1:
-            pi = star + 1
-            mark += 1
-            ni = mark
-        else:
-            return False
-    while pi < len(pat) and pat[pi] == "*":
-        pi += 1
-    return pi == len(pat)
-
-def _has_wildcards(s):
-    return ("*" in s) or ("?" in s)
-
-def _expand_one(pattern):
-    # Only supports wildcards in last path component: dir/pat
-    # If no wildcard, returns [pattern] (even if missing).
-    if not _has_wildcards(pattern):
-        return [pattern]
-
-    d = _dirname(pattern)
-    if d in ("", None):
-        d = "."
-    pat = _basename(pattern)
-
-    try:
-        names = os.listdir(d)
-    except OSError:
-        return []
-
-    out = []
-    for n in names:
-        if _match(pat, n):
-            out.append(_join(d if d != "." else "", n) if d != "." else n)
-    return out
-
-def _expand_sources(src_list):
-    out = []
-    for s in src_list:
-        ex = _expand_one(s)
-        if ex:
-            out.extend(ex)
-        else:
-            # If wildcard matched nothing, behave like many shells: keep as-is -> error later
-            out.append(s)
-    return out
-
-# --------- copy primitives ---------
+def _normalize_dir_path(path):
+  if path == '/':
+    return '/'
+  while len(path) > 1 and path[-1] == '/':
+    path = path[:-1]
+  return path
 
 def _copy_file(src, dst):
-    # dst may be a file path; parent dirs should exist
-    # Copy in chunks
-    bufsize = 1024*64
-    b = bytearray(bufsize)
-    mv = memoryview(b)
-    with open(src, "rb") as rf:
-        with open(dst, "wb") as wf:
-            while True:
-                numread = rf.readinto(b)
-                if numread == 0:
-                    break
-                wf.write(mv[:numread])
+  try:
+    fsrc = open(src, 'rb')
+  except Exception:
+    return False, 'Failed to open source file: ' + src
 
-def _copy_tree(src_dir, dst_dir):
-    # dst_dir is directory path (created if needed)
-    if not _exists(dst_dir):
-        os.mkdir(dst_dir)
-    for name in os.listdir(src_dir):
-        s = _join(src_dir, name)
-        d = _join(dst_dir, name)
-        if _is_dir(s):
-            _copy_tree(s, d)
-        else:
-            _copy_file(s, d)
+  try:
+    fdst = open(dst, 'wb')
+  except Exception:
+    fsrc.close()
+    return False, 'Failed to open destination file: ' + dst
 
-# --------- main cp command ---------
+  try:
+    while True:
+      data = fsrc.read(1024)
+      if not data:
+        break
+      fdst.write(data)
+  except Exception:
+    fsrc.close()
+    fdst.close()
+    return False, 'Failed while copying: ' + src
 
-def main(vs, args):
-    # Parse options
-    recursive = False
-    args = args[1:]
-    paths = []
-    i = 0
-    while i < len(args):
-        a = args[i]
-        if a in ("-r", "-R"):
-            recursive = True
-        else:
-            paths.append(a)
-        i += 1
+  fsrc.close()
+  fdst.close()
+  return True, None
 
-    if len(paths) < 2:
-        _write(vs, "usage: cp [-r|-R] SRC... DST\n")
-        return 2
+def _collect_sources(src, recursive):
+  ret = ls.list_file(src, recursive)
+  if not ret:
+    return None
 
-    dst = paths[-1]
-    srcs = _expand_sources(paths[:-1])
+  out = []
+  if recursive:
+    for group in ret:
+      dirname = group[0]
+      filelist = group[1]
+      for item in filelist:
+        full = _join_path(dirname, item)
+        if not _is_dir(full):
+          out.append(full)
+  else:
+    dirname = ret[0]
+    filelist = ret[1]
+    for item in filelist:
+      full = _join_path(dirname, item)
+      if not _is_dir(full):
+        out.append(full)
 
-    dst_is_dir = _is_dir(dst)
-    multiple = len(srcs) > 1
+  if len(out) == 0:
+    return None
+  return out
 
-    if multiple and not dst_is_dir:
-        _write(vs, "cp: destination must be a directory when copying multiple sources\n")
-        return 1
+def main(vs, args_in):
+  parser = argparse.ArgumentParser(
+            description='copy file')
+  parser.add_argument('-r', '--recursive', action='store_true', help='search recursively')
+  parser.add_argument('src', help='Source path')
+  parser.add_argument('dst', help='Destination path')
 
-    # If dst doesn't exist but multiple sources, error (cannot infer)
-    if multiple and not _exists(dst):
-        _write(vs, "cp: destination directory does not exist: %s\n" % dst)
-        return 1
+  args = parser.parse_args(args_in[1:])
 
-    for src in srcs:
-        if not _exists(src):
-            _write(vs, "cp: cannot stat '%s': No such file or directory\n" % src)
-            return 1
+  src_files = _collect_sources(args.src, args.recursive)
+  if not src_files:
+    print('No matched files', file=vs)
+    return
 
-        if _is_dir(src):
-            if not recursive:
-                _write(vs, "cp: -r not specified; omitting directory '%s'\n" % src)
-                return 1
+  dst_path = _normalize_dir_path(args.dst)
+  dst_is_dir = _is_dir(dst_path) or (len(args.dst) > 1 and args.dst[-1] == '/')
 
-            if dst_is_dir or multiple:
-                out_dir = _join(dst, _basename(src)) if dst_is_dir or multiple else dst
-            else:
-                out_dir = dst
+  if not dst_is_dir and len(src_files) > 1:
+    print('Destination must be a directory when copying multiple files', file=vs)
+    return
 
-            # If dst exists and is a file -> error
-            if _exists(out_dir) and not _is_dir(out_dir):
-                _write(vs, "cp: cannot overwrite non-directory '%s' with directory '%s'\n" %
-                          (out_dir, src))
-                return 1
+  copied = 0
 
-            # Ensure parent exists (in case out_dir includes parents)
-            _mkdirs(_dirname(out_dir))
-            _copy_tree(src, out_dir)
-        else:
-            if dst_is_dir or multiple:
-                out_file = _join(dst, _basename(src))
-            else:
-                out_file = dst
+  for src in src_files:
+    if dst_is_dir:
+      dst = _join_path(dst_path, _basename(src))
+    else:
+      dst = dst_path
 
-            _mkdirs(_dirname(out_file))
-            _copy_file(src, out_file)
+    ok, err = _copy_file(src, dst)
+    if not ok:
+      print(err, file=vs)
+      return
 
-    return 0
+    copied += 1
 
+  if copied == 1:
+    print('Copied 1 file', file=vs)
+  else:
+    print('Copied ' + str(copied) + ' files', file=vs)

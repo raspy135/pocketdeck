@@ -49,6 +49,10 @@
             "data/active.xbmr"
         ],
         [
+            "data/agent_mode.md",
+            "data/agent_mode.md"
+        ],
+        [
             "data/block.xbmr",
             "data/block.xbmr"
         ],
@@ -89,6 +93,14 @@
             "data/checked.xbmr"
         ],
         [
+            "data/clear.wav",
+            "data/clear.wav"
+        ],
+        [
+            "data/easy.xbmr",
+            "data/easy.xbmr"
+        ],
+        [
             "data/fireball.xbmr",
             "data/fireball.xbmr"
         ],
@@ -109,12 +121,24 @@
             "data/guitar_wt.wav"
         ],
         [
+            "data/hard.xbmr",
+            "data/hard.xbmr"
+        ],
+        [
             "data/invader.wav",
             "data/invader.wav"
         ],
         [
             "data/lofi_girl-studying.xbm",
             "data/lofi_girl-studying.xbm"
+        ],
+        [
+            "data/medium.xbmr",
+            "data/medium.xbmr"
+        ],
+        [
+            "data/nudoc.xbmr",
+            "data/nudoc.xbmr"
         ],
         [
             "data/nunomo_logo.xbmr",
@@ -315,6 +339,10 @@
         [
             "ntptime.mpy",
             "ntptime.mpy"
+        ],
+        [
+            "nudoc.py",
+            "nudoc.py"
         ],
         [
             "overlay.py",

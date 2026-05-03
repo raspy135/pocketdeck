@@ -28,11 +28,12 @@ def main(vs, args):
         
         p.add(drums, "0 . . . 0 . . .") # Simple kick pattern
         
-        while True:
-            # process_event must be called in your main loop periodically
-            p.process_event()
-            time.sleep(0.1)
-            # Your main loop logic here
+        with p:
+            while True:
+                # process_event must be called in your main loop periodically
+                p.process_event()
+                time.sleep(0.1)
+                # Your main loop logic here
 ```
 
 ### Methods
@@ -44,14 +45,12 @@ def main(vs, args):
   Creates a `Pattern` object for a specific instrument. You can apply pattern methods to modify the pattern.
 - `update(index, pattern)`
   Hot-swaps a pattern string for an existing track.
-- `Pattern` methods (can be chained):
-  - `slow(n)`: Stretches the pattern to last `n` cycles.
-  - `clip(n)`: Sets the note duration multiplier (default 0.9). Accepts a constant or a pattern string.
-  - `strum(amount)`: Adds an incremental delay to chord notes. Positive values strum "down" (lowest to highest), negative values strum "up" (highest to lowest). Accepts a constant or a pattern string.
-  - `scale(name)`: Sets the current musical scale for relative sequencing. Accepts a constant (e.g., `'Cmajor'`) or a pattern string (e.g., `'<Cmajor Gmajor>'`).
-  - `transpose(n)`: Shifts notes by `n` semitones. Works on MIDI numbers, note strings, and scale indices. Accepts a constant or a pattern string (e.g., `'<0 7 12>'`).
 - `remove(index)`
   Removes a track from the sequencer.
+- `schedule_update(cycle, index, pattern)`
+  Schedules an update to occur automatically at a specific cycle in the future. The pattern is pre-compiled immediately to ensure it does not cause audio glitches when the update fires.
+- `schedule_remove(cycle, index)`
+  Schedules a track removal to occur automatically at a specific cycle.
 - `process_event()`
   **Must be called in your main loop.** This processes timing and dispatches events to the audio engine.
 - `process_interactive(filename, loc)`: Standard interactive mode entry point.
@@ -134,38 +133,13 @@ Pie uses a "mini-notation" inspired by TidalCycles to represent time and rhythm.
 - **Weight `@n`**: Adjusts the relative duration of an element in a group.
   - `"[0@3 1]"`: `0` occupies 75% of the step, `1` occupies 25%.
 
-### 5. Primary parameter
+---
 
-Each instrument has a primary parameter that can be automated.
+## Synthesizer & Note Data
 
-For example, `PieFilter`'s primary parameter is `cutoff`.
-The following pattern will sweep the cutoff frequency changes 200 then 2000 every cycle.
+These features are primarily available for `PieWavetable` instruments.
 
-```python
-with Pie(bpm=120) as p, PieFilter() as lpf:
-    lpf.set_type("lpf")
-    p.add(lpf, "[200 2000]")
-```
-
-For other parameters and for smooth transitions, you can use the `command:value:transition` syntax.
-The following pattern will sweep the cutoff frequency changes 200 then 2000 every cycle with a 500ms transition.
-```python
-with Pie(bpm=120) as p, PieFilter() as lpf:
-    lpf.set_type("lpf")
-    p.add(lpf, "cutoff:200:500 cutoff:2000:500")
-```
-
-| Class | Primary Parameter |
-| :--- | :--- |
-| **PieSampler** | Slot number |
-| **PieWavetable** | Note value |
-| **PieFilter** | Cutoff frequency |
-| **PieCompressor** | Gain |
-| **PieEcho** | Delay time |
-| **PieMixer** | Volume |
-
-### 6. Pitch and Notes
-They are only available for `PieWavetable`.
+### 1. Pitch and Notes
 - **MIDI Numbers**: Integers (e.g., `60`).
 - **Note Strings**: Standard notation (e.g., `C4`, `F#3`).
 - **Chords**: Parsed into simultaneous notes (e.g., `Cmaj`, `Cm`).
@@ -175,7 +149,7 @@ They are only available for `PieWavetable`.
   - `C4maj:-1`: Move top note down an octave.
 - **Scale Indices**: When a scale is set via `.scale()`, integers are treated as scale degrees (e.g., `0 1 2`).
 
-### 7. Available Chords
+### 2. Available Chords
 The following chord shorthands are supported. Intervals are relative to the root MIDI note.
 
 | Suffix | Intervals | Type |
@@ -195,15 +169,94 @@ The following chord shorthands are supported. Intervals are relative to the root
 | `dim7` | `0, 3, 6, 9` | Diminished 7th |
 | `aug` | `0, 4, 8` | Augmented Triad |
 
-### 8. Scales
+### 3. Scales
 Pie supports a variety of common scales. You can apply them to influence how relative notes (integers) are mapped to actual frequencies.
-
 - **Available Scales**: `maj`, `m`, `pent_maj`, `pent_m`, `chrom`.
 - **Usage**: `pat.scale("Cmajor")` or `pat.scale("Cm")`
 - **Dynamic Scales**: `<Cmajor Dm>` rotates the scale per cycle.
 
-### 7. Instrument Automation
-Each instrument supports specific commands that can be used in the `command:value:transition` syntax.
+---
+
+## Pattern Modifiers (Chaining)
+
+When you create a pattern using `p.pattern(instrument, string)`, it returns a `Pattern` object. You can chain modifier methods to this object before adding it to the mix to radically alter how it plays.
+
+### 1. `.scale(name)`
+Sets the current musical scale for relative sequencing. Integers in your pattern string will be treated as degrees of this scale rather than raw MIDI notes.
+- **Usage**: `pat.scale("Cmaj")` or `pat.scale("Cm")`
+- **Dynamic Scales**: Pass a pattern string to rotate scales over time.
+  ```python
+  # Alternates between C Major and D Minor every cycle
+  pat = p.pattern(synth, "0 2 4 6").scale("<Cmaj Dm>")
+  p.add(synth, pat)
+  ```
+
+### 2. `.clip(n)`
+Sets the note duration multiplier (default is typically 0.9 to leave a tiny gap between notes). A clip of `1.0` means legato (the note plays for the full duration of its step). A clip of `0.5` means staccato (half the step).
+- **Usage**: `pat.clip(0.5)`
+- **Dynamic Clip**: You can pass a pattern string to automate note lengths.
+  ```python
+  # First two notes are short (0.5), last two are long (1.0)
+  p.add(synth, p.pattern(synth, "C4 E4 G4 B4").clip("0.5 0.5 1.0 1.0"))
+  ```
+
+### 3. `.transpose(n)`
+Shifts all notes by `n` semitones. This works on raw MIDI numbers, note strings, and scale indices.
+- **Usage**: `pat.transpose(-12)` (Drops the pattern by one octave)
+- **Dynamic Transposition**:
+  ```python
+  # Transposes the pattern up by 7 semitones every other cycle
+  p.add(synth, p.pattern(synth, "C4 E4 G4").transpose("<0 7>"))
+  ```
+
+### 4. `.strum(amount)`
+Adds an incremental time delay (in seconds) between notes in a chord, simulating a strummed guitar or harp. 
+- **Usage**: Positive values strum "up" (lowest to highest note). Negative values strum "down".
+  ```python
+  # Strums the C Major chord with a 20ms delay between each note
+  p.add(synth, p.pattern(synth, "C4maj").strum(0.02))
+  ```
+
+### 5. `.slow(n)`
+Stretches the pattern to last over `n` cycles instead of fitting into 1 cycle.
+- **Usage**:
+  ```python
+  # Plays the pattern at half speed (spread over 2 cycles)
+  p.add(synth, p.pattern(synth, "C4 D4 E4 F4").slow(2))
+  ```
+
+---
+
+## Instrument Automation
+
+### 1. Primary Parameter
+Each instrument has a primary parameter that can be automated just by passing values in the basic string.
+
+For example, `PieFilter`'s primary parameter is `cutoff`.
+The following pattern will sweep the cutoff frequency between 200 and 2000 every cycle:
+```python
+with Pie(bpm=120) as p, PieFilter() as lpf:
+    lpf.set_type("lpf")
+    p.add(lpf, "[200 2000]")
+```
+
+| Class | Primary Parameter |
+| :--- | :--- |
+| **PieSampler** | Slot number |
+| **PieWavetable** | Note value |
+| **PieFilter** | Cutoff frequency |
+| **PieCompressor** | Gain |
+| **PieEcho** | Delay time |
+| **PieMixer** | Volume |
+
+### 2. Parameter Commands
+For other parameters (and for smooth transitions), you can use the `command:value:transition` syntax.
+The following pattern will sweep the cutoff frequency to 200 then to 2000 every cycle with a 500ms smooth transition:
+```python
+with Pie(bpm=120) as p, PieFilter() as lpf:
+    lpf.set_type("lpf")
+    p.add(lpf, "cutoff:200:500 cutoff:2000:500")
+```
 
 | Class | Command | Description |
 | :--- | :--- | :--- |
@@ -219,8 +272,9 @@ Each instrument supports specific commands that can be used in the `command:valu
 | **PieMixer** | `vol` | Volume (0.0 to 1.0) |
 | | `pan` | Panning (-1.0 to 1.0) |
 
+---
 
-### 9. Pattern Examples
+## Pattern Examples
 Practical examples of combining patterns with the Pie API:
 
 ```python
@@ -230,13 +284,13 @@ Practical examples of combining patterns with the Pie API:
 # 1. Simple drum sequence (assuming 0 is kick, 1 is snare)
 p.add(drums, "[0 1 0 1]")
 
-# 2. Simple drum sequence with hihat (assuming 0 is kick, 1 is snare, 2 is hihat)
-p.add(drums, "[0 1 0 1], [2 2 2 2]")
+# 2. Simple drum sequence with hihat (assuming 0 is kick, 1 is snare, 2 is hihat), with volume alternation for hihat.
+p.add(drums, "[0 1 0 1], [2 2 2 2], [vol2:0.8:0 vol2:0.4:0]*2")
 
 # 3. Transposed chord (moves C3maj down an octave)
 p.add(synth, p.pattern(synth, "C3maj").transpose(-12))
 
-# 4. Chained configuration: Clipping + Scale
+# 4. Chained configuration: Clipping (Note duration) + Scale
 pat = p.pattern(synth, "0 2 4 6").scale("Ebmaj").clip("0.5 1.0")
 p.add(synth, pat)
 

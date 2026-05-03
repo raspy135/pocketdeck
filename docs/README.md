@@ -206,12 +206,12 @@ Here are some basic commands written by Python.
 
 command | summary
 --------|---------
-`ls [file]` | List files. `-l` will show more information such as file size and date.
-`cp src dst` | Copy a file
+`ls [file]` | List files. `-l` will show more information such as file size and datetime. Wild card is allowed for search. `-r` for recursive search.
+`cp [options] src dst` | Copy a file. `-r` for recursive copy. Wild card is allowed for src.
 `mv src dst` | Move a file
 `mkdir dir_name` | Create a directory
 `rmdir dir_name` | Delete a directory
-`cat file` | Print file contents
+`cat file [file..]` | Print file(s) content
 `cd [dir]` | Change the working directory. **Note** unlike other OSes, this is a global value shared between shells and applications. Sometimes it makes confusing result.
 `pwd` | Get the current working directory. The default working directory is `/sd/Documents`.
 `netserver [password]` | Launch a network server to provide services. It provides screencasting, clipboard and file sharing. See `[[../netserver/GETTING_STARTED]]` for details.
@@ -242,7 +242,7 @@ The `analog_clock` application is useful. It includes an analog clock, calendar,
 
 - `c`: Copy the date to the clipboard. Format: `<yyyy-mm-dd day>`
 - Arrow keys: Move the calendar
-- Backspace: Switch between the calendar and timer
+- Backspace or B button: Switch between the calendar and timer
 
 
 ### Journal
@@ -298,8 +298,21 @@ You need an OpenAI API key to use the app. Save your API key to `/config/openapi
 - `-vt`, `--voice-type`: Select a voice type (`alloy`, `coral`, `echo`, `fable`, `onyx`, `nova`, `shimmer`)
 - `-c`, `--clipboard`: Use data from the clipboard as reference data
 - `-n`: Do not save the result
+- `-m`: Select model. Default is `gpt-5.4`. Proper model name such as gpt-5.4, or `f`,`m`, `h` are allowed. `f` is fast(gpt-5.4 mini), `m` is medium(gpt-5.4), `h` is high(gpt-5.5).
 - `-j`: Answer in Japanese. You need to execute the `setuni` command to use Unicode characters in the terminal font.
-- `-q`: Specify the content explicitly, for example after the `-f` option you need to use `-q` to mark the start of the question.
+- `-q`: Specify the content explicitly, for example after the `-f` option you need to use `-q` to mark the start of the question. If you specify filename after this option, it will read the file and use this as a main prompt.
+
+#### Special syntax in prompt file
+
+When you use `-q file` to give main prompt, you can include additional files by using `[[filename]]` format. The following example will include app_development.md as a reference.
+
+```
+[[pd/app_development.md]]
+
+Make a hello world program.
+```
+
+
 
 ### stt 
 
@@ -338,6 +351,14 @@ arrow keys : navigate
 touch pad : scroll
 buttom buttons : page up, page down
 `B` button : quit
+
+### Invader
+
+`invader` is a invader game.
+
+### Nudoc
+
+`nudoc` is a Sudoku game.
 
 ### Zen chamber
 

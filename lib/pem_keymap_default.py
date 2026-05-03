@@ -11,6 +11,7 @@ map = {
   'quit': [ b'\x18\x03' ],
   'save': [ b'\x18\x13' ],
   'open': [ b'\x18\x06' ],
+  'revert': [ b'\x18\x16' ],
   'close': [ b'\x18k' ],
   'switch': [ b'\x18b' ],
   'kill': [ b'\x0b' ],

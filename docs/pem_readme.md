@@ -40,6 +40,7 @@ It can open multiple files.
 - `C-x` `C-c` : Quit
 - `C-x` `C-f` : Open file
 - `C-x` `C-s` : Save file
+- `C-x` `C-v` : Revert file (Reload from file)
 - `C-x` `b` : Switch between files
 - `C-x` `k` : Close the file
 - `C-g`: Cancel operation (**Important!**)

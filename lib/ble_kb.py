@@ -346,13 +346,19 @@ def main(vs, args):
   # Start with both reconnect + scan
   if kb._saved:
     kb.reconnect_all()
-  kb.scan(1500)
+  else:
+    kb.scan(1500)
   kb._recon_t = time.time() + 3
-
+  req_scan = False
   try:
     while True:
       now = time.time()
-
+      key = vs.v.read_nb(1)
+      if key and key[0] > 0 and key[1].encode('ascii') == b'\x0d':
+        req_scan = True
+      if req_scan and not kb.scanning:
+        kb.scan(1500)
+        
       # Per-connection: pair & discover
       for c in list(kb._conns.values()):
         if c.pair_q:
@@ -392,8 +398,9 @@ def main(vs, args):
             kb.reconnect_all()
             conn_t = now
             fails += 1
-          if not kb.scanning:
-            kb.scan(1500)
+          else:
+            if not kb.scanning:
+              kb.scan(1500)
         kb._recon_t = now + 3
 
       if any(c.ready for c in kb._conns.values()):

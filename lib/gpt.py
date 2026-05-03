@@ -352,7 +352,7 @@ def main(vs, args_in):
   parser.add_argument('-j', '--jp',action='store_true',help='Answer in Japanese')
   parser.add_argument('-f', '--file',nargs='+',action='store',help='Attach file(s) as reference. file1 file2...')
   parser.add_argument('-i', '--image', nargs='+', action='store',help='Attach image file(s) or image url(s). img1 img2...')
-  parser.add_argument('-m', '--model',action='store',default='gpt-5.4-mini',help='Model to use (e.g. gpt-5-mini)')
+  parser.add_argument('-m', '--model',action='store',default='gpt-5.4',help='Model to use (e.g. gpt-5-mini)')
   parser.add_argument('-v', '--voice',action='store_true',help='Use voice mode (STT and TTS)')
   parser.add_argument('-vt', '--voice-type',action='store',default='coral',help='Voice type for TTS (alloy, coral, echo, fable, onyx, nova, shimmer)')
   parser.add_argument('content', nargs='*',help='Content to ask')
@@ -367,7 +367,7 @@ def main(vs, args_in):
   message = ""
   instructions = None
 
-  if args.voice:
+  if args.voice: # and not args.q and not args.content:
     rec_file = "/sd/work/voice_rec.wav"
     record_audio(vs, rec_file)
     print("Transcribing...", file=vs)
@@ -394,6 +394,10 @@ def main(vs, args_in):
 
   ex1 = " and answer in Japanese" if args.jp else  ""
   message = message + ex1
+
+  ctime = time.gmtime(time.time() + pu.timezone * 60 * 15)
+  time_str = f"[User current time: {ctime[0]:04d}-{ctime[1]:02d}-{ctime[2]:02d} {ctime[3]:02d}:{ctime[4]:02d}]\n"
+  message = time_str + message
 
   references = []
   
@@ -425,7 +429,18 @@ def main(vs, args_in):
             except Exception:
                 pass
                 
-    message += "\n\nGenerate codeblocks by following rules in agent_mode.md. You can use `python:filename`, `python:execute` and `iterate` special code blocks as needed."
+    agent_instruction = (
+        "CRITICAL INSTRUCTION: You are an autonomous agent operating on a MicroPython device. "
+        "You MUST execute commands by strictly using the markdown code blocks defined in agent_mode.md."
+        "(`[type]:filename`, `python:execute`, `iterate`). "
+    )
+    
+    if instructions:
+        instructions += "\n\n" + agent_instruction
+    else:
+        instructions = agent_instruction
+        
+    message += "\n\n[SYSTEM NOTE: Follow the critical rules in agent_mode.md to perform actions.]"
 
   if args.file:
     files = args.file
@@ -457,8 +472,14 @@ def main(vs, args_in):
         except Exception as e:
           print(f'Error when opening image {img_path}', file=vs)
           return
-
-  raw_response = gpt.ask(gpt.make_json(message, references, images, args.model, instructions = instructions))
+  model = args.model
+  if model in ('m','medium'):
+    model = 'ngpt-5.4'
+  elif model in ('h','high'):
+    model = 'gpt-5.5'
+  elif model in ('f','fast'):
+    model = 'gpt-5.4-mini'
+  raw_response = gpt.ask(gpt.make_json(message, references, images, model, instructions = instructions))
   if not raw_response:
     return
   
@@ -520,7 +541,7 @@ def main(vs, args_in):
       lang_tag = block[:first_nl].strip()
       code = block[first_nl+1:]
       
-      if lang_tag.startswith("python:") and lang_tag != "python:execute":
+      if ":" in lang_tag and lang_tag != "python:execute":
         out_filename = lang_tag.split(":", 1)[1].strip()
         print(f"{el.set_font_color(1)}Agent: Saving to {out_filename}{el.reset_font_color()}", file=vs)
         
@@ -558,6 +579,10 @@ def main(vs, args_in):
       elif lang_tag == "iterate":
         print(  f"{el.set_font_color(1)}Agent: Iterating...{el.reset_font_color()}", file=vs)
         iter_args = ['gpt'] + code.split()
+        for i, item in enumerate(iter_args):
+          if item == '-q':
+            iter_args = iter_args[0:i+1] + [" ".join(iter_args[i+2:])]
+            break
         print(f"{el.set_font_color(1)}Agent: Calling main with {iter_args}{el.reset_font_color()}", file=vs)
         main(vs, iter_args)
 
