@@ -1,4 +1,4 @@
-    # Pocket Deck overview
+# Pocket Deck overview
 
 Pocket Deck is a tiny, customizable computer designed for everyday productivity and creative tinkering. It's great for fast text writing, personal organization, and small life-improvement utilities. 
 
