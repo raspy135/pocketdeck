@@ -42,6 +42,17 @@ DIFFS = {
 }
 
 DIFF_ORDER = ['Easy', 'Medium', 'Hard']
+FULL_MASK = 0x1FF
+
+def bit_count(x):
+  c = 0
+  while x:
+    x &= x - 1
+    c += 1
+  return c
+
+def lowest_bit(x):
+  return x & -x
 
 def clamp(v, a, b):
   if v < a:
@@ -200,40 +211,6 @@ class NudocGame:
       self.sound.note_on(0)
       self.sound.note_off(0, "+0.45s")
 
-  def solved_pattern(self, r, c):
-    return (r * 3 + r // 3 + c) % 9
-
-  def build_solution(self):
-    rows_base = [0, 1, 2]
-    cols_base = [0, 1, 2]
-    nums = [1, 2, 3, 4, 5, 6, 7, 8, 9]
-
-    row_groups = [0, 1, 2]
-    col_groups = [0, 1, 2]
-    shuffle_list(row_groups)
-    shuffle_list(col_groups)
-    shuffle_list(nums)
-
-    rows = []
-    cols = []
-
-    for g in row_groups:
-      inner = rows_base[:]
-      shuffle_list(inner)
-      for r in inner:
-        rows.append(g * 3 + r)
-
-    for g in col_groups:
-      inner = cols_base[:]
-      shuffle_list(inner)
-      for c in inner:
-        cols.append(g * 3 + c)
-
-    for y in range(9):
-      for x in range(9):
-        n = nums[self.solved_pattern(rows[y], cols[x])]
-        self.solution[y][x] = n
-
   def board_copy(self, src):
     out = []
     for y in range(9):
@@ -243,130 +220,141 @@ class NudocGame:
       out.append(row)
     return out
 
-  def count_bits(self, mask):
-    c = 0
-    while mask:
-      c += mask & 1
-      mask >>= 1
-    return c
+  def box_index(self, r, c):
+    return (r // 3) * 3 + (c // 3)
 
-  def get_candidates_mask(self, board, x, y):
-    if board[y][x] != 0:
-      return 0
-    used = 0
-    for i in range(9):
-      n = board[y][i]
-      if n:
-        used |= 1 << (n - 1)
-    for i in range(9):
-      n = board[i][x]
-      if n:
-        used |= 1 << (n - 1)
-    bx = (x // 3) * 3
-    by = (y // 3) * 3
-    for yy in range(by, by + 3):
-      for xx in range(bx, bx + 3):
-        n = board[yy][xx]
+
+  def init_masks_from_board(self, board):
+    rows = [0] * 9
+    cols = [0] * 9
+    boxes = [0] * 9
+    for r in range(9):
+      for c in range(9):
+        n = board[r][c]
         if n:
-          used |= 1 << (n - 1)
-    return (~used) & 0x1FF
+          bit = 1 << (n - 1)
+          rows[r] |= bit
+          cols[c] |= bit
+          boxes[self.box_index(r, c)] |= bit
+    return rows, cols, boxes
 
-  def find_best_empty(self, board):
-    best_x = -1
-    best_y = -1
+  def find_best_cell_masks(self, board, rows, cols, boxes):
+    min_count = 10
+    best_r = -1
+    best_c = -1
     best_mask = 0
-    best_count = 10
-    for y in range(9):
-      for x in range(9):
-        if board[y][x] == 0:
-          mask = self.get_candidates_mask(board, x, y)
-          cnt = self.count_bits(mask)
-          if cnt < best_count:
-            best_count = cnt
-            best_x = x
-            best_y = y
-            best_mask = mask
-            if cnt <= 1:
-              return best_x, best_y, best_mask, best_count
-    return best_x, best_y, best_mask, best_count
 
-  def count_solutions_limited(self, board, limit):
+    for r in range(9):
+      for c in range(9):
+        if board[r][c] == 0:
+          used = rows[r] | cols[c] | boxes[self.box_index(r, c)]
+          avail = (~used) & FULL_MASK
+          cnt = bit_count(avail)
+          if cnt < min_count:
+            min_count = cnt
+            best_r = r
+            best_c = c
+            best_mask = avail
+            if cnt == 1:
+              return best_r, best_c, best_mask
+    return best_r, best_c, best_mask
+
+  def randomize_bits(self, mask):
+    arr = []
+    while mask:
+      b = lowest_bit(mask)
+      arr.append(b)
+      mask ^= b
+
+    for i in range(len(arr) - 1, 0, -1):
+      j = random.getrandbits(16) % (i + 1)
+      arr[i], arr[j] = arr[j], arr[i]
+
+    return arr
+
+  def ordered_bits(self, mask):
+    arr = []
+    while mask:
+      b = lowest_bit(mask)
+      arr.append(b)
+      mask ^= b
+    return arr
+
+  def bit_to_num(self, bit):
+    n = 1
+    while bit > 1:
+      bit >>= 1
+      n += 1
+    return n
+
+  def place_bit(self, board, rows, cols, boxes, r, c, bit):
+    board[r][c] = self.bit_to_num(bit)
+    rows[r] |= bit
+    cols[c] |= bit
+    boxes[self.box_index(r, c)] |= bit
+
+  def remove_bit(self, board, rows, cols, boxes, r, c, bit):
+    board[r][c] = 0
+    rows[r] ^= bit
+    cols[c] ^= bit
+    boxes[self.box_index(r, c)] ^= bit
+
+  def make_candidate_bits(self, mask, randomize):
+    if randomize:
+      return self.randomize_bits(mask)
+    return self.ordered_bits(mask)
+
+  def backtrack_next(self, board, rows, cols, boxes, stack):
+    while stack:
+      pr, pc, cand, idx = stack[-1]
+      last_bit = cand[idx - 1]
+      self.remove_bit(board, rows, cols, boxes, pr, pc, last_bit)
+
+      if idx >= len(cand):
+        stack.pop()
+        continue
+
+      bit = cand[idx]
+      stack[-1][3] += 1
+      self.place_bit(board, rows, cols, boxes, pr, pc, bit)
+      return True
+    return False
+
+  def solve_board_mdv(self, board, randomize=True, limit=1):
+    rows, cols, boxes = self.init_masks_from_board(board)
     stack = []
     total = 0
 
     while True:
-      pos = self.find_best_empty(board)
-      x = pos[0]
-      y = pos[1]
-      mask = pos[2]
-      cnt = pos[3]
+      r, c, mask = self.find_best_cell_masks(board, rows, cols, boxes)
 
-      if x < 0:
+      if r == -1:
         total += 1
         if total >= limit:
           return total
-        backtracked = False
-        while stack:
-          frame = stack.pop()
-          board[frame[1]][frame[0]] = 0
-          x = frame[0]
-          y = frame[1]
-          mask = frame[2]
-          n = frame[3] + 1
-          while n <= 9:
-            bit = 1 << (n - 1)
-            if mask & bit:
-              board[y][x] = n
-              stack.append([x, y, mask, n])
-              backtracked = True
-              break
-            n += 1
-          if backtracked:
-            break
-        if not backtracked:
+        if not self.backtrack_next(board, rows, cols, boxes, stack):
           return total
         continue
 
-      if cnt == 0:
-        backtracked = False
-        while stack:
-          frame = stack.pop()
-          board[frame[1]][frame[0]] = 0
-          x = frame[0]
-          y = frame[1]
-          mask = frame[2]
-          n = frame[3] + 1
-          while n <= 9:
-            bit = 1 << (n - 1)
-            if mask & bit:
-              board[y][x] = n
-              stack.append([x, y, mask, n])
-              backtracked = True
-              break
-            n += 1
-          if backtracked:
-            break
-        if not backtracked:
+      if mask == 0:
+        if not self.backtrack_next(board, rows, cols, boxes, stack):
           return total
         continue
 
-      n = 1
-      placed = False
-      while n <= 9:
-        bit = 1 << (n - 1)
-        if mask & bit:
-          board[y][x] = n
-          stack.append([x, y, mask, n])
-          placed = True
-          break
-        n += 1
+      cand = self.make_candidate_bits(mask, randomize)
+      bit = cand[0]
+      self.place_bit(board, rows, cols, boxes, r, c, bit)
+      stack.append([r, c, cand, 1])
 
-      if not placed:
-        return total
+  def build_solution(self):
+    for y in range(9):
+      for x in range(9):
+        self.solution[y][x] = 0
+    self.solve_board_mdv(self.solution, True, 1)
 
   def has_unique_solution(self, board):
     temp = self.board_copy(board)
-    return self.count_solutions_limited(temp, 2) == 1
+    return self.solve_board_mdv(temp, False, 2) == 1
 
   def remove_cells(self, holes):
     for y in range(9):
@@ -669,9 +657,6 @@ class NudocGame:
     self.v.set_dither(phase)
     self.v.draw_frame(GRID_X - 4, GRID_Y - 4, GRID_W + 8, GRID_H + 8)
     self.v.draw_frame(GRID_X - 6, GRID_Y - 6, GRID_W + 12, GRID_H + 12)
-    #self.v.set_dither(16)
-    #self.v.set_font("u8g2_font_profont22_mf")
-    #self.v.draw_str(SIDE_X - 6, 50, "CLEAR!")
 
   def draw_line_box_anims(self):
     for item in self.anim_lines:
@@ -729,7 +714,6 @@ class NudocGame:
     self.v.set_font("u8g2_font_profont22_mf")
     if self.completed:
       self.v.draw_str(x + 22, y + 26, "CLEAR!")
-      #self.v.set_font("u8g2_font_profont15_mf")
       self.v.draw_str(x + 22, y + 50, f"Score:{self.score}")
     else:
       self.v.draw_str(x + 22, y + 26, "GAME OVER")
@@ -747,10 +731,6 @@ class NudocGame:
 
     self.v.set_draw_color(1)
     self.v.draw_image(200-160,120-100,self.images['title'])
-
-    #self.v.draw_rframe(x, y, w, h, 5)
-    #self.v.set_font("u8g2_font_profont22_mf")
-    #self.v.draw_str(x + 18, y + 24, "Nudoc")
 
     self.v.set_font("u8g2_font_profont15_mf")
     for i in range(len(DIFF_ORDER)):
