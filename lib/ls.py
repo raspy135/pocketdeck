@@ -69,6 +69,11 @@ def _collect_recursive(dirname, pat, out):
   if len(filelist) > 0:
     out.append([dirname, filelist])
 
+month_list = ( \
+    "","January","Febary","March","April", \
+    "May","June", "July", "August","September", \
+    "October","November", "December" )
+
 def list_file(q, recursive=False):
   q = _normalize_query_path(q)
   dirname, filename, original = _split_query(q)
@@ -112,7 +117,7 @@ def _print_group(vs, dirname, filelist, detailed):
     if detailed:
       st = os.stat(_join_path(dirname, item))
       t = time.localtime(st[7]+pu.timezone*15*60)
-      print(f'{i}: {'[Dir]' if st[0]&0x4000 != 0 else ''} {item} {st[6]:,} {t[0]}/{t[1]}/{t[2]} {t[3]:02}:{t[4]:02}:{t[5]:02}', file=vs)
+      print(f'{i}: {'[Dir]' if st[0]&0x4000 != 0 else ''} {item} {st[6]:,} {month_list[t[1]][:3]} {t[2]}, {t[0]} {t[3]:02}:{t[4]:02}:{t[5]:02}', file=vs)
     else:
       print(f'{item} ', end='', file=vs)
 

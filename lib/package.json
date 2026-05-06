@@ -145,6 +145,10 @@
             "data/nunomo_logo.xbmr"
         ],
         [
+            "data/pencil.xbmr",
+            "data/pencil.xbmr"
+        ],
+        [
             "data/piano_a2.wav",
             "data/piano_a2.wav"
         ],
@@ -259,6 +263,10 @@
         [
             "examples/techno_example.py",
             "examples/techno_example.py"
+        ],
+        [
+            "font/u8g2_amstrad_cpc_extended.fnt",
+            "font/u8g2_amstrad_cpc_extended.fnt"
         ],
         [
             "fontloader.py",

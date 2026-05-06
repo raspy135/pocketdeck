@@ -49,7 +49,7 @@ cp.main(vs, ["cp", "/sd/work/temp.txt", "/sd/work/temp_backup.txt"])
 vs.close()
 ```
 
-Other useful command is `cat`, you can get file content using the module.
+Other useful command is `cat`, you can get file content using the module. Or, you can simply use -f option in iterate code block to add files that you want to read.
 
 `grep` can be used to search for a pattern or text in a file. `grep -n` can be used to search for a pattern in a file and print the line number.
 

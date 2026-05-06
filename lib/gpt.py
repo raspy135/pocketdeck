@@ -25,6 +25,131 @@ def file_exists(name):
   except OSError:
     return False
 
+def parse_inline_directives(message, references, images, args, vs):
+  idx = 0
+  result = ""
+  changed = False
+
+  while True:
+    start = message.find('[[', idx)
+    if start == -1:
+      result += message[idx:]
+      break
+
+    end = message.find(']]', start)
+    if end == -1:
+      result += message[idx:]
+      break
+
+    result += message[idx:start]
+    block = message[start+2:end].strip()
+    handled = False
+
+    if len(block) > 0 and block[0] == '-':
+      try:
+        opt_args = block.split()
+      except Exception:
+        opt_args = []
+
+      i = 0
+      ok = True
+      while i < len(opt_args):
+        opt = opt_args[i]
+
+        if opt == '-m' or opt == '--model':
+          if i + 1 < len(opt_args):
+            args.model = opt_args[i + 1]
+            i += 2
+            handled = True
+          else:
+            print("Inline option error: -m requires a value", file=vs)
+            ok = False
+            break
+
+        elif opt == '-j' or opt == '--jp':
+          args.jp = True
+          i += 1
+          handled = True
+
+        elif opt == '-c' or opt == '--clipboard':
+          args.clipboard = True
+          i += 1
+          handled = True
+
+        elif opt == '-nf' or opt == '--no-format':
+          args.no_format = True
+          i += 1
+          handled = True
+
+        elif opt == '-n' or opt == '--nosave':
+          args.nosave = True
+          i += 1
+          handled = True
+
+        elif opt == '-v' or opt == '--voice':
+          args.voice = True
+          i += 1
+          handled = True
+
+        elif opt == '-vt' or opt == '--voice-type':
+          if i + 1 < len(opt_args):
+            args.voice_type = opt_args[i + 1]
+            i += 2
+            handled = True
+          else:
+            print("Inline option error: -vt requires a value", file=vs)
+            ok = False
+            break
+
+        elif opt == '-i' or opt == '--image':
+          i += 1
+          handled = True
+          while i < len(opt_args) and not opt_args[i].startswith('-'):
+            img_path = opt_args[i]
+            if img_path.startswith("http://") or img_path.startswith("https://"):
+              images.append(img_path)
+            else:
+              try:
+                with open(img_path, 'rb') as f:
+                  images.append(f.read())
+              except Exception:
+                print(f'Inline option error when opening image {img_path}', file=vs)
+            i += 1
+
+        elif opt == '-f' or opt == '--file':
+          print("Inline option note: -f is not supported in [[...]] blocks", file=vs)
+          i += 1
+          while i < len(opt_args) and not opt_args[i].startswith('-'):
+            i += 1
+          handled = True
+
+        else:
+          print(f"Inline option note: unsupported option {opt}", file=vs)
+          i += 1
+          handled = True
+
+      if ok:
+        changed = True
+
+    else:
+      if file_exists(block):
+        try:
+          with open(block, 'r') as f:
+            references.append("---- " + block + " ----\n" + f.read())
+          handled = True
+          changed = True
+        except Exception as e:
+          print(f"Error reading inline reference {block}: {e}", file=vs)
+      else:
+        print(f"Inline reference file not found: {block}", file=vs)
+
+    if not handled:
+      result += message[start:end+2]
+
+    idx = end + 2
+
+  return result, changed
+
 class chatgpt_util:
   def __init__(self,vs):
     self.vs = vs
@@ -392,6 +517,11 @@ def main(vs, args_in):
   if len(message) == 0:
     return
 
+  references = []
+  images = []
+
+  message, _ = parse_inline_directives(message, references, images, args, vs)
+
   ex1 = " and answer in Japanese" if args.jp else  ""
   message = message + ex1
 
@@ -399,8 +529,6 @@ def main(vs, args_in):
   time_str = f"[User current time: {ctime[0]:04d}-{ctime[1]:02d}-{ctime[2]:02d} {ctime[3]:02d}:{ctime[4]:02d}]\n"
   message = time_str + message
 
-  references = []
-  
   if args.agent:
     idx = 0
     while True:
@@ -459,7 +587,6 @@ def main(vs, args_in):
   if args.clipboard:
     references.append(pdeck.clipboard_paste().decode("utf-8"))
   
-  images = []
   if args.image:
     image_paths = args.image
     for img_path in image_paths:

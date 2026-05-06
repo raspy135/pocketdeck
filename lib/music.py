@@ -203,10 +203,10 @@ class MusicGUI:
     self.current_tick = time.ticks_us()
     self.time_diff = (self.current_tick - self.last_tick)
 
-    self.menu_ui.draw_menu(offset=50)
+    self.menu_ui.draw_menu(y_offset=50)
     self.draw_header()
     self.draw_play_animation(0, 0)
-    self.menu_ui.draw_cursor(self.time_diff, offset=50)
+    self.menu_ui.draw_cursor(self.time_diff, y_offset=50)
     self.draw_playbar()
     self.draw_message()
 

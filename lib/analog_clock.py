@@ -320,7 +320,10 @@ class analog_clock:
           self.v.draw_str(x - 5, y + 14, str(int(i/10)))
       else:
         self.v.set_dither(6)
-      pix_height = int(self.tide_chart[i] * 10)
+      if len(self.tide_chart) < i:
+        pix_height = int(self.tide_chart[i] * 10)
+      else:
+        pix_height = 0
       #if pix_height < 0:
       #  pix_height == 0
 

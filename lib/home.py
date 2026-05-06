@@ -414,8 +414,8 @@ class setting():
       self.splash_count -= 1
       self.v.finished()
       return
-    self.menu_ui.draw_cursor(self.time_diff, offset=10)
-    self.menu_ui.draw_menu(offset=10)
+    self.menu_ui.draw_cursor(self.time_diff, y_offset=10)
+    self.menu_ui.draw_menu(y_offset=10)
     self.menu_ui.draw_help()
     self.menu_ui.draw_clock()
     self.menu_ui.draw_message()

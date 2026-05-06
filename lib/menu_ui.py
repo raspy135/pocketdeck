@@ -23,18 +23,21 @@ class menu_ui:
     self.item_font = font
     self.item_font_height = font_height
     
-  def draw_cursor(self, time_diff, offset=0):
+  def draw_cursor(self, time_diff, x_offset=0, y_offset=0):
     rotate = math.sin(self.cursor_angle)
     height = int(10 * rotate)
     self.cursor_angle += time_diff * 0.001 * 0.003
     if self.cursor_angle >= 2*3.14159:
       self.cursor_angle -= 2*3.14159
-    center_y = offset +  int(self.item_font_height//4)*3 #why???
-    points = array.array('h',(10,30,10, center_y - height,center_y, center_y+height))
+    center_y = y_offset + int(self.item_font_height//4)*3 #why???
+    points = array.array('h',(
+      10 + x_offset, 30 + x_offset, 10 + x_offset,
+      center_y - height, center_y, center_y + height
+    ))
       
     self.v.draw_polygon(points)
 
-  def draw_menu(self, offset=10):
+  def draw_menu(self, x_offset=0, y_offset=10):
     # Calculate Y offset
     c_offset = 0
     c_offset_x = 0
@@ -61,17 +64,17 @@ class menu_ui:
     if self.anm_offset < c_offset:
       self.anm_offset += (c_offset - self.anm_offset) // 4 + 1
       
-    cur_y = offset - self.anm_offset
-    cur_x = self.anm_offset_x
+    cur_y = y_offset - self.anm_offset
+    cur_x = x_offset + self.anm_offset_x
     for item in self.cur_root:
       self.v.set_font(self.item_font)
-      self.v.draw_str(40+ cur_x,cur_y + self.item_font_height, item[0])
+      self.v.draw_str(40 + cur_x,cur_y + self.item_font_height, item[0])
       cur_y += self.item_font_height
       if isinstance(item[1], dict):
         detail = item[1]
         self.v.set_font('u8g2_font_profont15_mf')
         if 'description' in detail:
-          self.v.draw_str(40+cur_x,cur_y+16, detail['description'])
+          self.v.draw_str(40 + cur_x,cur_y+16, detail['description'])
           cur_y += 18
         if detail['type'] == 'int':
           self.v.set_font('u8g2_font_profont22_mf')
@@ -80,16 +83,16 @@ class menu_ui:
           else:
             str_value = str(detail['value'])
             
-          self.v.draw_str(50+cur_x,cur_y+22,str_value) 
+          self.v.draw_str(50 + cur_x,cur_y+22,str_value) 
           cur_y += 24
 
           
         if detail['type'] == 'switch':
-          self.v.draw_rframe(50+cur_x,cur_y + 3,30,20,5)
+          self.v.draw_rframe(50 + cur_x,cur_y + 3,30,20,5)
           if detail['value'] == True:
-            self.v.draw_rbox(50+17+cur_x,cur_y + 5, 10, 16,3)
+            self.v.draw_rbox(67 + cur_x,cur_y + 5, 10, 16,3)
           else:
-            self.v.draw_rbox(50+3+cur_x,cur_y + 5, 10, 16,3)
+            self.v.draw_rbox(53 + cur_x,cur_y + 5, 10, 16,3)
           cur_y += 26
 
 
@@ -171,5 +174,3 @@ class menu_ui:
         return True
       else:
         return False
-    
-

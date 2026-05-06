@@ -359,6 +359,29 @@ buttom buttons : page up, page down
 ### Nudoc
 
 `nudoc` is a Sudoku game.
+You can feed a custom board as an optional parameter, so you can play legendary boards.
+
+
+```
+nudoc [filename]
+```
+
+The file is a simple text format. 0 means a hole.
+
+Here is an example:
+
+```
+100007090
+030020008
+009600500
+005300900
+010080002
+600004000
+300000010
+040000007
+007000300
+```
+
 
 ### Zen chamber
 
