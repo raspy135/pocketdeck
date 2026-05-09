@@ -5,6 +5,10 @@
             "analog_clock.py"
         ],
         [
+            "anm.py",
+            "anm.py"
+        ],
+        [
             "argparse.py",
             "argparse.py"
         ],
@@ -265,8 +269,24 @@
             "examples/techno_example.py"
         ],
         [
+            "examples/texture_example.py",
+            "examples/texture_example.py"
+        ],
+        [
             "font/u8g2_amstrad_cpc_extended.fnt",
             "font/u8g2_amstrad_cpc_extended.fnt"
+        ],
+        [
+            "font/u8g2_lubb08_te.fnt",
+            "font/u8g2_lubb08_te.fnt"
+        ],
+        [
+            "font/u8g2_lubb12_te.fnt",
+            "font/u8g2_lubb12_te.fnt"
+        ],
+        [
+            "font/u8g2_wedge.fnt",
+            "font/u8g2_wedge.fnt"
         ],
         [
             "fontloader.py",
@@ -540,7 +560,7 @@
         },
         {
             "path": "nudoc.py",
-            "md5": "9e00f979faefc329b5c9d19a4124a9e3"
+            "md5": "f55a2b742c1f116abf823847cf7e7693"
         },
         {
             "path": "benchmark.py",
@@ -603,6 +623,10 @@
             "md5": "aa98bab0655d60df7d87570bc98fbdbd"
         },
         {
+            "path": "anm.py",
+            "md5": "af65915a7f65f22afbffac7019557f5a"
+        },
+        {
             "path": "pwd.py",
             "md5": "48ed2b18b97aef71894e3472c4f44057"
         },
@@ -636,7 +660,7 @@
         },
         {
             "path": "gpt.py",
-            "md5": "29457bd251bd11b6cfbd5b3b274464a2"
+            "md5": "54ab9e6647c489fe6690394c18621d4f"
         },
         {
             "path": "argparse.py",
@@ -752,7 +776,7 @@
         },
         {
             "path": "misc_utils.py",
-            "md5": "263c5111be1ca052c6b3164603ae2e92"
+            "md5": "b65b71aebb90ea179422b40829e06f50"
         },
         {
             "path": "mkdir.py",
@@ -795,12 +819,24 @@
             "md5": "9d293e4b86779f4c134f7ab00cbbdf34"
         },
         {
+            "path": "font/u8g2_lubb08_te.fnt",
+            "md5": "9dbe284a5abcb3b57156683f76927c83"
+        },
+        {
+            "path": "font/u8g2_wedge.fnt",
+            "md5": "fa1410b9342c612f99d1f3790ad05d6f"
+        },
+        {
+            "path": "font/u8g2_lubb12_te.fnt",
+            "md5": "d20bede81a3e955aeef32598e2366912"
+        },
+        {
             "path": "data/ghost1.xbmr",
             "md5": "2832ac924ae746c2c7f05e42f119a57f"
         },
         {
             "path": "data/nudoc.xbmr",
-            "md5": "7aa974c5fa056982afab20bfadf29057"
+            "md5": "e049f0fe157218b5e7e8db1c8c077e69"
         },
         {
             "path": "data/speaker-icon.xbm",
@@ -953,6 +989,10 @@
         {
             "path": "examples/interactive_example.py",
             "md5": "5faf275225bdddb4af7e0a52824128f6"
+        },
+        {
+            "path": "examples/texture_example.py",
+            "md5": "037bc97a7d0924aea5321882d6d719cd"
         },
         {
             "path": "examples/square_test.py",
