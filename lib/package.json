@@ -497,5 +497,503 @@
             "zen_chamber.py"
         ]
     ],
+    "files": [
+        {
+            "path": "pngviewer.py",
+            "md5": "3cd0959acf88c1480a11e0b39bd3e441"
+        },
+        {
+            "path": "sound.py",
+            "md5": "42ec9027c44f6b9d44068fe1edbed309"
+        },
+        {
+            "path": "rm.py",
+            "md5": "d90a1774c22deb0592cd829a69701296"
+        },
+        {
+            "path": "setuni.py",
+            "md5": "4dcc2b5c14602c1df0e75311b8dde888"
+        },
+        {
+            "path": "analog_clock.py",
+            "md5": "3bdd7fdf1cc38d519799c5f8b60f1786"
+        },
+        {
+            "path": "ble_manager.py",
+            "md5": "7745e1b76361d5dec3421a85e7cb00e7"
+        },
+        {
+            "path": "tasks.py",
+            "md5": "4d8f8621b015cd08ca2853b93e802e5f"
+        },
+        {
+            "path": "invader.py",
+            "md5": "f870709f521723100d21c34d4f7d8144"
+        },
+        {
+            "path": "wav_play.py",
+            "md5": "1e701515bc20669411cd2ae3ad2c43bf"
+        },
+        {
+            "path": "rmdir.py",
+            "md5": "065ec6d66a46887af19594194b8ca320"
+        },
+        {
+            "path": "nudoc.py",
+            "md5": "9e00f979faefc329b5c9d19a4124a9e3"
+        },
+        {
+            "path": "benchmark.py",
+            "md5": "122a7416cceda6e884a0601bd487b49b"
+        },
+        {
+            "path": "gdrive.py",
+            "md5": "9ef8b6d34260fd37b7269f9ba392835f"
+        },
+        {
+            "path": "cpmv.py",
+            "md5": "9b1a003cdde3c2b5594035c55f16a380"
+        },
+        {
+            "path": "ble_kb.py",
+            "md5": "c17d501fa1a29caad38e5cffe92ecc6f"
+        },
+        {
+            "path": "ntptime.mpy",
+            "md5": "6d3f69a214e19e1ff2222a5fd4f7c9aa"
+        },
+        {
+            "path": "pem_extra.py",
+            "md5": "4c00604093c6656a44e7a2e4b8fa5070"
+        },
+        {
+            "path": "copy.mpy",
+            "md5": "88eb3d4ca6eaf2c717ab1bacec543855"
+        },
+        {
+            "path": "mock_stream.py",
+            "md5": "6c1c1f59b982a99c5d60a272ee7d8259"
+        },
+        {
+            "path": "pathlib.mpy",
+            "md5": "93056f01e41b03013f9a9088ffa6f36d"
+        },
+        {
+            "path": "journal.py",
+            "md5": "1ea9390b6ffa04df136ca1dd931d2b48"
+        },
+        {
+            "path": "wavplay.py",
+            "md5": "fc37d6137165f38a9747c9cac95ddc74"
+        },
+        {
+            "path": "mouse.py",
+            "md5": "cc9c2124e2b784b068c63413ae4010bb"
+        },
+        {
+            "path": "ping.py",
+            "md5": "4c633006ddb5699ba6345f810109177b"
+        },
+        {
+            "path": "uping.py",
+            "md5": "f01067a4d408cf410b55d6d898f4bfec"
+        },
+        {
+            "path": "home.py",
+            "md5": "aa98bab0655d60df7d87570bc98fbdbd"
+        },
+        {
+            "path": "pwd.py",
+            "md5": "48ed2b18b97aef71894e3472c4f44057"
+        },
+        {
+            "path": "datetime.mpy",
+            "md5": "cec989192cf080e5ec6e3741f5a3a729"
+        },
+        {
+            "path": "codec_config.py",
+            "md5": "6eb329f1350c16a3ea9470c895a6e851"
+        },
+        {
+            "path": "voicerecorder.py",
+            "md5": "4fb152f2b7c6908b849fcfacb1e6a153"
+        },
+        {
+            "path": "mv.py",
+            "md5": "238690265928f863d00ff12d50a399e2"
+        },
+        {
+            "path": "esclib.py",
+            "md5": "54b71b983fd41f9aec438f67bdc19452"
+        },
+        {
+            "path": "pngreader.py",
+            "md5": "633a51452f3a5dc82802ebbeb49fd4f6"
+        },
+        {
+            "path": "setjpf.py",
+            "md5": "b1f03be065255058750e1241d681a30b"
+        },
+        {
+            "path": "gpt.py",
+            "md5": "29457bd251bd11b6cfbd5b3b274464a2"
+        },
+        {
+            "path": "argparse.py",
+            "md5": "cbbfaceb5b4153ba8a3916c0cef78d96"
+        },
+        {
+            "path": "fontloader.py",
+            "md5": "618fe9ddc8d4cac98c28ab0584a5aa63"
+        },
+        {
+            "path": "imagelib.py",
+            "md5": "107a3f4aa06697988fa6530513abc15b"
+        },
+        {
+            "path": "ls.py",
+            "md5": "83201acb4a049637ac4e6e78dc1e9227"
+        },
+        {
+            "path": "pie.py",
+            "md5": "b21863bd8989496a23ccf2b039f94f20"
+        },
+        {
+            "path": "cd.py",
+            "md5": "badfff2af2b5fe59e251b4bfea38db2d"
+        },
+        {
+            "path": "wavtest.py",
+            "md5": "3d1d37dca9b8f6d3067c6a2740bfb45e"
+        },
+        {
+            "path": "xbmviewer.py",
+            "md5": "89309ceca9ca6835893824ef5971ed9e"
+        },
+        {
+            "path": "home.mpy",
+            "md5": "751f85f1d025565b2704066837483b7f"
+        },
+        {
+            "path": "re_findall.py",
+            "md5": "fe418d8d9411e1fea145234dc6fdcb98"
+        },
+        {
+            "path": "stt.py",
+            "md5": "6dd077a0e6c0edcb19669d428b5c01ff"
+        },
+        {
+            "path": "reader.py",
+            "md5": "7d5aca7ab02669e39bcef1e94290cd94"
+        },
+        {
+            "path": "ls.mpy",
+            "md5": "f62bf8b64d8aa50f35c1c6264d4593f1"
+        },
+        {
+            "path": "music.py",
+            "md5": "84ae369b7b2d98ee75a190dbc0ff9136"
+        },
+        {
+            "path": "pem_keymap_default.py",
+            "md5": "db591b3eae9a1506b23c947b7e0dd316"
+        },
+        {
+            "path": "xbm2xbmr.py",
+            "md5": "e8d28f7e255ac66d3f19163226b1595f"
+        },
+        {
+            "path": "pem_keymap.py",
+            "md5": "6a03e82e4d7532b13a57fef75bfc18d8"
+        },
+        {
+            "path": "wav_loader.py",
+            "md5": "d60e626cbfdbed3c38f717db561c8710"
+        },
+        {
+            "path": "jp_input.py",
+            "md5": "42a7179908498f64d8f55dae3789f6bd"
+        },
+        {
+            "path": "pem.mpy",
+            "md5": "612ac45372fa7156323fb345cc0198ee"
+        },
+        {
+            "path": "update_updater.py",
+            "md5": "adfe287c00cd166f66d75484b4e43fa3"
+        },
+        {
+            "path": "pem.py",
+            "md5": "48154089701b7136a51a88b4a27a0830"
+        },
+        {
+            "path": "recorder.py",
+            "md5": "a68420e3634ccdf41694f1de7c9f03c3"
+        },
+        {
+            "path": "cat.py",
+            "md5": "2dd464abafaca4eb9dfa05153ea965c2"
+        },
+        {
+            "path": "overlay.py",
+            "md5": "c50b150dfda3c53e7cea5cac2315f629"
+        },
+        {
+            "path": "download_drumkit_uzu.py",
+            "md5": "2b3dc2f10b6dfd4d7d79dae07e464f54"
+        },
+        {
+            "path": "dsp_utils.py",
+            "md5": "5b1914030b20cc28c546d07cdd096cef"
+        },
+        {
+            "path": "speaker_test.py",
+            "md5": "eee61a80d394b77bccefb89984d357d2"
+        },
+        {
+            "path": "misc_utils.py",
+            "md5": "263c5111be1ca052c6b3164603ae2e92"
+        },
+        {
+            "path": "mkdir.py",
+            "md5": "e3e08b8d7966b5c0727d9af4519bff8d"
+        },
+        {
+            "path": "wavfileplay.py",
+            "md5": "d550f26c0d211db88561df8dcc16e7db"
+        },
+        {
+            "path": "menu_ui.py",
+            "md5": "fb6e55ab4c805128ac855ba0cf6f39ba"
+        },
+        {
+            "path": "cp.py",
+            "md5": "c76309fa6fff679694b511e011add14b"
+        },
+        {
+            "path": "types.mpy",
+            "md5": "00efda36ef7f491a4e2d18a8d492a011"
+        },
+        {
+            "path": "dic.py",
+            "md5": "d25730d654db7300ec710a432ac1f1e6"
+        },
+        {
+            "path": "grep.py",
+            "md5": "03e22f84500f11390c92d34952034db7"
+        },
+        {
+            "path": "xbmreader.py",
+            "md5": "46ea5b7afed5d1536b61db3a7f7d663c"
+        },
+        {
+            "path": "zen_chamber.py",
+            "md5": "0582a9a8c3bffd86a308be5ba7cc0a88"
+        },
+        {
+            "path": "font/u8g2_amstrad_cpc_extended.fnt",
+            "md5": "9d293e4b86779f4c134f7ab00cbbdf34"
+        },
+        {
+            "path": "data/ghost1.xbmr",
+            "md5": "2832ac924ae746c2c7f05e42f119a57f"
+        },
+        {
+            "path": "data/nudoc.xbmr",
+            "md5": "7aa974c5fa056982afab20bfadf29057"
+        },
+        {
+            "path": "data/speaker-icon.xbm",
+            "md5": "7cd323aab58d16641a70bcf0727fdfc8"
+        },
+        {
+            "path": "data/easy.xbmr",
+            "md5": "9fd5d57f0d7b765faa687ed3f432956f"
+        },
+        {
+            "path": "data/block.xbmr",
+            "md5": "6318ab2687415d3161b2a5343f29783f"
+        },
+        {
+            "path": "data/invader.wav",
+            "md5": "e0f1a54b19d580095c0fa35c2a78b6a0"
+        },
+        {
+            "path": "data/ghost2.xbm",
+            "md5": "bee7fdfed95ad156232a0869dea0518b"
+        },
+        {
+            "path": "data/cat3.xbmr",
+            "md5": "82a77fa267cd7d37ecfd1df947b4cd50"
+        },
+        {
+            "path": "data/saw_wt.wav",
+            "md5": "b7577efac26796ebb8c7d2723d9f296f"
+        },
+        {
+            "path": "data/fireball.xbmr",
+            "md5": "436f258c101178c4cfefa9c677bf97aa"
+        },
+        {
+            "path": "data/pencil.xbmr",
+            "md5": "9b0e1c1e4d9c687224976fe021dcf072"
+        },
+        {
+            "path": "data/speaker-icon-disabled.xbm",
+            "md5": "b29a89e0cff01d6de719195e52633d9f"
+        },
+        {
+            "path": "data/square.wav",
+            "md5": "7c63447e6f56f6ed26a78a636ab1d550"
+        },
+        {
+            "path": "data/wifi-icon-disabled.xbm",
+            "md5": "8d82bd62895d7a7a5838e8dfcf238410"
+        },
+        {
+            "path": "data/checked.xbmr",
+            "md5": "7ad44f04109967b823919f7048976d00"
+        },
+        {
+            "path": "data/agent_mode.md",
+            "md5": "1c3402cb2aebdd2dddaf9c23d0340e32"
+        },
+        {
+            "path": "data/cat4.xbmr",
+            "md5": "9a6dbd6b15e7eae65c34688fc45a7053"
+        },
+        {
+            "path": "data/cat2.xbm",
+            "md5": "59d2e9c4a1175c5a3bfa89586178da22"
+        },
+        {
+            "path": "data/response.xbmr",
+            "md5": "0a83fff878bec7efe239bd12404fb6ba"
+        },
+        {
+            "path": "data/wifi-icon.xbm",
+            "md5": "eb8463b17334480242374c55e2a3876a"
+        },
+        {
+            "path": "data/cat3.xbm",
+            "md5": "a15fdd972c2e099c3b0a1e3567772297"
+        },
+        {
+            "path": "data/cat4.xbm",
+            "md5": "1f1d65f7186b80ad45d535b5caaf599c"
+        },
+        {
+            "path": "data/nunomo_logo.xbmr",
+            "md5": "c3f962d9556004ad492140415f59527c"
+        },
+        {
+            "path": "data/medium.xbmr",
+            "md5": "c6764585f82234fa147e654aad92ccd4"
+        },
+        {
+            "path": "data/ghost1.xbm",
+            "md5": "55692878c5a004549e316de3e9b0fa29"
+        },
+        {
+            "path": "data/cat1.xbm",
+            "md5": "8be62bee11c9389a7f3a396c638b71ad"
+        },
+        {
+            "path": "data/guitar_wt.wav",
+            "md5": "d380bc4732f14f9be0e9322e8c277c48"
+        },
+        {
+            "path": "data/hard.xbmr",
+            "md5": "00a50fa167f5c1fff96a482abf8dbfae"
+        },
+        {
+            "path": "data/active.xbmr",
+            "md5": "386bd6ae118ddd9580486f293f719619"
+        },
+        {
+            "path": "data/lofi_girl-studying.xbm",
+            "md5": "868f6036351881cc4d3953f7de8deef6"
+        },
+        {
+            "path": "data/clear.wav",
+            "md5": "f9f8787c529aa68478e62ca517980b6a"
+        },
+        {
+            "path": "data/piano_a2.wav",
+            "md5": "27c6f5ec7ccc0bab8f5f0bac7cd8ec0f"
+        },
+        {
+            "path": "data/cat2.xbmr",
+            "md5": "71568d9ac8347d164d467287e29fd7f6"
+        },
+        {
+            "path": "data/cat1.xbmr",
+            "md5": "1d997bc6705cab21dc2f60021894e510"
+        },
+        {
+            "path": "examples/compressor_example.py",
+            "md5": "51a959a0e42d4ac2c62481b49af6bb23"
+        },
+        {
+            "path": "examples/reverb_example.py",
+            "md5": "2b2bc7698978e5fd836dfef3a13d45b8"
+        },
+        {
+            "path": "examples/techno_example.py",
+            "md5": "a4a5d8ecfc8550532e701af6af7743cc"
+        },
+        {
+            "path": "examples/hello_world.py",
+            "md5": "9fb8b219f2053998bfc9d974c7b81510"
+        },
+        {
+            "path": "examples/hello2.py",
+            "md5": "13125d602fb6907126902f41ff6652f2"
+        },
+        {
+            "path": "examples/interactive_example.py",
+            "md5": "5faf275225bdddb4af7e0a52824128f6"
+        },
+        {
+            "path": "examples/square_test.py",
+            "md5": "e69557af6821fe00816dce9b7bf6ba39"
+        },
+        {
+            "path": "examples/hello_graphic.py",
+            "md5": "bbb3080e521b2b611bb504d98377acce"
+        },
+        {
+            "path": "examples/pattern_example.py",
+            "md5": "85b72be8bc915cd4498099e2319395d1"
+        },
+        {
+            "path": "examples/input_test.py",
+            "md5": "92bbd9c30b9ebd0bed3f66f172bb2043"
+        },
+        {
+            "path": "examples/launch_app.py",
+            "md5": "756cfd3aa19c0c46689e9cb8da5608f8"
+        },
+        {
+            "path": "examples/cube_test.py",
+            "md5": "93dff331069c663658b4c3b89a98cf39"
+        },
+        {
+            "path": "examples/mixer_delay_example.py",
+            "md5": "917aa5d5413a8c157bc96a843861eee3"
+        },
+        {
+            "path": "examples/dither_test.py",
+            "md5": "cd4af4938152a4c1ff85d52d83d761f5"
+        },
+        {
+            "path": "examples/sphere_test.py",
+            "md5": "ce2b747ec0a637881b2af2c80ab614b0"
+        },
+        {
+            "path": "examples/routing_example.py",
+            "md5": "9a2b5b6e00b0332ac3386ea20d359315"
+        }
+    ],
     "version": "1.0"
 }

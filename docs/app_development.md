@@ -177,8 +177,13 @@ All drawing methods work when the vscreen is active (current screen). Basically 
 - `draw_ellipse(x, y, rx, ry, opt)`
 - `draw_filled_ellipse(x, y, rx, ry, opt)`
 - `draw_polygon(points_array)` - Draws a polygon from an `int16_t` array. For a triangle, the format must be `[x1, x2, x3, y1, y2, y3]`.
+- `draw_polygon_texture(points_list, map_list, image_tuple, [frame_index])` - Draws an affine textured polygon. 
+	`points_list`: Flat list or array of `[x1, x2, ..., xn, y1, y2, ..., yn]`.
+	`map_list`: Flat list or array of texture coordinates `[u1, u2, ..., un, v1, v2, ..., vn]`.
+	`image_tuple`: Standard image tuple `(name, w, h, data, num_frames)`.
+	`frame_index`: Optional frame index for multi-frame images.
 
-#### 3D operations
+#### 2D3D batch face operations
 
 - `draw_3d_faces(points, indices, dither)` - Specialized high-speed batch renderer for 3D/2D faces. Draws all triangles in one call with internal state caching for dither levels. This function is used with dsplib module's indexed projection functions. See dsplib module reference and example applications, `sphere_test`, `cube_test`.
 	`points`: array('h',...) stores vertecies of triangles. Size is 6*number_of_faces
@@ -399,5 +404,76 @@ See 3D examples under `/sd/lib/examples/`.
 ## esclib module
 
 esclib module is a small utility to generate basic escape sequences.
+
+## anm module reference
+
+The `anm` module provides a flexible keyframe-based animation system with various easing curves.
+
+### Interpolation Functions (Curves)
+
+- `linear(t)`: Constant speed.
+- `ease_in(t)`: Quadratic acceleration.
+- `ease_out(t)`: Quadratic deceleration.
+- `ease_in_out(t)`: Acceleration then deceleration.
+- `ease_out_in(t)`: Deceleration then acceleration (useful for jump-like physics).
+- `spring(t)`: Bouncy overshoot effect.
+- `jump(t)`: Step function (0.0 until completion, then 1.0).
+
+### anm_object
+
+Represents an individual animation.
+
+- `__init__(duration_ms, props, loop=False, auto_unregister=False)`
+	- `duration_ms`: Total animation time.
+	- `props`: Dictionary of `{ 'property_name': [easing_func, val0, val1, ...] }`.
+	- `loop`: If True, the animation restarts automatically.
+	- `auto_unregister`: If True, the sequencer removes this object upon completion.
+
+- `seek(norm_t)`: Jumps to a specific point in the animation (0.0 to 1.0) and resets the start time.
+- `get_time()`: Returns current normalized time.
+
+### anm_sequencer
+
+Manages multiple `anm_object` instances.
+
+- `__init__()`: Creates a new sequencer.
+- `register(key, obj)`: Adds an animation object and starts it.
+- `unregister(key)`: Removes an animation object.
+- `update(t_ms)`: Updates all registered animations. Usually called in the screen update loop with `time.ticks_ms()`.
+- `get_obj(key)`: Returns the registered `anm_object` by its key.
+
+### Anm module example usage
+
+```python
+import anm
+import time
+
+class AnimDemo:
+  def __init__(self, v):
+    self.v = v
+    self.seq = anm.anm_sequencer()
+    
+    # Animate 'x' from 0 to 300, and 'y' from 50 to 150
+    box_anim = anm.anm_object(2000, {
+      'x': [anm.ease_in_out, 0, 300],
+      'y': [anm.spring, 50, 150]
+    }, loop=True)
+    
+    self.seq.register('box', box_anim)
+
+  def update(self, e):
+    v = self.v
+    # Update animations with current time
+    self.seq.update(time.ticks_ms())
+    
+    # Get animated properties
+    anim = self.seq.get_obj('box')
+    
+    v.set_draw_color(0)
+    v.draw_box(0, 0, 400, 240)
+    v.set_draw_color(1)
+    v.draw_box(int(anim.x), int(anim.y), 50, 50)
+    v.finished()
+```
 
 

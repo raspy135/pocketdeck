@@ -150,6 +150,17 @@ def parse_inline_directives(message, references, images, args, vs):
 
   return result, changed
 
+def read_api_key():
+  try:
+    with open(API_KEY_FILENAME,"r") as f:
+      api_key = f.read().strip()
+    return api_key
+  except Exception as e:
+    print(f"Error to open API key. Put API key to {API_KEY_FILENAME}", file=self.vs)
+    return False
+    
+  #return True
+
 class chatgpt_util:
   def __init__(self,vs):
     self.vs = vs
@@ -157,16 +168,6 @@ class chatgpt_util:
     self.stt_url = "https://api.openai.com/v1/audio/transcriptions"
     self.tts_url = "https://api.openai.com/v1/audio/speech"
     self.api_key = ""
-
-  def read_api_key(self):
-    try:
-      with open(API_KEY_FILENAME,"r") as f:
-        self.api_key = f.read().strip()
-    except Exception as e:
-      print(f"Error to open API key. Put API key to {API_KEY_FILENAME}", file=self.vs)
-      return False
-    
-    return True
 
   def post(self, url, json=None):
     headers = {
@@ -176,7 +177,10 @@ class chatgpt_util:
       }
     return requests.post(url, headers=headers, data=json)
 
-
+  def read_api_key(self):
+    self.api_key = read_api_key()
+    return False if self.api_key == False else True
+    
 
   def make_json(self, message, references, images=None, model="gpt-5.5", instructions = None):
     content_items = []
@@ -222,7 +226,7 @@ class chatgpt_util:
       payload_dic['instructions'] = instructions
       
     payload = ujson.dumps(payload_dic)
-    print(payload)
+    #print(payload)
     return payload
     
   def ask(self,json):
@@ -477,7 +481,7 @@ def main(vs, args_in):
   parser.add_argument('-j', '--jp',action='store_true',help='Answer in Japanese')
   parser.add_argument('-f', '--file',nargs='+',action='store',help='Attach file(s) as reference. file1 file2...')
   parser.add_argument('-i', '--image', nargs='+', action='store',help='Attach image file(s) or image url(s). img1 img2...')
-  parser.add_argument('-m', '--model',action='store',default='gpt-5.4',help='Model to use (e.g. gpt-5-mini)')
+  parser.add_argument('-m', '--model',action='store',default='gpt-5.4-mini',help='Model to use (e.g. gpt-5-mini)')
   parser.add_argument('-v', '--voice',action='store_true',help='Use voice mode (STT and TTS)')
   parser.add_argument('-vt', '--voice-type',action='store',default='coral',help='Voice type for TTS (alloy, coral, echo, fable, onyx, nova, shimmer)')
   parser.add_argument('content', nargs='*',help='Content to ask')
@@ -492,7 +496,7 @@ def main(vs, args_in):
   message = ""
   instructions = None
 
-  if args.voice: # and not args.q and not args.content:
+  if args.voice and not args.q and not args.content:
     rec_file = "/sd/work/voice_rec.wav"
     record_audio(vs, rec_file)
     print("Transcribing...", file=vs)
@@ -620,7 +624,7 @@ def main(vs, args_in):
       #raw_response = "Speak fast and casually: " + raw_response
       raw_response_sub = re.sub('\]\(ht.+?\)',']',raw_response)
       
-      print(raw_response_sub)
+      #print(raw_response_sub)
       res = gpt.tts_stream(raw_response_sub, voice=args.voice_type)
       if res and res.status_code == 200:
         # In MicroPython urequests, the raw socket is often .raw or .s
@@ -652,9 +656,16 @@ def main(vs, args_in):
     idx = 0
     while True:
       start = raw_response.find("```", idx)
+      while start != -1 and start != 0 and raw_response[start-1] != '\n':
+        start = raw_response.find("```", start + 1)
+        
       if start == -1:
         break
+        
       end = raw_response.find("```", start + 3)
+      while end != -1 and raw_response[end-1] != '\n':
+        end = raw_response.find("```", end + 1)
+        
       if end == -1:
         break
         

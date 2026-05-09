@@ -1,5 +1,6 @@
 import esclib as ec
 import pdeck_utils
+import os
 
 def input(message):
   vs = pdeck_utils.vscreen_stream()
@@ -24,4 +25,13 @@ def input_vs(vs, message):
       print('', file=vs)
       break
   return out
+
+def file_exists(name):
+  if name == None:
+    return False
+  try:
+    os.stat(name)
+    return True
+  except OSError:
+    return False
 

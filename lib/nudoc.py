@@ -11,6 +11,7 @@ import xbmreader
 import fontloader
 import ujson
 import menu_ui
+from anm import anm_sequencer, anm_object
 
 KEY_UP = b'\x1b[A'
 KEY_DOWN = b'\x1b[B'
@@ -161,9 +162,13 @@ class NudocGame:
     self.cursor_y = 0
     self.last_scroll = 255
     self.last_mouse_cell = None
-    self.anim_lines = []
-    self.anim_boxes = []
-    self.anim_win = 0
+    
+    self.anim_seq = anm_sequencer()
+
+    self.char_anm = anm_object(duration_ms = 800,
+      props = { 'y': [anm_object.spring, 0, -20, 0]})
+    self.anim_seq.register("char",self.char_anm)
+
     self.time_bonus_anm = 0
     self.current_tick = time.ticks_us()
     self.solution = [[0 for _ in range(9)] for _ in range(9)]
@@ -190,6 +195,7 @@ class NudocGame:
     self.images['Hard'] = xbmreader.scale(img, 2)
 
     img = xbmreader.read_xbmr("/sd/lib/data/nudoc.xbmr")
+    #self.images['title'] = xbmreader.scale(img, 2)
     self.images['title'] = img
     img = xbmreader.read_xbmr("/sd/lib/data/pencil.xbmr")
     self.images['pencil'] = img
@@ -202,6 +208,7 @@ class NudocGame:
     self.title_menu.change_font("u8g2_font_profont22_mf", 24)
     self.title_message_life = 0
     self.title_message = ""
+
 
   def make_title_menu(self):
     return [
@@ -269,15 +276,14 @@ class NudocGame:
     self.last_scroll = 255
     self.last_mouse_cell = None
     self.last_tp_pad = -1
-    self.anim_lines = []
-    self.anim_boxes = []
-    self.anim_win = 0
+    #self.anim_seq = anm_sequencer()
     self.current_tick = time.ticks_us()
     self.solution = [[0 for _ in range(9)] for _ in range(9)]
     self.board = [[0 for _ in range(9)] for _ in range(9)]
     self.fixed = [[0 for _ in range(9)] for _ in range(9)]
     self.notes = [[0 for _ in range(9)] for _ in range(9)]
     self.note_mode = False
+    self.op_note_mode = 0
     self.board_load_error = None
     ok = self.generate_puzzle()
     while self.vs.poll():
@@ -686,31 +692,33 @@ class NudocGame:
   def check_animations(self):
     y = self.cursor_y
     x = self.cursor_x
+    self.char_anm.seek(0)
     if self.is_row_filled(y):
-      found = False
-      for item in self.anim_lines:
-        if item[0] == 'r' and item[1] == y:
-          found = True
-      if not found:
-        self.anim_lines.append(['r', y, 18])
+      #print('filled')
+      key = f"line_r_{y}"
+      if key not in self.anim_seq.anms:
+        anim = anm_object(duration_ms=1000, props={'life': [anm_object.linear, 18, 0]}, auto_unregister=True)
+        anim.mode = 'r'
+        anim.idx = y
+        self.anim_seq.register(key, anim)
         self.score += 30
     if self.is_col_filled(x):
-      found = False
-      for item in self.anim_lines:
-        if item[0] == 'c' and item[1] == x:
-          found = True
-      if not found:
-        self.anim_lines.append(['c', x, 18])
+      key = f"line_c_{x}"
+      if key not in self.anim_seq.anms:
+        anim = anm_object(duration_ms=1000, props={'life': [anm_object.linear, 18, 0]}, auto_unregister=True)
+        anim.mode = 'c'
+        anim.idx = x
+        self.anim_seq.register(key, anim)
         self.score += 30
     bx = x // 3
     by = y // 3
     if self.is_box_filled(bx, by):
-      found = False
-      for item in self.anim_boxes:
-        if item[0] == bx and item[1] == by:
-          found = True
-      if not found:
-        self.anim_boxes.append([bx, by, 24])
+      key = f"box_{bx}_{by}"
+      if key not in self.anim_seq.anms:
+        anim = anm_object(duration_ms=1400, props={'life': [anm_object.linear, 24, 0]}, auto_unregister=True)
+        anim.bx = bx
+        anim.by = by
+        self.anim_seq.register(key, anim)
         self.score += 50
 
   def check_complete(self):
@@ -719,28 +727,13 @@ class NudocGame:
         if self.board[y][x] != self.solution[y][x]:
           return
     self.completed = True
-    self.anim_win = 80
+    self.anim_seq.register('win', anm_object(duration_ms=4800, props={'phase': [anm_object.linear, 80, 0]}, auto_unregister=True))
     self.score += 200 + 200 * (2 - self.mistakes)
     self.play_sound(0)
     self.state = STATE_GAMEOVER_DIALOG
 
   def update_anims(self):
-    out = []
-    for item in self.anim_lines:
-      item[2] -= 1
-      if item[2] > 0:
-        out.append(item)
-    self.anim_lines = out
-
-    out = []
-    for item in self.anim_boxes:
-      item[2] -= 1
-      if item[2] > 0:
-        out.append(item)
-    self.anim_boxes = out
-
-    if self.anim_win > 0:
-      self.anim_win -= 1
+    pass
 
   def draw_status(self):
     self.v.set_draw_color(1)
@@ -893,36 +886,40 @@ class NudocGame:
         self.v.set_dither(16)
 
   def draw_completion_effect(self):
-    if self.anim_win <= 0:
-      return
-    phase = self.anim_win % 16
+    anim = self.anim_seq.get_obj('win')
+    if not anim: return
+    if not hasattr(anim, 'phase'): return
+    phase = int(anim.phase) % 16
     self.v.set_dither(phase)
     self.v.draw_frame(GRID_X - 4, GRID_Y - 4, GRID_W + 8, GRID_H + 8)
     self.v.draw_frame(GRID_X - 6, GRID_Y - 6, GRID_W + 12, GRID_H + 12)
 
   def draw_line_box_anims(self):
-    for item in self.anim_lines:
-      mode = item[0]
-      idx = item[1]
-      life = item[2]
-      d = 4 + (life % 10)
-      self.v.set_dither(d)
-      if mode == 'r':
-        y = GRID_Y + idx * CELL
-        self.v.draw_box(GRID_X, y, GRID_W, CELL)
-      else:
-        x = GRID_X + idx * CELL
-        self.v.draw_box(x, GRID_Y, CELL, GRID_H)
-      self.v.set_dither(16)
-
-    for item in self.anim_boxes:
-      bx = item[0]
-      by = item[1]
-      life = item[2]
-      d = 5 + (life % 10)
-      self.v.set_dither(d)
-      self.v.draw_box(GRID_X + bx * CELL * 3, GRID_Y + by * CELL * 3, CELL * 3, CELL * 3)
-      self.v.set_dither(16)
+    for key, item in list(self.anim_seq.anms.items()):
+      anim = item
+      if not hasattr(anim, 'life'): continue
+      
+      life = int(anim.life)
+      if key.startswith('line_'):
+        mode = anim.mode
+        idx = anim.idx
+        d = 4 + (life % 10)
+        self.v.set_dither(d)
+        if mode == 'r':
+          y = GRID_Y + idx * CELL
+          self.v.draw_box(GRID_X, y, GRID_W, CELL)
+        else:
+          x = GRID_X + idx * CELL
+          self.v.draw_box(x, GRID_Y, CELL, GRID_H)
+        self.v.set_dither(16)
+        
+      elif key.startswith('box_'):
+        bx = anim.bx
+        by = anim.by
+        d = 5 + (life % 10)
+        self.v.set_dither(d)
+        self.v.draw_box(GRID_X + bx * CELL * 3, GRID_Y + by * CELL * 3, CELL * 3, CELL * 3)
+        self.v.set_dither(16)
 
   def draw_quit_dialog(self):
     w = 190
@@ -974,7 +971,7 @@ class NudocGame:
     self.v.set_draw_color(0)
     self.v.draw_box(0, 0, 400,100)
     self.v.set_draw_color(1)
-    self.v.draw_image(200 - 160, 120 - 120, self.images['title'])
+    self.v.draw_image(200 - 160, 120 - 115, self.images['title'])
     if self.title_message_life > 0:
       self.v.set_font("u8g2_font_profont15_mf")
       self.v.draw_str(40, 228, self.title_message)
@@ -1176,7 +1173,7 @@ class NudocGame:
     d = self.difficulty
     self.v.set_draw_color(1)
     self.v.set_dither(16)
-    self.v.draw_image(x, y, self.images[d])
+    self.v.draw_image(x, int(y + self.char_anm.y), self.images[d])
     self.v.set_font("u8g2_font_profont22_mf")
     w = self.v.get_utf8_width(d)
     self.v.draw_utf8(x + 48 - w // 2, y + 140, d)
@@ -1206,6 +1203,7 @@ class NudocGame:
     self.last_tick = self.current_tick
     self.current_tick = time.ticks_us()
     self.time_diff = self.current_tick - self.last_tick
+    self.anim_seq.update(time.ticks_ms())
 
     self.v.set_dither(16)
     if self.state == STATE_TITLE:
@@ -1250,7 +1248,6 @@ class NudocGame:
         else:
           self.handle_mouse()
         self.handle_touch_buttons()
-        self.update_anims()
       else:
         self.handle_touch_buttons()
       if not self.v.active:
