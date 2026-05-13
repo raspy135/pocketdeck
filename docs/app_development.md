@@ -496,3 +496,72 @@ class AnimDemo:
 
 ```
 
+## ssh module
+
+The `ssh` module provides SSH remote execution and file transfer. Requires an active WiFi connection. The default private key is `/config/ssh/id_rsa`.
+
+`user@host` shorthand is accepted wherever `host` is a parameter — the username embedded in the string is used unless overridden by an explicit `username` argument.
+
+All network operations run in a dedicated FreeRTOS task to avoid stack exhaustion on the MicroPython task.
+
+### ssh.Session
+
+Persistent SSH session — connect once, run many operations. Supports the `with` statement.
+
+```python
+ssh.Session(host [, username, password, identity])
+```
+
+- `host`: hostname or IP, optionally `user@host`
+- `username`: default `"root"`
+- `password`: default `""`
+- `identity`: path to private key file; default `/config/ssh/id_rsa`
+
+Raises `OSError` if the connection fails or WiFi is not available.
+
+**Methods:**
+
+- `exec(cmd)` — Run a command. Returns `(exit_code, output_bytes)`. Raises `OSError` on failure.
+- `put(local, remote)` — Upload a file. Returns `0` on success.
+- `get(remote, local)` — Download a file. Returns `0` on success.
+- `close()` — Close the session.
+
+```python
+import ssh
+
+with ssh.Session("pi@192.168.1.10") as s:
+  rc, out = s.exec("uname -a")
+  print(out.decode())
+  s.put("/sd/data.txt", "/home/pi/data.txt")
+```
+
+### ssh.exec
+
+One-shot command execution. Opens a connection, runs the command, and closes.
+
+```python
+ssh.exec(host, command [, username, password, identity])
+```
+
+Returns `(exit_code, output_bytes)`. Raises `OSError` on failure.
+
+```python
+rc, out = ssh.exec("192.168.1.10", "ls /tmp", "pi")
+print(rc, out.decode())
+```
+
+### ssh.scp
+
+One-shot file copy using SCP protocol.
+
+```python
+ssh.scp(src, dst [, username, password, identity])
+```
+
+Returns `0` on success. `src` and `dst` follow standard SCP notation (`user@host:path` for remote).
+
+```python
+ssh.scp("/sd/file.txt", "pi@192.168.1.10:/home/pi/file.txt")
+```
+
+

@@ -11,6 +11,8 @@ import urequests as requests
 import array
 import xbmreader
 import audio
+import anm
+from wav_loader import load_wav
 
 from machine import RTC
 
@@ -70,10 +72,15 @@ class ktimer:
     self.second = 0
     self.touched = False
     self.dial_base = 0
+    self.anim = anm.anm_object(100,
+    { 'minute': [anm.ease_out, 0,0]})
+    self.anim.goal = 0
+    
 
 class analog_clock:
   def __init__(self,v, vs, sampler):
     self.key_event = False
+    self.seq = anm.anm_sequencer()
     self.sampler = sampler
     self.tide_chart = None
     self.message = ''
@@ -116,6 +123,7 @@ class analog_clock:
     #self.last_us=0
     self.page = 'clock'
     self.kt = ktimer()
+    self.seq.register('timer_hand', self.kt.anim)
     self.wavbuf = array.array('h',bytearray(0x10000))
     phase = 0
     for i in range(0x4000):
@@ -124,11 +132,11 @@ class analog_clock:
         phase += 0.3
         if phase > twopi: phase -= twopi
     
-    self.wavbuf_click = array.array('h',bytearray(0x1000))
-    for i in range(0x800):
-        self.wavbuf_click[i] = int(math.sin(i*0.001)*3000)
+    data, ch = load_wav('/sd/lib/data/click2.wav', sample_rate=16000, channels=2)
+    self.wavbuf_click = data
     self.sampler.set_sample(0, self.wavbuf)
     self.sampler.set_sample(1, self.wavbuf_click)
+    self.sampler.volume(1, 0.8)
     self.op_second = None
       
   def wavplay_alarm(self):
@@ -141,7 +149,7 @@ class analog_clock:
   def draw_oneline_help(self):
     self.v.set_draw_color(1)
     self.v.set_font('u8g2_font_profont15_mf')
-    help_copy_str = 'C - Copy date '
+    help_copy_str = 'C - Copy date, BS or B button - Toggle Timer '
     copy_str_width = self.v.get_str_width(help_copy_str) + 1
     self.v.draw_str(pdeck.get_screen_size()[0] - copy_str_width, self.coffset[1] + 195,help_copy_str)
 
@@ -168,6 +176,8 @@ class analog_clock:
       self.v.finished()
       return
 
+    
+    self.seq.update(time.ticks_ms())
     self.last_second = self.second
     #self.draw_secondhand()
     #return
@@ -219,11 +229,19 @@ class analog_clock:
       if not self.sampler.is_playing(0):
         self.wavplay_alarm()
 
-    if kt.stat == KT_RUNNING:
+    if kt.stat == KT_RUNNING and not kt.touched:
       curtime = time.ticks_ms()
       kt.second_past = int(((curtime - kt.starttime) / (1000)))
       kt.minute = int(kt.org_minute + (kt.org_second / 60)- (self.kt.second_past / 60))
       kt.second = int(kt.org_second - (self.kt.second_past %60))
+
+      if kt.minute != kt.anim.goal:
+        kt.anim = anm.anm_object(0,
+        { 'minute' : [ anm.ease_out, kt.anim.minute, kt.minute ]})
+        kt.anim.goal = kt.minute
+        self.seq.register('timer_hand', kt.anim)
+
+
       if kt.second < 0:
         kt.second += 60
       if kt.minute < 0 or (kt.minute == 0 and kt.second == 0):
@@ -260,23 +278,44 @@ class analog_clock:
     else:
       if not kt.touched:
         kt.dial_base = dial
+        kt.org_minute = kt.minute
+        kt.last_dial = dial
+        kt.cycles = 0
         kt.minute_base = kt.minute
         kt.stat = KT_STOP
         kt.second = 0
       kt.touched = True
 
     if kt.touched:
-      dial_distance = dial - kt.dial_base
-      if dial_distance > 30:
-        dial_distance = dial - (kt.dial_base + 160)
-      elif dial_distance < -30:
-        dial_distance = (dial+160) - kt.dial_base
+      if dial - kt.last_dial < -120:
+        kt.cycles += 1
+      if dial - kt.last_dial > 120:
+        kt.cycles -= 1
+      dial_distance = dial - kt.dial_base + kt.cycles*160
+        
+      kt.last_dial = dial
+      #if dial_distance > 30:
+      #  dial_distance = dial - (kt.dial_base + 160)
+      #elif dial_distance < -30:
+      #  dial_distance = (dial+160) - kt.dial_base
       last_minute = kt.minute
-      kt.minute += int(dial_distance / 10)
+      dist = int(dial_distance / 6.66)
+      #if dist < 5:
+      kt.minute = kt.org_minute + int(dial_distance / 6.66)
+      
       if kt.minute < 0:
         kt.minute = 0
+      if kt.anim.goal != kt.minute:
+        #print(kt.anim.props['minute'])
+        self.seq.update(time.ticks_ms())
+        skip_to = kt.anim.get_time() if kt.anim.get_time()< 1.0 else 0.0
+        kt.anim = anm.anm_object(550,
+        {'minute' : [anm.ease_out, kt.anim.minute,kt.minute ]})
+        kt.anim.goal = kt.minute
+        self.seq.register('timer_hand', kt.anim, seek_to = skip_to)
+      
       if last_minute != kt.minute:
-        kt.dial_base = dial
+        #kt.dial_base = dial
         self.wavplay_click()
       
     #self.v.draw_str(300,20,str(input[4]))
@@ -434,7 +473,7 @@ class analog_clock:
     
 
   def draw_timerhand(self):
-    minute = self.kt.minute
+    minute = self.kt.anim.minute
     second = self.kt.second
     h = minute + second * dc["1/60"]
     angle = h * dc["pi * 2 / 24"] 
@@ -668,8 +707,13 @@ class analog_clock:
             self.page = 'clock'
           else:
             self.wavplay_click()
+            org_minute = self.kt.minute
             self.kt.minute = 0
             self.kt.second = 0
+            self.kt.anim = anm.anm_object(min(20*org_minute,600),
+            { 'minute' : [ anm.ease_out, self.kt.anim.minute, self.kt.minute ]})
+            self.kt.anim.goal = self.kt.minute
+            self.seq.register('timer_hand', self.kt.anim)
             self.kt.stat = KT_STOP
 
         #if keys == b'\x1b[D':

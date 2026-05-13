@@ -112,10 +112,10 @@ class anm_sequencer:
       if norm_t >= 1.0 and obj.auto_unregister:
         self.unregister(key)
 
-  def register(self, key, obj):
+  def register(self, key, obj, seek_to = 0.0):
     self.anms[key] = obj
     obj.key = key
-    obj.seek(0.0)
+    obj.seek(seek_to)
     
   def unregister(self, key):
     if key in self.anms:

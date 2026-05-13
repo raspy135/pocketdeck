@@ -20,32 +20,22 @@ def format_mic_gain(value):
   return f'{value/2:.1f}dB'
   
 def set_mic_gain(value = None):
-  
-  ## Mic gain is 0 (0dB) to 0x5f (47.5dB)
-  
   if value != None:
     if value > 0x5f:
       value = 0x5f
     if value < 0:
       value = 0
     codec_config.set_micgain(value)
-  
   if set_audio_power():
     return codec_config.get_micgain()
-
   return 0
   
 def set_mic_auto_gain(value = None):
-  
-  ## Mic auto gain
-  
   if value != None:
     codec_config.set_agc(value)
-  
   if set_audio_power():
     enabled, target_level = codec_config.get_agc()
     return enabled
-
   return 0
   
 def format_audio_volume(value):
@@ -61,22 +51,18 @@ def set_audio_volume(value = None):
     codec_config.set_vol(value)
   if set_audio_power():
     return codec_config.get_vol()-255
-
   return 0
 
 def set_speaker_out(value = None):
   if value != None:
     if value:
-      #pass
       codec_config.set_lpf(cutoff_freq=3000, biquad_idx='A')
       codec_config.set_hpf(cutoff_freq=150, biquad_idx='B')
       codec_config.set_hpf(cutoff_freq=80, biquad_idx='C')
     else:
-      #pass
       codec_config.set_pass_through(biquad_idx='A')
       codec_config.set_pass_through(biquad_idx='B')
       codec_config.set_pass_through(biquad_idx='C')
-      
     codec_config.toggle_lo(value)
   if set_audio_power():
     return codec_config.get_lo()
@@ -100,7 +86,6 @@ def set_system_font(value = None):
     pdeck.set_default_terminal_font_size(value)
   return pdeck.get_default_terminal_font_size()
   
-
 def set_autosleep(value = None):
   if value != None:
     if value < 0:
@@ -128,17 +113,13 @@ def format_timezone(value):
     hour = value // 4 
   return f'{hour}:{minute}'
 
-
 def set_invert(value = None):
-  #print('set_invert')
   if value != None:
     pdeck.screen_invert(value)
   return pdeck.screen_invert()
   
-
 menu_list = [
- [ 'Launch apps', None
-    ],
+ [ 'Launch apps', None ],
  [ 'Audio',[
   [ 'Volume' , 
      { 'description': 'Sound volume in dB',
@@ -150,14 +131,14 @@ menu_list = [
      }
   ],
   [ 'Speaker out' , 
-         { 'description': 'Set it off when you use phone out',
+     { 'description': 'Set it off when you use phone out',
      'type' : 'switch',
      'value' : set_speaker_out(),
      'callback' : set_speaker_out
      }
   ],
   [ 'Input source' , 
-         { 'description': 'On = Line in, Off = Microphone',
+     { 'description': 'On = Line in, Off = Microphone',
      'type' : 'switch',
      'value' : set_line_in(),
      'callback' : set_line_in
@@ -180,7 +161,7 @@ menu_list = [
      }
    ],
   [ 'Power' ,
-       { 'description': 'Controls audio power',
+     { 'description': 'Controls audio power',
      'type' : 'switch',
      'value' : set_audio_power(),
      'callback' : set_audio_power
@@ -226,10 +207,7 @@ menu_list = [
      ],
    ],
  ],
- [ 'Reload app list', 
-    { 'type' : 'reload_applist',
-    } 
-  ],
+ [ 'Reload app list', { 'type' : 'reload_applist' } ],
  [ 'Save', { 'type': 'save_settings' } ],
 ]
 
@@ -245,22 +223,17 @@ class noisebox():
     self.v.set_dither(random.randint(3,14))
     self.v.draw_box(self.x,self.y,self.w,self.h)
     self.v.set_dither(16)
-    #self.x += self.x_moment
-    #self.y += self.y_moment
     self.life -= 1
-    
 
 class setting():
   def __init__(self,vs, skiplogo = False):
-    #fontname = 'cour_r18'
-    #fontloader.load(fontname)
-    #self.font = fontloader.font_list[fontname]
     self.vs = vs
     self.v = self.vs.v
     self.message_life = 0
     self.message = ""
     self.last_tick=0
     self.current_tick=0
+    self.last_r_btn = 0
     if not skiplogo:
       self.splash_count = 400
       self.logo = xbmreader.read_xbmr("/sd/lib/data/nunomo_logo.xbmr")
@@ -268,6 +241,7 @@ class setting():
       self.splash_count = 0
     self.boxes = []
     self.menu_ui = menu_ui.menu_ui(vs, menu_list)
+    self.edit_buffer = ['', '', '']
     self.read_app_list()
 
   def save_app_list(self):
@@ -286,14 +260,12 @@ class setting():
           out[item[0]] = { 'type' : item[1]['type'], 'value': item[1]['value'] }
     return out
         
-    
   def update_setting(self, root):
     for item in root:
       if isinstance(item, list) and len(item) == 2 and isinstance(item[1], list):
         self.update_setting(item[1])
       if isinstance(item, list) and len(item) == 2 and isinstance(item[1], dict):
         if 'value' in item[1] and item[0] in self.loaded_setting:
-          #print(f'Updating{item[0]}')
           if item[1]['value'] != self.loaded_setting[item[0]]['value']:
             item[1]['value'] = self.loaded_setting[item[0]]['value']
             if 'callback' in item[1] and item[1]['callback'] != None:
@@ -308,9 +280,6 @@ class setting():
       self.menu_ui.set_message(f'Error in loading setting')
       return
     self.update_setting(self.menu_ui.menu_list[1:])
-    #pdeck.cmd_execute(f'set_font_size {self.menu_ui.menu_list[2][1][1][1]['value']}', 1)
-    #print(self.menu_ui.menu_list[2][1][1][1]['value'])
-
 
   def save_settings(self):
     filename = SETTING_FILENAME
@@ -320,7 +289,6 @@ class setting():
     
   def read_app_list(self):
     filename = '/config/apps.json'    
-    out = []
     try:
       with open(filename,'r') as f:
         self.menu_ui.menu_list[0][1] = ujson.load(f)
@@ -328,15 +296,13 @@ class setting():
     except Exception as e:
       self.menu_ui.set_message(f'Error: {e}')
       print(e)
-      pass
-      
+
   def search_free_screen(self,launched, scnum = None):
     loop = True
     if scnum == None:
       scnum = 2
     else:
       loop = False
-      
     while True:
       if not pdeck.cmd_exists(scnum) and scnum not in launched:
         break
@@ -348,8 +314,6 @@ class setting():
     return scnum
     
   def launch_app(self,command, pref_scnum = None):
-
-    #pdeck.cmd_execute(' '.join(command), 1, scnum)
     first = True
     launched = []
     for one in command:
@@ -361,7 +325,6 @@ class setting():
         pdeck.change_screen(scnum)
       first = False
       pdeck_utils.launch(one,scnum)
-
     pdeck.show_screen_num()
     self.menu_ui.select_root()
     return True
@@ -372,10 +335,7 @@ class setting():
       rx = random.randint(-20, 20)//10 * 15
     if random.randint(0,40) == 0:
       ry = random.randint(-20, 20)//10 * 15
-    self.v.draw_xbm(200-150 +rx, ry+120-41,
-      self.logo[1],self.logo[2], 
-      self.logo[3])
-
+    self.v.draw_xbm(200-150 +rx, ry+120-41, self.logo[1],self.logo[2], self.logo[3])
     for i in range(40):
       box = random.randint(0,800)
       if box < 3:
@@ -385,26 +345,21 @@ class setting():
         del(self.boxes[key])
         continue
       box.draw()
-
     dc = 0
     if self.splash_count > 300:
       dc = (self.splash_count - 300) // 4
     if self.splash_count < 140:
       dc = (140 - self.splash_count) // 4
-      
     dc = 16 if dc > 16 else dc
     dc = 0 if dc < 0 else dc
-    
     self.v.set_dither(dc)
     self.v.set_draw_color(0)
     self.v.set_bitmap_mode(1)
-    #self.v.draw_box(200-143, 120-41, 290, 90)  
     self.v.draw_box(0, 0, 400, 240)
     self.v.set_bitmap_mode(0)
     self.v.set_dither(16)
     self.v.set_draw_color(1)
 
-    
   def update(self,e):
     self.last_tick = self.current_tick
     self.current_tick = time.ticks_us()
@@ -414,11 +369,15 @@ class setting():
       self.splash_count -= 1
       self.v.finished()
       return
+      
+    self.menu_ui.seq.update(time.ticks_ms())
     self.menu_ui.draw_cursor(self.time_diff, y_offset=10)
+    
     self.menu_ui.draw_menu(y_offset=10)
     self.menu_ui.draw_help()
     self.menu_ui.draw_clock()
     self.menu_ui.draw_message()
+    self.menu_ui.draw_dialog()
     self.v.finished()
 
   def change_value(self,val):
@@ -432,13 +391,192 @@ class setting():
         step = 1 * val
       item['callback'](item['callback']()+step)
       item['value'] = item['callback']()
-            
     elif item['type'] == 'switch':
       item['callback'](not item['callback']())
       item['value'] = item['callback']()
 
+  def open_launcher_dialog(self):
+    if self.menu_ui.depth != 1:
+      return
+    cur = self.menu_ui.cur_root
+    if cur is not self.menu_ui.menu_list[0][1]:
+      return
+    self.menu_ui.open_dialog({
+      'type': 'launcher_menu',
+      'title': 'Launcher Menu',
+      'options': ['Add a new item', 'Move this app', 'Delete this app']
+    })
+
+  def parse_command(self, text):
+    parts = []
+    cur = ''
+    in_quote = False
+    quote = ''
+    i = 0
+    while i < len(text):
+      ch = text[i]
+      if in_quote:
+        if ch == quote:
+          in_quote = False
+        else:
+          cur += ch
+      else:
+        if ch == '"' or ch == "'":
+          in_quote = True
+          quote = ch
+        elif ch == ' ':
+          if cur != '':
+            parts.append(cur)
+            cur = ''
+        else:
+          cur += ch
+      i += 1
+    if cur != '':
+      parts.append(cur)
+    if len(parts) == 0:
+      return None
+    return [parts]
+
+  def add_launcher_item(self, title, command_line, desc):
+    cmd = self.parse_command(command_line)
+    if not title or not cmd:
+      self.menu_ui.set_message('Title and command required')
+      return False
+    item = [
+      title,
+      {
+        'type': 'program',
+        'command': cmd,
+        'description': desc
+      }
+    ]
+    app_list = self.menu_ui.menu_list[0][1]
+    insert_at = len(app_list)
+    if self.menu_ui.cur_root is app_list:
+      insert_at = self.menu_ui.y[self.menu_ui.depth] + 1
+    app_list.insert(insert_at, item)
+    self.menu_ui.y[self.menu_ui.depth] = insert_at
+    self.save_app_list()
+    self.menu_ui.set_message('Launcher added')
+    return True
+
+  def move_launcher_item(self, delta):
+    app_list = self.menu_ui.menu_list[0][1]
+    idx = self.menu_ui.y[self.menu_ui.depth]
+    new_idx = idx + delta
+    if new_idx < 0 or new_idx >= len(app_list):
+      return
+    tmp = app_list[idx]
+    app_list[idx] = app_list[new_idx]
+    app_list[new_idx] = tmp
+    self.menu_ui.y[self.menu_ui.depth] = new_idx
+
+  def delete_launcher_item(self):
+    app_list = self.menu_ui.menu_list[0][1]
+    idx = self.menu_ui.y[self.menu_ui.depth]
+    if idx < 0 or idx >= len(app_list):
+      return
+    del app_list[idx]
+    if self.menu_ui.y[self.menu_ui.depth] >= len(app_list) and len(app_list) > 0:
+      self.menu_ui.y[self.menu_ui.depth] = len(app_list) - 1
+    if len(app_list) == 0:
+      self.menu_ui.y[self.menu_ui.depth] = 0
+    self.save_app_list()
+    self.menu_ui.set_message('Launcher deleted')
+
+  def handle_dialog_key(self, keys):
+    dlg = self.menu_ui.dialog
+    if not dlg:
+      return False
+    if dlg['type'] == 'launcher_menu':
+      if keys == b'\x1b[B' and self.menu_ui.dialog_focus < len(dlg['options']) - 1:
+        self.menu_ui.dialog_focus += 1
+      elif keys == b'\x1b[A' and self.menu_ui.dialog_focus > 0:
+        self.menu_ui.dialog_focus -= 1
+      elif keys == b'\r':
+        sel = self.menu_ui.dialog_focus
+        if sel == 0:
+          self.menu_ui.open_dialog({
+            'type': 'add_item',
+            'title': 'Add launcher',
+            'values': ['', '', ''],
+            'labels' : ('Title', 'Command', 'Description'),
+            'button_label': 'Add',
+            'height' : 110
+            })
+        elif sel == 1:
+          self.menu_ui.close_dialog()
+          self.menu_ui.set_move_mode(True)
+          # one level copy
+          self.org_app_list = [n for n in self.menu_ui.menu_list[0][1]]
+          
+        elif sel == 2:
+          self.menu_ui.open_dialog({
+            'type': 'confirm',
+            'title': 'Delete launcher',
+            'message': 'Delete this app?',
+            'height' : 50
+          })
+      else:
+        self.menu_ui.close_dialog()
+      return True
+    if dlg['type'] == 'confirm':
+      if keys == b'\x1b[C' or keys == b'\x1b[B':
+        self.menu_ui.dialog_focus = 1
+      elif keys == b'\x1b[D' or keys == b'\x1b[A':
+        self.menu_ui.dialog_focus = 0
+      elif keys == b'\r':
+        if self.menu_ui.dialog_focus == 1:
+          self.delete_launcher_item()
+        self.menu_ui.close_dialog()
+      else:
+        self.menu_ui.close_dialog()
+      return True
+    if dlg['type'] == 'add_item':
+      vals = dlg['values']
+      if keys == b'\x1b[B':
+        if self.menu_ui.dialog_focus < 3:
+          self.menu_ui.dialog_focus += 1
+      elif keys == b'\x1b[A':
+        if self.menu_ui.dialog_focus > 0:
+          self.menu_ui.dialog_focus -= 1
+      elif keys == b'\x08':
+        if self.menu_ui.dialog_focus < 3 and len(vals[self.menu_ui.dialog_focus]) > 0:
+          vals[self.menu_ui.dialog_focus] = vals[self.menu_ui.dialog_focus][:-1]
+        else:
+          self.menu_ui.close_dialog()
+      elif keys == b'\r':
+        if self.menu_ui.dialog_focus == 3:
+          if self.add_launcher_item(vals[0], vals[1], vals[2]):
+            self.menu_ui.close_dialog()
+        else:
+          self.menu_ui.dialog_focus += 1
+      elif keys and keys[0] >= 32 and keys[0] < 127:
+        if self.menu_ui.dialog_focus < 3:
+          vals[self.menu_ui.dialog_focus] += keys.decode('ascii')
+      return True
+    return False
+
+  def handle_tp_buttons(self):
+    tp = self.v.get_tp_keys()
+    if not tp or len(tp) < 4:
+      return False
+    r_btn = tp[3] & 0x02
+    triggered = False
+    if r_btn and not self.last_r_btn:
+      if self.menu_ui.dialog:
+        self.menu_ui.close_dialog()
+      elif self.menu_ui.move_mode:
+        self.menu_ui.set_move_mode(False)
+      else:
+        self.open_launcher_dialog()
+      triggered = True
+    self.last_r_btn = 1 if r_btn else 0
+    return triggered
+
   def keyevent_loop(self):
     while True:
+      self.handle_tp_buttons()
       ret = self.v.read_nb(1)
       if ret and ret[0] > 0:
         keys = ret[1]
@@ -451,8 +589,7 @@ class setting():
         
       keys = keys.encode('ascii')
 
-      if keys == b'q':
-        #print('quit')
+      if keys == b'q' and not self.menu_ui.dialog:
         break
 
       if keys == b'\x1b':
@@ -465,6 +602,27 @@ class setting():
           keys = b''.join(seq)
         else:
           keys = b''.join(seq)
+
+      if self.menu_ui.dialog:
+        self.handle_dialog_key(keys)
+        continue
+
+      if self.menu_ui.move_mode:
+        if keys == b'\x1b[B':
+          self.move_launcher_item(1)
+        elif keys == b'\x1b[A':
+          self.move_launcher_item(-1)
+        elif keys == b'\r':
+          self.menu_ui.set_move_mode(False)
+          self.save_app_list()
+          self.menu_ui.set_message('Launcher moved')
+        else:
+          self.menu_ui.set_move_mode(False)
+          self.menu_ui.menu_list[0][1] = self.org_app_list
+          self.menu_ui.cur_root = self.menu_ui.menu_list[0][1]
+          
+          
+        continue
 
       if keys == b'\x1b[B':
         self.menu_ui.move_cursor(1)
@@ -491,12 +649,10 @@ class setting():
             break
         if isinstance(item,list):
           self.menu_ui.select_item()
-        
       elif keys == b'\x08':
         self.menu_ui.goup_item()
 
 def main(vs, args):
-  
   el = elib.esclib()  
   obj = setting(vs, True)
   vs.v.print(el.display_mode(False))
@@ -506,5 +662,3 @@ def main(vs, args):
   vs.v.callback(None)
   vs.v.print(el.display_mode(True))
   print("finished.", file=vs)
-
-

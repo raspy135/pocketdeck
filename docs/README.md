@@ -26,6 +26,7 @@ https://shop.nunomo.net
 - Expansion port
 - USB-A for USB keyboard, and USB-C for charging.
 - RTC clock to keep date and time
+- 8 pin external port (2 pins are available for I/O)
 
 ## Accessaries
 
@@ -185,6 +186,13 @@ setjpf | Change terminal font to Japanese. It's lighter than setuni.
 
 ## Basic applications
 
+### Home app
+
+Home app is an app to launch apps and change settings.
+
+- Arrow keys, Enter and BS : Navigate menu
+- R bottom button in launch app list : Open application list menu. You can add, move and delete app. The data is saved in /config/apps.json. You can edit the file manually.
+
 ### Pem editor
 
 Pem (`pem`) is emacs-inspired powerful editor written by Python. See [[pem_readme.md]] for detail. 
@@ -192,6 +200,9 @@ Pem (`pem`) is emacs-inspired powerful editor written by Python. See [[pem_readm
 ### Analog clock
 
 Analog clock (`analog_clock`) is useful application, it has analog clock, calendar and kicken timer. You can copy select date, it's useful for journaling.
+
+- B button (BS) : Toggle timer
+- C key in calendar mode : Copy selected date to clipboard (C-S-v to paste)
 
 ### Journal
 

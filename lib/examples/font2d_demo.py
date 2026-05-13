@@ -60,7 +60,7 @@ class text_anim_demo:
         )
         newobj.ch = obj.ch
         self.seq.register(obj.key, newobj)
-        print(newobj.x)
+        #print(newobj.x)
     if phase == 2:
       x = self.word2_start_x
       for i, ch in enumerate(self.word2):

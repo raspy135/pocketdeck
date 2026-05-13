@@ -11,6 +11,7 @@ import fontloader
 import gpt
 import json
 import misc_utils
+import gc
 from anm import anm_sequencer, anm_object
 
 KEY_ENTER = b'\r'
@@ -510,6 +511,8 @@ class FlashcardsApp:
       self.open_message_dialog("OpenAI API key is not set.", False)
       return
     try:
+      # We don't want gc run for a while
+      gc.collect()
       res = self.gpt.tts_stream(word, voice='alloy')
 
       if res and res.status_code == 200:

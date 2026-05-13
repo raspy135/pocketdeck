@@ -8,6 +8,7 @@ import xbmreader
 import fontloader
 import pdeck_utils
 import os
+import anm
 
 def file_exists(name):
   if name == None:
@@ -25,7 +26,19 @@ class tasks_card:
     fontname = 'font_unifont_japanese3'
     fontloader.load(fontname)
     self.font = fontloader.font_list[fontname]
-    
+    self.seq = anm.anm_sequencer()    
+    anim = anm.anm_object(0, {
+        'y': [anm.ease_out, 30]
+        }
+        )
+    anim.goal = 0
+    self.seq.register('cursor',anim)
+    anim = anm.anm_object(0, {
+        'y': [anm.ease_out, 0]
+        }
+        )
+    self.seq.register('scroll',anim)
+
     self.updated = True
     self.title_width = 50
     self.detail_width = 48
@@ -135,17 +148,111 @@ class tasks_card:
     v.draw_xbm(x,y, image[1], image[2], image[3])
     v.set_draw_color(1)
 
+  def draw_due(self, t, y_offset):
+    v = self.vs.v
+    due = False
+    y = y_offset
+    x = 38
+    if t['due'] < 0:
+      num_loop = 0
+      due = True
+    else:
+      num_loop = t['due'] // 24
+    while num_loop >=28:
+      v.draw_box(x,y-25,20,10)
+      num_loop -= 28
+      x+=24
+    while num_loop >=7:
+      v.draw_box(x,y-20,10,5)
+      num_loop -= 7
+      x+=16
+      
+    while num_loop > 0:
+      v.draw_disc(x,y-20,4,0xf)
+      num_loop -= 1
+      x+=8
+
+    v.draw_utf8(x, y-15, str(t['due']//24))
+    if t['due'] < 0:
+      v.draw_utf8(x+1, y-15, str(t['due']//24))
+    return due
+
+  def draw_task(self,t, y_offset, anim_offset, selected):
+    v = self.vs.v
+    y = y_offset
+    if t['group_title']:
+      v.set_dither(3)
+      v.set_draw_color(1)
+      v.draw_box(0, y - 25, 399, 8)
+      v.set_dither(16)
+      v.draw_utf8(5, y-5, str(t['title']))
+      y += 32
+      return y
+
+    due = False
+      
+    if t['due'] != '' and t['status'] != 'DONE':
+      due = self.draw_due(t, y)
+
+    txt = f'{t["title"]}'
+    v.set_bitmap_mode(1)
+        
+    v.draw_utf8(35, y, txt[:65])
+    if due:
+      v.draw_utf8(36, y, txt[:65])
+    v.set_bitmap_mode(0)
+    self.draw_icon(t['status'], 0, y-32)
+            
+    if selected:
+      anim = self.seq.get_obj('cursor')
+      goal = int(y - 12 - anim_offset)
+      if anim.goal != goal:
+        anim = anm.anm_object(100, {
+          'y': [anm.ease_out, anim.y, goal]
+          }
+          )
+        anim.goal = goal
+        self.seq.register('cursor', anim)
+    y += 32
+    return y
+
+  def draw_cursor(self):
+    v = self.vs.v
+    anim = self.seq.get_obj('cursor')
+    v.set_draw_color(2)
+    v.draw_box(32, int(anim.y), 396, 18)
+    v.set_draw_color(1)
+
+  def draw_task_detail(self,t):
+    v = self.vs.v
+    v.draw_utf8(5, 18, t["title"][:50])
+    v.draw_utf8(5, 34, f'Status: {t["status"]}')
+    if t['due'] != '':
+      v.draw_utf8(5, 50, f'Due: {t["due"]//24} days ({t['due_string']})')
+    y = 70
+    for line in t["lines"][:10]:
+      v.draw_utf8(5, y, line[:60])
+      y += 16
+
   def update(self,e):
     v = self.vs.v
     if not v.active:
       v.finished()
       return
-
+    
+    self.seq.update(time.ticks_ms())
+    
     # Skip redraw to save power
     # Redraw can be skipped when screen is 
     # not updated (e.g., just waiting for key)
     # and redraw is not requested by system 
     # (e is False)
+
+    # Make sure all animation was finished
+    for anim in self.seq:
+      if anim.get_time() != 1.0:
+        self.updated = True
+
     if (not e) and (not self.updated):
       v.finished()
       return
@@ -155,74 +262,18 @@ class tasks_card:
     #v.draw_utf8(5, 15, "Task List")
 
     if self.mode == "list":
-      y = 32
+      anim = self.seq.get_obj('scroll')
+      y = int(32 + anim.y)
       for i, t in enumerate(self.tasks):
-        if i < self.scroll_head:
+        if i < self.scroll_head-1:
           continue
-
-        if t['group_title']:
-          v.set_dither(3)
-          v.set_draw_color(1)
-          v.draw_box(0, y - 25, 399, 8)
-          v.set_dither(16)
-          v.draw_utf8(5, y-5, str(t['title']))
-          y += 32
-          continue
-
-        #print(t)
-        due = False
-        
-        if t['due'] != '' and t['status'] != 'DONE':
-          x = 38
-          if t['due'] < 0:
-            num_loop = 0
-            due = True
-          else:
-            num_loop = t['due'] // 24
-          while num_loop >=28:
-            v.draw_box(x,y-25,20,10)
-            num_loop -= 28
-            x+=24
-          
-          while num_loop >=7:
-            v.draw_box(x,y-20,10,5)
-            num_loop -= 7
-            x+=16
-          
-          while num_loop > 0:
-            v.draw_disc(x,y-20,4,0xf)
-            num_loop -= 1
-            x+=8
-          v.draw_utf8(x, y-15, str(t['due']//24))
-          if t['due'] < 0:
-            v.draw_utf8(x+1, y-15, str(t['due']//24))
-
-        txt = f'{t["title"]}'
-        v.set_bitmap_mode(1)
-        
-        v.draw_utf8(35, y, txt[:65])
-        if due:
-          v.draw_utf8(36, y, txt[:65])
-        v.set_bitmap_mode(0)
-        self.draw_icon(t['status'], 0, y-32)
-            
-        if i == self.selected:
-          v.set_draw_color(2)
-          v.draw_box(32, y - 12, 396, 18)
-          v.set_draw_color(1)
-        y += 32
+        y = self.draw_task(t, y, anim.y, i == self.selected)
         if y >= 240 + 32:
           break
+      self.draw_cursor()
     else:
-      t = self.tasks[self.selected]
-      v.draw_utf8(5, 18, t["title"][:50])
-      v.draw_utf8(5, 34, f'Status: {t["status"]}')
-      if t['due'] != '':
-        v.draw_utf8(5, 50, f'Due: {t["due"]//24} days ({t['due_string']})')
-      y = 70
-      for line in t["lines"][:10]:
-        v.draw_utf8(5, y, line[:60])
-        y += 16
+      self.draw_task_detail(self.tasks[self.selected])
+
     self.updated = False
     v.finished()
 
@@ -275,11 +326,21 @@ class tasks_card:
           self.mode = "detail"
         elif k == b'q':
           break
+        old_scroll_head = self.scroll_head
         if self.selected - self.scroll_head > 5:
           self.scroll_head = self.selected - 5
         if self.scroll_head - self.selected > -1:
-          self.scroll_head = self.selected - 1
-          self.scroll_head = 0 if self.scroll_head < 0 else self.scroll_head
+           self.scroll_head = self.selected - 1
+           self.scroll_head = 0 if self.scroll_head < 0 else self.scroll_head
+
+        #animation
+        if old_scroll_head != self.scroll_head:
+          diff = self.scroll_head - old_scroll_head
+          anim = self.seq.get_obj('scroll')
+          anim = anm.anm_object(100,
+          { 'y' : [anm.ease_out, 34*diff, 0] })
+          self.seq.register('scroll', anim)
+          
       else:
         if k == b'\x1b[D' or k == b'\x08' or k == b'b' or k == b'\x1b':
           self.mode = "list"

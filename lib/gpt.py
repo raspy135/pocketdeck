@@ -1,6 +1,7 @@
 import network, socket
 import codec_config
 import ujson
+import wifi
 import time
 import urequests as requests
 import pdeck
@@ -11,8 +12,10 @@ import ubinascii
 import audio
 import wav_play
 import recorder
+import setuni
 import os
 import re
+import gc
 
 API_KEY_FILENAME = "/config/openai_api_key"
 
@@ -28,6 +31,7 @@ def file_exists(name):
 def parse_inline_directives(message, references, images, args, vs):
   idx = 0
   result = ""
+  mod_args = {}
   changed = False
 
   while True:
@@ -58,7 +62,7 @@ def parse_inline_directives(message, references, images, args, vs):
 
         if opt == '-m' or opt == '--model':
           if i + 1 < len(opt_args):
-            args.model = opt_args[i + 1]
+            mod_args['model'] = opt_args[i + 1]
             i += 2
             handled = True
           else:
@@ -67,33 +71,33 @@ def parse_inline_directives(message, references, images, args, vs):
             break
 
         elif opt == '-j' or opt == '--jp':
-          args.jp = True
+          mod_args['jp'] = True
           i += 1
           handled = True
 
         elif opt == '-c' or opt == '--clipboard':
-          args.clipboard = True
+          mod_args['clipboard'] = True
           i += 1
           handled = True
 
         elif opt == '-nf' or opt == '--no-format':
-          args.no_format = True
+          mod_args['no_format'] = True
           i += 1
           handled = True
 
         elif opt == '-n' or opt == '--nosave':
-          args.nosave = True
+          mod_args['nosave'] = True
           i += 1
           handled = True
 
         elif opt == '-v' or opt == '--voice':
-          args.voice = True
+          mod_args['voice'] = True
           i += 1
           handled = True
 
         elif opt == '-vt' or opt == '--voice-type':
           if i + 1 < len(opt_args):
-            args.voice_type = opt_args[i + 1]
+            mod_args['voice_type'] = opt_args[i + 1]
             i += 2
             handled = True
           else:
@@ -148,7 +152,7 @@ def parse_inline_directives(message, references, images, args, vs):
 
     idx = end + 2
 
-  return result, changed
+  return result, changed, mod_args
 
 def read_api_key():
   try:
@@ -427,6 +431,7 @@ def play_audio_stream(vs, stream):
   wp = wav_play.wav_play()
   wp.open_stream(stream)
   wp.play()
+  print("Playing..", file=vs)
   while audio.stream_play():
     pdeck.delay_tick(5)
     ret = vs.v.read_nb(1)
@@ -524,11 +529,15 @@ def main(vs, args_in):
   references = []
   images = []
 
-  message, _ = parse_inline_directives(message, references, images, args, vs)
+  message, _ , margs = parse_inline_directives(message, references, images, args, vs)
 
-  ex1 = " and answer in Japanese" if args.jp else  ""
+  jp = margs['jp'] if 'jp' in margs else args.jp
+  
+  ex1 = " and answer in Japanese" if jp else  ""
   message = message + ex1
-
+  if jp:
+    setuni.main(vs, ['setuni'])
+    
   ctime = time.gmtime(time.time() + pu.timezone * 60 * 15)
   time_str = f"[User current time: {ctime[0]:04d}-{ctime[1]:02d}-{ctime[2]:02d} {ctime[3]:02d}:{ctime[4]:02d}]\n"
   message = time_str + message
@@ -587,8 +596,8 @@ def main(vs, args_in):
       except Exception as e:
         print(f'Error when opening {file}', file=vs)
         return
-      
-  if args.clipboard:
+  clipboard = margs['clipboard'] if 'clipboard' in margs else args.clipboard    
+  if clipboard:
     references.append(pdeck.clipboard_paste().decode("utf-8"))
   
   if args.image:
@@ -603,29 +612,36 @@ def main(vs, args_in):
         except Exception as e:
           print(f'Error when opening image {img_path}', file=vs)
           return
-  model = args.model
+  model = margs['model'] if 'model' in margs else args.model
   if model in ('m','medium'):
     model = 'ngpt-5.4'
   elif model in ('h','high'):
     model = 'gpt-5.5'
   elif model in ('f','fast'):
     model = 'gpt-5.4-mini'
+  print("Asking..", file=vs)
   raw_response = gpt.ask(gpt.make_json(message, references, images, model, instructions = instructions))
   if not raw_response:
     return
   
-  if args.no_format:
+  no_format = margs['no_format'] if 'no_format' in margs else args.no_format
+  if no_format:
     response = raw_response
   else:
     response = format(raw_response)
   if response:
     print(response, file=vs)
-    if args.voice:
-      #raw_response = "Speak fast and casually: " + raw_response
+    voice = margs['voice'] if 'voice' in margs else args.voice
+    if voice:
       raw_response_sub = re.sub('\]\(ht.+?\)',']',raw_response)
       
       #print(raw_response_sub)
+      print("TTS processing..", file=vs)
+      # We don't want gc run for a while
+      gc.collect()
+      
       res = gpt.tts_stream(raw_response_sub, voice=args.voice_type)
+      print("TTS processing done", file=vs)
       if res and res.status_code == 200:
         # In MicroPython urequests, the raw socket is often .raw or .s
         # If none exist, we try the object itself as a backup
@@ -639,7 +655,8 @@ def main(vs, args_in):
           # For now, we've already consumed part of the stream, so fallback is tricky
         res.close()
 
-    if args.nosave:
+    nosave = margs['nosave'] if 'nosave' in margs else args.nosave
+    if nosave:
       return
     ctime = time.gmtime(time.time()+pu.timezone*60*15)
     filename = f"/sd/log/gptlog{ctime[1]:02}{ctime[2]:02}_{ctime[3]:02}{ctime[4]:02}"
