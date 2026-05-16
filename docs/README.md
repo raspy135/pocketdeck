@@ -22,7 +22,7 @@ https://shop.nunomo.net
 - Stereo built-in speaker
 - Stereo MEMS Microphone
 - LEDs
-- SD card slot (Up to 32GB, SDXC is not supported)
+- SD card slot (Tested up to 128GB, technically you can go more)
 - Expansion port
 - USB-A for USB keyboard, and USB-C for charging.
 - RTC clock to keep date and time

@@ -359,13 +359,13 @@ class analog_clock:
           self.v.draw_str(x - 5, y + 14, str(int(i/10)))
       else:
         self.v.set_dither(6)
-      if len(self.tide_chart) < i:
+      if i < len(self.tide_chart):
         pix_height = int(self.tide_chart[i] * 10)
       else:
         pix_height = 0
       #if pix_height < 0:
       #  pix_height == 0
-
+      #print(f'hello {i},{len(self.tide_chart)}:{self.tide_chart[i]} , {pix_height}')
       if pix_height > 0:
         self.v.draw_v_line(x, y - pix_height,pix_height)
       else:

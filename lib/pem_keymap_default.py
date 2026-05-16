@@ -2,6 +2,8 @@ resume_last_file = True
 
 ext_keys = [ b'\x18',b'\x03' ]
 
+chord_dialog = True  # set False to skip the visual chord menu (direct key dispatch)
+
 custom_map = {
   'dic' : [ b'\x03r' ],
   'today' : [ b'\x03d' ],
@@ -42,7 +44,8 @@ map = {
   'enter': [ b'\r',b'\x0a'],
   'pagedown': [b'\x1b[6~'],
   'pageup': [b'\x1b[5~'],
-  
+  'help': [b'\x1b[P'],  # F1 (xterm: ESC O P → rewritten to ESC [ P)
+
 }
 
 # ------ custom command examples ------
@@ -72,7 +75,7 @@ def dic(editor):
   pdeck.led(1,60)
 
   try:
-    gpt.main(st, ['gpt', '-n', '-nf', f"What does '{sym}' mean? Answer in short. Do not use syntax highlighting such as **bold**. Just print its meaning, you don't need to start with 'the word means'"])
+    gpt.main(st, ['gpt', '-s', '-n', '-nf', f"What does '{sym}' mean? Answer in short. Do not use syntax highlighting such as **bold**. Just print its meaning, you don't need to start with 'the word means'"])
   except Exception as e:
     print(e)
 

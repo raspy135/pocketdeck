@@ -102,6 +102,8 @@ Pdeck module controls Pocket Deck system features and peripherals.
 
 - `change_screen(screen)` Change screen to the given number.
 
+- `wifi_connected()` returns wifi connection status.
+
 - `change_priority(priority)` Set current application as priority. This might cause system performance issue, basically it's not recommend to use. Priority is bool. True for priority task.
 - `clipboard_copy(string)` Copy string data to clipboard which can be used between applciations. (C-S-v to paste the data from clipboard)
 

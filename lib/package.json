@@ -101,6 +101,10 @@
             "data/clear.wav"
         ],
         [
+            "data/click2.wav",
+            "data/click2.wav"
+        ],
+        [
             "data/easy.xbmr",
             "data/easy.xbmr"
         ],
@@ -209,6 +213,14 @@
             "examples/animation_example.py"
         ],
         [
+            "examples/bench.py",
+            "examples/bench.py"
+        ],
+        [
+            "examples/bench_str.py",
+            "examples/bench_str.py"
+        ],
+        [
             "examples/compressor_example.py",
             "examples/compressor_example.py"
         ],
@@ -291,6 +303,46 @@
         [
             "font/u8g2_amstrad_cpc_extended.fnt",
             "font/u8g2_amstrad_cpc_extended.fnt"
+        ],
+        [
+            "font/u8g2_font_lubI10_te.fnt",
+            "font/u8g2_font_lubI10_te.fnt"
+        ],
+        [
+            "font/u8g2_font_lubI10_te.fnt:Zone.Identifier",
+            "font/u8g2_font_lubI10_te.fnt:Zone.Identifier"
+        ],
+        [
+            "font/u8g2_font_lubR10_te.fnt",
+            "font/u8g2_font_lubR10_te.fnt"
+        ],
+        [
+            "font/u8g2_font_lubR10_te.fnt:Zone.Identifier",
+            "font/u8g2_font_lubR10_te.fnt:Zone.Identifier"
+        ],
+        [
+            "font/u8g2_font_lubR12_te.fnt",
+            "font/u8g2_font_lubR12_te.fnt"
+        ],
+        [
+            "font/u8g2_font_lubR12_te.fnt:Zone.Identifier",
+            "font/u8g2_font_lubR12_te.fnt:Zone.Identifier"
+        ],
+        [
+            "font/u8g2_font_ncenR10_te.fnt",
+            "font/u8g2_font_ncenR10_te.fnt"
+        ],
+        [
+            "font/u8g2_font_ncenR10_te.fnt:Zone.Identifier",
+            "font/u8g2_font_ncenR10_te.fnt:Zone.Identifier"
+        ],
+        [
+            "font/u8g2_font_ncenR12_te.fnt",
+            "font/u8g2_font_ncenR12_te.fnt"
+        ],
+        [
+            "font/u8g2_font_ncenR12_te.fnt:Zone.Identifier",
+            "font/u8g2_font_ncenR12_te.fnt:Zone.Identifier"
         ],
         [
             "font/u8g2_lubb08_te.fnt",
@@ -556,7 +608,7 @@
         },
         {
             "path": "analog_clock.py",
-            "md5": "2ec5b7d67243d1ec1f4e4af796181752"
+            "md5": "b9c99156f01b32f393fb99067a8eea71"
         },
         {
             "path": "ble_manager.py",
@@ -564,7 +616,7 @@
         },
         {
             "path": "tasks.py",
-            "md5": "9e16f82298794e02bddde5f2977cf6a6"
+            "md5": "e2e6adb22232c91f29f530c695e0b675"
         },
         {
             "path": "invader.py",
@@ -572,7 +624,7 @@
         },
         {
             "path": "wav_play.py",
-            "md5": "1bbea8db75723f08e98e19e702890834"
+            "md5": "40684ca6fc307a51c3958ba9200476a9"
         },
         {
             "path": "rmdir.py",
@@ -620,7 +672,7 @@
         },
         {
             "path": "journal.py",
-            "md5": "59b98b03b8e12dad6e975afb0272651f"
+            "md5": "a655f4af2c9d82f4b6b554e34ceda1b0"
         },
         {
             "path": "wavplay.py",
@@ -640,11 +692,11 @@
         },
         {
             "path": "home.py",
-            "md5": "37722e2bbed3c25136371115875b7843"
+            "md5": "1ab7f0f471e6d49f4220b2ca16d8d763"
         },
         {
             "path": "anm.py",
-            "md5": "2b2f5002202161aade33d2c1d670ea31"
+            "md5": "ac72746cf498194310a3bf5bd0a2b8b5"
         },
         {
             "path": "pwd.py",
@@ -664,7 +716,7 @@
         },
         {
             "path": "flashcards.py",
-            "md5": "a03df3ef7093c48d46c110b063336e67"
+            "md5": "841d5b68b311ff13b08a78ca47b4151d"
         },
         {
             "path": "font2d.py",
@@ -688,7 +740,7 @@
         },
         {
             "path": "gpt.py",
-            "md5": "be5cb5843bebfd4783f0dd9b8acfe036"
+            "md5": "81f33874e708f261dfe89c0ab13c44cd"
         },
         {
             "path": "argparse.py",
@@ -748,7 +800,7 @@
         },
         {
             "path": "pem_keymap_default.py",
-            "md5": "db591b3eae9a1506b23c947b7e0dd316"
+            "md5": "67ee3fd12279025fbefad35e9876b2f1"
         },
         {
             "path": "xbm2xbmr.py",
@@ -776,7 +828,7 @@
         },
         {
             "path": "pem.py",
-            "md5": "8f640d64f4e4c2cacb5a637cccb1a13e"
+            "md5": "54fca5b14c021a5fc39b0129664a893e"
         },
         {
             "path": "recorder.py",
@@ -816,7 +868,7 @@
         },
         {
             "path": "menu_ui.py",
-            "md5": "cb7507fe53a6b8c568d859b8f0f84496"
+            "md5": "4e46c53a972e4121108d3ec903fdda2d"
         },
         {
             "path": "cp.py",
@@ -847,20 +899,60 @@
             "md5": "d21611440ef3df51123e8cf5ee24cf58"
         },
         {
+            "path": "font/u8g2_font_lubR12_te.fnt:Zone.Identifier",
+            "md5": "cfca1aacd7f6564a550d570b410e11d0"
+        },
+        {
             "path": "font/u8g2_amstrad_cpc_extended.fnt",
             "md5": "9d293e4b86779f4c134f7ab00cbbdf34"
+        },
+        {
+            "path": "font/u8g2_font_lubI10_te.fnt:Zone.Identifier",
+            "md5": "cfca1aacd7f6564a550d570b410e11d0"
+        },
+        {
+            "path": "font/u8g2_font_lubR10_te.fnt",
+            "md5": "4b3995c930668f1812502c4691d7cf22"
+        },
+        {
+            "path": "font/u8g2_font_lubR12_te.fnt",
+            "md5": "6af763ad8715824686709617951423c7"
+        },
+        {
+            "path": "font/u8g2_font_lubR10_te.fnt:Zone.Identifier",
+            "md5": "cfca1aacd7f6564a550d570b410e11d0"
         },
         {
             "path": "font/u8g2_lubb08_te.fnt",
             "md5": "403b7c60afcbc542149d2ca16557c025"
         },
         {
+            "path": "font/u8g2_font_ncenR10_te.fnt:Zone.Identifier",
+            "md5": "cfca1aacd7f6564a550d570b410e11d0"
+        },
+        {
+            "path": "font/u8g2_font_ncenR12_te.fnt",
+            "md5": "e4249c1603d63e39ad06cd6483c63384"
+        },
+        {
+            "path": "font/u8g2_font_ncenR12_te.fnt:Zone.Identifier",
+            "md5": "cfca1aacd7f6564a550d570b410e11d0"
+        },
+        {
             "path": "font/u8g2_wedge.fnt",
             "md5": "fa1410b9342c612f99d1f3790ad05d6f"
         },
         {
+            "path": "font/u8g2_font_lubI10_te.fnt",
+            "md5": "8636935cc96188e21f2365282f4c9d96"
+        },
+        {
             "path": "font/u8g2_lubb12_te.fnt",
             "md5": "91f02f1e06f4fdd1f7107e69e44cf679"
+        },
+        {
+            "path": "font/u8g2_font_ncenR10_te.fnt",
+            "md5": "5d2ecd665cf6ce71a181cc4728b00d4e"
         },
         {
             "path": "data/ghost1.xbmr",
@@ -869,6 +961,10 @@
         {
             "path": "data/nudoc.xbmr",
             "md5": "e049f0fe157218b5e7e8db1c8c077e69"
+        },
+        {
+            "path": "data/click2.wav",
+            "md5": "b794968762e3b17223324f413b58a6e3"
         },
         {
             "path": "data/speaker-icon.xbm",
@@ -1004,7 +1100,7 @@
         },
         {
             "path": "examples/font2d_demo.py",
-            "md5": "4757523279a9c7d939fcb754c3aa2a5c"
+            "md5": "1c069bc034ecc3022eef2dceab8949b9"
         },
         {
             "path": "examples/reverb_example.py",
@@ -1013,6 +1109,10 @@
         {
             "path": "examples/techno_example.py",
             "md5": "cfe9d4d3d14be63da995a77f4393fcf8"
+        },
+        {
+            "path": "examples/bench.py",
+            "md5": "cc6a16aa5c2a041732a663796ff3a69c"
         },
         {
             "path": "examples/animation_example.py",
@@ -1049,6 +1149,10 @@
         {
             "path": "examples/input_test.py",
             "md5": "92bbd9c30b9ebd0bed3f66f172bb2043"
+        },
+        {
+            "path": "examples/bench_str.py",
+            "md5": "14de357eb64e1dd991855ac289d68014"
         },
         {
             "path": "examples/launch_app.py",

@@ -68,6 +68,116 @@ def file_exists(name):
   except OSError:
     return False
 
+# ---- Syntax highlighting ----
+_PY_KEYWORDS = frozenset([
+  'if','elif','else','for','while','def','class','return',
+  'import','from','and','or','not','in','is','True','False','None',
+  'try','except','finally','with','as','pass','break','continue',
+  'raise','yield','lambda','del','global','nonlocal',
+])
+_PY_KEYWORDS_B = frozenset([
+  b'if',b'elif',b'else',b'for',b'while',b'def',b'class',b'return',
+  b'import',b'from',b'and',b'or',b'not',b'in',b'is',b'True',b'False',b'None',
+  b'try',b'except',b'finally',b'with',b'as',b'pass',b'break',b'continue',
+  b'raise',b'yield',b'lambda',b'del',b'global',b'nonlocal',
+])
+_B_HL_ON  = b'\x1b[1m'
+_B_HL_OFF = b'\x1b[0m'
+
+def _is_id_cont(c):
+  return c.isalpha() or c.isdigit() or c == '_'
+
+def _is_id_cont_b(c):
+  return (65 <= c <= 90) or (97 <= c <= 122) or (48 <= c <= 57) or c == 95
+
+def _hl_md(b):
+  if type(b) is not bytes:
+    b = bytes(b)
+  if not b:
+    return None
+  if b[0] == 35:  # '#' heading — wrap whole line
+    return b''.join([_B_HL_ON, b, _B_HL_OFF])
+  if b'**' not in b and b'[' not in b:
+    return None
+  parts = []
+  append = parts.append
+  i = 0
+  n = len(b)
+  modified = False
+  while i < n:
+    c = b[i]
+    if c == 42 and i + 1 < n and b[i + 1] == 42:  # '**'
+      j = b.find(b'**', i + 2)
+      if j != -1:
+        append(_B_HL_ON); append(b[i:j + 2]); append(_B_HL_OFF)
+        modified = True
+        i = j + 2
+        continue
+    elif c == 91:  # '['
+      if i + 1 < n and b[i + 1] == 91:  # '[['
+        j = b.find(b']]', i + 2)
+        if j != -1:
+          append(_B_HL_ON); append(b[i:j + 2]); append(_B_HL_OFF)
+          modified = True
+          i = j + 2
+          continue
+      else:
+        j = b.find(b']', i + 1)
+        if j != -1:
+          append(_B_HL_ON); append(b[i:j + 1]); append(_B_HL_OFF)
+          modified = True
+          i = j + 1
+          continue
+    append(b[i:i + 1])
+    i += 1
+  if not modified:
+    return None
+  return b''.join(parts)
+
+def _hl_py(b):
+  if type(b) is not bytes:
+    b = bytes(b)
+  parts = []
+  append = parts.append
+  i = 0
+  n = len(b)
+  modified = False
+  while i < n:
+    c = b[i]
+    if c == 35:  # '#'
+      append(b[i:])
+      break
+    if (65 <= c <= 90) or (97 <= c <= 122) or c == 95:  # isalpha or '_'
+      j = i + 1
+      while j < n and _is_id_cont_b(b[j]):
+        j += 1
+      word = b[i:j]
+      if word in _PY_KEYWORDS_B:
+        append(_B_HL_ON)
+        append(word)
+        append(_B_HL_OFF)
+        modified = True
+      else:
+        append(word)
+      i = j
+    else:
+      append(b[i:i + 1])
+      i += 1
+  if not modified:
+    return None
+  return b''.join(parts)
+
+def _hl_line(line_bytes, mode):
+  if not line_bytes:
+    return line_bytes
+  if mode == 'py':
+    out = _hl_py(line_bytes)
+  elif mode == 'md':
+    out = _hl_md(line_bytes)
+  else:
+    return line_bytes
+  return line_bytes if out is None else out
+
 class editor:
   def __init__(self,v, japanese):
     # enum
@@ -80,6 +190,11 @@ class editor:
     self.IM_JP = 2
     self.h_diff = 1
     self.v = v
+    self.in_ext_mode = False
+    self.pending_keys = None
+    self._chord_items = []
+    self._chord_saved_scroll = None
+    self.should_quit = False
 
     # Load Japanese font
     if japanese:
@@ -237,7 +352,6 @@ class editor:
   def refresh_screen(self):
     bm.start_bench()
 
-    self.v.print(el.cursor_mode(False)) #hide cursor
     if self.dmod:
       self.render_main_text()
       self.dmod = False
@@ -286,35 +400,46 @@ class editor:
       if self.sl_info: #mode == self.MODE_INPUT_LINE_DIALOG:
         self.print_input_line_dialog()
 
-    if self.mode == self.MODE_INPUT_LINE_DIALOG:
+    if self.mode == self.MODE_SELECT_DIALOG:
+      pass  # keep cursor hidden while dialog is open
+    elif self.mode == self.MODE_INPUT_LINE_DIALOG:
       # Position cursor at the end of input or current cursor position in input
       prompt_len = len(self.sl_info.header) + 2
       self.v.print(el.move_cursor(self.text_height + 2, prompt_len + self.sl_info.cur + 1))
+      self.v.print(el.cursor_mode(True))
     else:
       self.v.print(el.reset_font_color() + el.move_cursor(self.d_row +1, self.d_col + 1))
 
-
-
-    #if (self.mode == self.MODE_REPLACE or self.mode == self.MODE_SEARCH) and 
-    if self.search_info.matched_query != None:
-      out = el.set_font_color(4) #underline
-      offset = len(self.search_info.matched_query) + self.d_col - self.file.w
-      #print(f"offset {offset}")
-      if  offset > 0:
-        out += self.search_info.matched_query[:-offset]
-        out += "\r\n"
-        out += self.search_info.matched_query[-offset:]
-      else:
-        out += self.search_info.matched_query
-      out += el.move_cursor(self.d_row +1, self.d_col + 1)
-      #out += el.cur_left(len(self.search_info.matched_query))
-      out += el.reset_font_color()
-      self.v.print(out)
-    self.v.print(el.cursor_mode(True)) #show cursor at the very end
+      #if (self.mode == self.MODE_REPLACE or self.mode == self.MODE_SEARCH) and
+      if self.search_info.matched_query != None:
+        out = el.set_font_color(4) #underline
+        offset = len(self.search_info.matched_query) + self.d_col - self.file.w
+        #print(f"offset {offset}")
+        if  offset > 0:
+          out += self.search_info.matched_query[:-offset]
+          out += "\r\n"
+          out += self.search_info.matched_query[-offset:]
+        else:
+          out += self.search_info.matched_query
+        out += el.move_cursor(self.d_row +1, self.d_col + 1)
+        #out += el.cur_left(len(self.search_info.matched_query))
+        out += el.reset_font_color()
+        self.v.print(out)
+      self.v.print(el.cursor_mode(True))
     bm.add_bench('status bar')
     bm.print_bench()
 
-  def cursor_move(self, row, col):
+  def cursor_move(self, a_row, a_col):
+    row = a_row
+    col = a_col
+    while row != 0 or col != 0:
+      #print(f"{row}, {col}")
+      row, col = self.cursor_move_loop(row,col)
+
+  def cursor_move_loop(self, a_row, a_col):
+    row = a_row
+    col = a_col
+    #print(f"row1 {row}")
     if row < 0:
       request_col = self.wished_d_col if self.wished_d_col != -1 else self.d_col
       filepos = self.file.scr_to_filepos(self.file.h, self.file.w, self.d_row - 1, request_col)
@@ -329,6 +454,7 @@ class editor:
           if self.wished_d_col == -1:
             self.wished_d_col = self.d_col
       row += 1
+    #print(f"row {row}")
     if row > 0:
       request_col = self.wished_d_col if self.wished_d_col != -1 else self.d_col
       # print(f' Req: {request_col}')
@@ -343,6 +469,7 @@ class editor:
             self.wished_d_col = self.d_col
             #print(f'wished_d_col {self.wished_d_col}')
       row -= 1
+    #print(f"row {row}")
     if col < 0:
       self.wished_d_col = -1
       nextcol = self.file_col - 1
@@ -365,8 +492,7 @@ class editor:
       col -= 1
 
     self.update_scroll_for_curmove()
-    if row != 0 or col != 0:
-      self.cursor_move(row,col)
+    return row,col
 
   def update_scroll_for_curmove(self, offset = 0):
     while self.update_scroll_for_curmove_one(offset):
@@ -516,6 +642,16 @@ class editor:
     self.process_open_file(self.file.filename.encode('utf-8'), linenum = self.file_row, colnum = self.file_col, force = True)
     # We don't need the old file
     del self.file_list[0]
+
+  def process_quit_yn(self, answer):
+    if answer.chars == b"n":
+      return
+    self.should_quit = True
+
+  def process_close_yn(self, answer):
+    if answer.chars == b"n":
+      return
+    self.close_file()
         
   def process_replace_yn(self, answer):
     #print(f"Answer: {answer.decode()}")
@@ -572,10 +708,13 @@ class editor:
     self.file_col = 0
     self.scroll_row = 0
     self.scroll_col = 0
-    self.file = editor_file(self.v, filename, self.text_height, self.text_width, self.tab_size)
+    self.file = editor_file(self.v, filename, self.text_height, self.text_width - 1, self.tab_size)
     
     self.file_row, self.file_col = self.file.open(linenum, colnum)
-    
+
+    if filename is None or not file_exists(filename):
+      self.set_message("New file  F1:Help")
+
     self.render_main_text(True)
     self.jump_to_position(self.file_row, self.file_col, 1, False)
     return
@@ -610,7 +749,7 @@ class editor:
     self.file_list.insert(0,self.file)
     self.file = self.file_list[idx+1]
     self.v.background_update=self.file.background_update
-    self.file.w = self.text_width
+    self.file.w = self.text_width - 1
     self.file.h = self.text_height
     del self.file_list[idx+1]
     self.recall_pos(self.file.saved_pos)
@@ -690,6 +829,21 @@ class editor:
 
     
   def process_select_dialog(self, keys):
+    # Direct chord shortcut: pressing the second key while the chord menu is open
+    if self._chord_items:
+      for i, seq in enumerate(self._chord_items):
+        if keys == seq[1:2]:
+          self.h_diff -= self.sd_info.height
+          self.text_height += self.sd_info.height
+          self.file.h += self.sd_info.height
+          self.mode = self.MODE_NORMAL
+          self.sd_info = None
+          self.pending_keys = self._chord_items[i]
+          self._chord_items = []
+          if self._chord_saved_scroll is not None:
+            self.scroll_row, self.scroll_col = self._chord_saved_scroll
+            self._chord_saved_scroll = None
+          return
     #Ctrl-g to quit
     if keys in (b'\x07', b'q'):
       self.mode = self.MODE_NORMAL
@@ -697,6 +851,11 @@ class editor:
       self.text_height += self.sd_info.height
       self.file.h += self.sd_info.height
       self.sd_info = None
+      if self._chord_items:
+        self._chord_items = []
+        if self._chord_saved_scroll is not None:
+          self.scroll_row, self.scroll_col = self._chord_saved_scroll
+          self._chord_saved_scroll = None
       return
     #Up
     elif keys in (b'\x1b[A', b'\x10'):
@@ -815,6 +974,47 @@ class editor:
     self.status_message=message
     self.status_message_life = 1
 
+  def _fmt_chord_key(self, k):
+    if k < 0x20:
+      return 'C-' + chr(k + 0x40).lower()
+    return chr(k)
+
+  def _open_chord_dialog(self, prefix):
+    self._chord_items = []
+    labels = []
+    for name, seqs in km.map.items():
+      for seq in seqs:
+        if len(seq) == 2 and seq[0:1] == prefix:
+          key_label = self._fmt_chord_key(seq[1])
+          pad = ' ' * max(1, 6 - len(key_label))
+          labels.append(key_label + pad + name)
+          self._chord_items.append(seq)
+          break
+    if hasattr(km, 'custom_map'):
+      for name, seqs in km.custom_map.items():
+        for seq in seqs:
+          if len(seq) == 2 and seq[0:1] == prefix:
+            key_label = self._fmt_chord_key(seq[1])
+            pad = ' ' * max(1, 6 - len(key_label))
+            labels.append(key_label + pad + name)
+            self._chord_items.append(seq)
+            break
+    if not labels:
+      return
+    if not getattr(km, 'chord_dialog', True):
+      self.in_ext_mode = True
+      return
+    prefix_label = 'C-' + chr(prefix[0] + 0x40).lower()
+    height = min(len(labels), 6)
+    self._chord_saved_scroll = (self.scroll_row, self.scroll_col)
+    self.open_select_dialog(labels, height, prefix_label, self.process_chord_select)
+
+  def process_chord_select(self, idx, item):
+    if self._chord_saved_scroll is not None:
+      self.scroll_row, self.scroll_col = self._chord_saved_scroll
+      self._chord_saved_scroll = None
+    self.pending_keys = self._chord_items[idx]
+
   def open_select_dialog(self,slist,height,subject, callback):
     self.mode = self.MODE_SELECT_DIALOG
     self.sd_info = select_dialog_info(slist, height, subject, callback)
@@ -823,6 +1023,7 @@ class editor:
     self.file.h -= height
     self.render_main_text(True)
     self.jump_to_position(self.file_row, self.file_col, 1, False)
+
 
   def open_input_line_dialog(self,subject,header,callback, answer_list = None, default_str=b''):
     self.mode = self.MODE_INPUT_LINE_DIALOG
@@ -844,8 +1045,12 @@ class editor:
     return False
   
   def process_key(self):
-    keys = self.v.read(1)
-      
+    if self.pending_keys is not None:
+      keys = self.pending_keys
+      self.pending_keys = None
+    else:
+      keys = self.v.read(1)
+
     tw, th = self.v.get_terminal_size()
     if tw != self.text_width or th-self.h_diff != self.text_height:
       print(f'ow,oh,nw,nh = {self.text_width},{self.text_height},{tw},{th}')
@@ -859,19 +1064,33 @@ class editor:
       #print("size changed")
 
 
-    # Ctrl-x;
-    if keys in km.ext_keys:
-      seq = [ keys ]
-      seq.append( self.v.read(1) )
-      keys = b''.join(seq)
+    # When chord_dialog=False, in_ext_mode is set after the prefix key.
+    # The next key is matched directly against _chord_items.
+    if self.in_ext_mode:
+      self.in_ext_mode = False
+      for seq in self._chord_items:
+        if keys == seq[1:2]:
+          self.pending_keys = seq
+          self._chord_items = []
+          return 0
+      self._chord_items = []
+      return 0
+
+    # ext keys (C-x, C-c): open command chooser dialog
+    # Skip when a dialog is already open so the second key (e.g. C-c in C-x C-c)
+    # is handled by the dialog's direct-shortcut logic instead.
+    if keys in km.ext_keys and self.mode != self.MODE_SELECT_DIALOG:
+      self._open_chord_dialog(keys)
+      return 0
+
    
 
 
-    # C- x C-c to exit
+    # C-x C-c to exit
     if keys in km.map['quit']:
-      return 1
-
-
+      msg = "Modified buffer. Quit? y(or Enter)/n" if self.file.modified else "Quit? y(or Enter)/n"
+      self.open_input_line_dialog("Quit", msg, self.process_quit_yn, ["y","n","\r"])
+      return 0
 
     if keys == b'\x1b':
       seq = [ keys ]
@@ -887,18 +1106,29 @@ class editor:
       else:
         keys = b''.join(seq)
 
+
     #print(f"--- {keys} ---")
     #self.v.read(1)
     self.dmod = True
     
+    # F1 / help: open readme (must be after escape sequence is assembled)
+    if keys in km.map.get('help', []):
+      self.process_open_file(b'/sd/Documents/pd/pem_readme.md', 0,0)
+      return 0
+      
     if self.mode == self.MODE_SEARCH:
       return self.process_search(keys)
       
     if self.mode == self.MODE_SELECT_DIALOG:
       return self.process_select_dialog(keys)
 
+      
+
     if self.mode == self.MODE_INPUT_LINE_DIALOG:
-      return self.process_input_line_dialog(keys)
+      self.process_input_line_dialog(keys)
+      if self.should_quit:
+        return 1
+      return 0
 
 
 
@@ -929,7 +1159,7 @@ class editor:
         if self.file.im_session and len(self.file.im_session.buffer) > 0:
           row = self.file.org_row
           curcol = self.file_col
-          temp_row = erow( row.substr(0,curcol) +  el.set_font_color(4) +  self.file.im_session.d_buffer.encode('utf-8') + el.set_font_color(0) + row.substr(curcol, -1), self.file.tab_size)
+          temp_row = erow( row.substr(0,curcol) +  el.set_font_color(4) +  self.file.im_session.d_buffer.encode('utf-8') + el.set_font_color(0) + row.substr(curcol, -1), self.file.tab_size, self.file.w)
           self.file.rows[self.file_row] = temp_row
           self.update_scroll_for_curmove(self.file.im_session.col)
           
@@ -966,7 +1196,10 @@ class editor:
 
     # C-x k to close file
     if keys in km.map['close']:
-      self.close_file()
+      if len(self.file_list) == 0:
+        self.set_message("The last buffer cannot be closed.")
+      else:
+        self.open_input_line_dialog("Kill buffer","Kill buffer? y(or Enter)/n", self.process_close_yn, ["y","\r", "n"])
 
     # C-x b to switch buffer
     if keys in km.map['switch']:
@@ -1344,6 +1577,7 @@ class editor_file:
     self.w = w
     self.modified = False
     self.filename = filename
+    self.v.background_update=self.background_update
 
   def open(self, linenum = 0, colnum = 0):
     
@@ -1369,13 +1603,19 @@ class editor_file:
                 line = line[:-2]
               else:
                 line = line[:-1]
-            self.rows.append(erow(line.encode('utf-8'), self.tab_size))
+            row = erow(line.encode('utf-8'), self.tab_size, self.w)
+            row.hl_mode = self.mode
+            self.rows.append(row)
         #self.jump_to_position(linenum, colnum, 1, False)
         #self.save_last_filename(linenum, colnum)
       except:
-        self.rows.append(erow(b"", self.tab_size))
+        row = erow(b"", self.tab_size, self.w)
+        row.hl_mode = self.mode
+        self.rows.append(row)
     else:
-      self.rows.append(erow(b"", self.tab_size))
+      row = erow(b"", self.tab_size, self.w)
+      row.hl_mode = self.mode
+      self.rows.append(row)
     
     return linenum, colnum      
 
@@ -1383,8 +1623,10 @@ class editor_file:
     if self.num_updated < len(self.rows):
       for i in range(self.num_updated, self.num_updated+3):
         if i < len(self.rows):
-          self.rows[i].update()
+          self.rows[i].w = self.w
+          self.rows[i].update_hl_bytes()
       self.num_updated += 3
+      #print('update')
       return True
     return False
 
@@ -1539,6 +1781,10 @@ class editor_file:
     for ln in lnl:
       if not dry_run:
         row = self.rows[ln[1]]
+        if row.w != self.w:
+          row.w = self.w
+          row.update_hl_bytes()
+          self.num_updated = 0
         #print(f"exchars: {row.get_ex_chars()}")
 
         # Trim the row to one display line.
@@ -1557,6 +1803,14 @@ class editor_file:
         else:
           out_line = row.substr(ln[2], expos)
         
+        if self.mode in ('md', 'py'):
+          #if not row.tab_detected and expos >= len(row.cbmap):
+          if self.input_method != IM_JP and ln[1] != filerow:
+            if not ln[2] in row.hl_bytes:
+              row.hl_bytes[ln[2]] = _hl_line(bytes(row.chars), self.mode)
+            out_line = row.hl_bytes[ln[2]]
+          else:
+            out_line = _hl_line(out_line, self.mode)
         out_buf.extend(out_line)
         out_buf.extend(el.erase_to_end_of_current_line().encode('utf-8'))
         #print(f"outbuf: {out_line}")
@@ -1649,7 +1903,8 @@ class editor_file:
 
   def insert_return(self, r, c, auto_indent = True):
     self.modified = True
-    newrow = erow(self.rows[r].substr(c,-1), self.tab_size)
+    newrow = erow(self.rows[r].substr(c,-1), self.tab_size, self.w)
+    newrow.hl_mode = self.mode
 
     # Auto indent for Python
     ind = 0
@@ -1820,8 +2075,9 @@ class yank_buffer:
 
 
 class erow:
-  def __init__(self, str, tab_size):
+  def __init__(self, str, tab_size, w=200):
     self.chars = str
+    self.w = w
     if self.chars == None:
       self.chars = bytearray()
     if type(self.chars) == bytes:
@@ -1833,20 +2089,31 @@ class erow:
     self.tab_detected = False
     self.scanned = False
     self.updated = False
+    self.hl_mode = None
+    self.hl_bytes = {}
     #self.update(True)
 
   def decode(self):
     return self.chars.decode('utf-8')
 
   def update(self, skip_tab_scan = False):
+    self.hl_bytes = {}
+    chars = self.chars
+    n = len(chars)
+    tab_size = self.tab_size
+    # pre-allocate to max possible size; sliced to actual length at end
     # bmap stores char to byte offset info
-    self.cbmap = array.array('h')
+    cbmap = array.array('h', b'\x00' * (n * 2))
     # cmap stores byte to char info
-    self.bcmap = array.array('h')
+    bcmap = array.array('h', b'\x00' * (n * 2))
     # dmap stores bytes to display width (utf-8 chars has size of 2, and tab)
-    self.bdmap = array.array('h')
-    # dmap stores display width to bytes (utf-8 chars has size of 2, and tab)
-    self.dbmap = array.array('h')
+    bdmap = array.array('h', b'\x00' * (n * 2))
+    # dmap stores display width to bytes; tab expands so worst case n*tab_size
+    dbmap = array.array('h', b'\x00' * (n * tab_size * 2))
+    cbmap_len = 0
+    bcmap_len = 0
+    bdmap_len = 0
+    dbmap_len = 0
 
     numchar = 0
     numdchar = 0
@@ -1854,108 +2121,116 @@ class erow:
     last_numdchar = 0
     tab_found = False
     escape_sequence_idx = 0
-    csize=0
-    dsize=0
-    for i,ch in enumerate(self.chars):
-      #if ch&0xc0 != 0x80 and escape_sequence_idx == 0:
-      #  last_numchar = numchar
-      #  last_numdchar = numdchar
-      #if escape_sequence_idx == -1:
-      #  escape_sequence_idx = 0
-      
+    org_numchar = 0
+    org_numdchar = 0
+    for i in range(n):
+      ch = chars[i]
       csize = 1
       dsize = 1
-        
+
       if ch&0xc0 == 0xc0:
         csize = 1
-        dsize = pdeck.get_utf8_width(self.chars[i:i+3])
+        dsize = pdeck.get_utf8_width(chars[i:i+3])
         org_numchar = numchar
         org_numdchar = numdchar
       elif ch&0xc0 == 0x80:
-        csize = 0
-        dsize = 0
-        self.bcmap.append(org_numchar+1)
-        self.bdmap.append(org_numdchar+1)
+        bcmap[bcmap_len] = org_numchar+1; bcmap_len += 1
+        bdmap[bdmap_len] = org_numdchar+1; bdmap_len += 1
         continue
       elif ch == 0x9:
         csize = 1
-        dsize = self.tab_size - (numdchar % self.tab_size)
+        dsize = tab_size - (numdchar % tab_size)
         tab_found = True
       elif ch == 0x1b:
-        csize = 0
-        dsize = 0
         escape_sequence_idx = 1
         org_numchar = numchar-1
         org_numdchar = numdchar-1
-        self.bcmap.append(org_numchar)
-        self.bdmap.append(org_numdchar)
+        bcmap[bcmap_len] = org_numchar; bcmap_len += 1
+        bdmap[bdmap_len] = org_numdchar; bdmap_len += 1
         continue
       elif escape_sequence_idx == 1:
-        csize = 0
-        dsize = 0
-        if ch == ord('['):
+        if ch == 91:
           escape_sequence_idx += 1
         else:
           escape_sequence_idx = 0
-        self.bcmap.append(org_numchar)
-        self.bdmap.append(org_numdchar)
+        bcmap[bcmap_len] = org_numchar; bcmap_len += 1
+        bdmap[bdmap_len] = org_numdchar; bdmap_len += 1
         continue
       elif escape_sequence_idx > 1:
-        csize = 0
-        dsize = 0
-        if ch >= ord('a') and ch  <= ord('z'):
+        if ch >= 97 and ch <= 122:
           escape_sequence_idx = 0
-        elif ch >= ord('A') and ch <= ord('A'):
+        elif ch >= 65 and ch <= 65:
           escape_sequence_idx = 0
         else:
           escape_sequence_idx += 1
-        self.bcmap.append(org_numchar)
-        self.bdmap.append(org_numdchar)
+        bcmap[bcmap_len] = org_numchar; bcmap_len += 1
+        bdmap[bdmap_len] = org_numdchar; bdmap_len += 1
         continue
-
 
       numchar += csize
       numdchar += dsize
-      
+
       if last_numchar != numchar:
         while csize > 0:
-          self.cbmap.append(i)
+          cbmap[cbmap_len] = i; cbmap_len += 1
           csize -= 1
       if last_numdchar != numdchar:
         while dsize > 0:
-          self.dbmap.append(i)
+          dbmap[dbmap_len] = i; dbmap_len += 1
           dsize -= 1
-        
-      self.bcmap.append(last_numchar)
-      self.bdmap.append(last_numdchar)
+
+      bcmap[bcmap_len] = last_numchar; bcmap_len += 1
+      bdmap[bdmap_len] = last_numdchar; bdmap_len += 1
       last_numchar = numchar
       last_numdchar = numdchar
-      
-    #print(self.cbmap)  
-    #print(self.dbmap)  
-    self.len : int = numchar
-    
+
+    self.cbmap = cbmap[:cbmap_len]
+    self.bcmap = bcmap[:bcmap_len]
+    self.bdmap = bdmap[:bdmap_len]
+    self.dbmap = dbmap[:dbmap_len]
+    self.len = numchar
+
     # Build ex_chars (tab-expanded version) if needed
     if tab_found:
       self.tab_detected = True
       self.scanned = True
       ex_chars = bytearray()
-      for i, ch in enumerate(self.chars):
+      ex_ap = ex_chars.append
+      ex_ext = ex_chars.extend
+      for i in range(n):
+        ch = chars[i]
         if ch == 0x9:
-          d_pos = self.bdmap[i]
-          dsize = self.tab_size - (d_pos % self.tab_size)
-          ex_chars.extend(b' ' * dsize)
+          d_pos = bdmap[i]
+          dsize = tab_size - (d_pos % tab_size)
+          ex_ext(b' ' * dsize)
         else:
-          ex_chars.append(ch)
+          ex_ap(ch)
       self.ex_chars = ex_chars
-      self.ex_len = len(self.ex_chars)
+      self.ex_len = len(ex_chars)
     else:
-      self.ex_chars = self.chars
+      self.ex_chars = chars
       self.ex_len = self.len
       self.tab_detected = False
-      
+
     self.updated = True
-  
+    self.update_hl_bytes()
+    
+  def update_hl_bytes(self):
+    if not self.updated:
+      self.update()
+      return
+      
+    if self.hl_mode in ('md', 'py'):
+      cur = 0
+      while True:     
+        next_stop = self.expanded_to_pos(cur, self.w)
+        #print(f"{idx}:{cur} {next_stop}, {self.get_len()}")
+        self.hl_bytes[cur] = _hl_line(self.substr(cur,next_stop), self.hl_mode)
+        if next_stop >= self.get_len():
+          break
+        cur = next_stop
+      
+
   def get_len(self):
     if not self.updated: #self.scanned:
       self.update()

@@ -371,6 +371,7 @@ class setting():
       return
       
     self.menu_ui.seq.update(time.ticks_ms())
+    self.menu_ui.handle_key()
     self.menu_ui.draw_cursor(self.time_diff, y_offset=10)
     
     self.menu_ui.draw_menu(y_offset=10)
@@ -402,10 +403,110 @@ class setting():
     if cur is not self.menu_ui.menu_list[0][1]:
       return
     self.menu_ui.open_dialog({
-      'type': 'launcher_menu',
+      'type': 'v_container',
+      'name': 'launcher_menu',
       'title': 'Launcher Menu',
-      'options': ['Add a new item', 'Move this app', 'Delete this app']
+      'items': [
+        {
+          'type': 'button',
+          'label': 'Add a new item',
+          'onPress': [self.open_add_launcher_dialog, None],
+          'close_on_press': False
+        },
+        {
+          'type': 'button',
+          'label': 'Move this app',
+          'onPress': [self.begin_move_launcher, None]
+        },
+        {
+          'type': 'button',
+          'label': 'Delete this app',
+          'onPress': [self.open_delete_confirm_dialog, None],
+          'close_on_press': False
+        }
+      ]
     })
+
+  def open_add_launcher_dialog(self, arg=None):
+    self.menu_ui.open_dialog({
+      'type': 'v_container',
+      'name': 'dialog_add_item',
+      'title': 'Add launcher',
+      'items': [
+        {
+          'type': 'textbox',
+          'name': 'title',
+          'label': 'Title'
+        },
+        {
+          'type': 'textbox',
+          'name': 'command',
+          'label': 'Command'
+        },
+        {
+          'type': 'textbox',
+          'name': 'description',
+          'label': 'Description'
+        },
+        {
+          'type': 'button',
+          'label': 'Add',
+          'onPress': [self.add_launcher_from_dialog, 'dialog_menu_item']
+        }
+      ]
+    })
+    return False
+
+  def add_launcher_from_dialog(self, values):
+    return self.add_launcher_item(
+      values.get('title', ''),
+      values.get('command', ''),
+      values.get('description', '')
+    )
+
+  def begin_move_launcher(self, arg=None):
+    self.menu_ui.set_move_mode(True)
+    self.org_app_list = [n for n in self.menu_ui.menu_list[0][1]]
+    return True
+
+  def open_delete_confirm_dialog(self, arg=None):
+    self.menu_ui.open_dialog({
+      'type': 'v_container',
+      'name': 'delete_launcher_confirm',
+      'title': 'Delete launcher',
+      'items': [
+        {
+          'type': 'label',
+          'text': 'Delete this app?'
+        },
+        {
+          'type': 'h_container',
+          'gap': 12,
+          'items': [
+            {
+              'type': 'button',
+              'label': 'Cancel',
+              'onPress': [self.cancel_dialog, None]
+            },
+            {
+              'type': 'button',
+              'label': 'Delete',
+              'onPress': [self.confirm_delete_launcher, None]
+            }
+          ]
+        }
+      ],
+      'height': 120
+    })
+    return False
+
+  def cancel_dialog(self, arg=None):
+    self.menu_ui.close_dialog()
+    return True
+
+  def confirm_delete_launcher(self, arg=None):
+    self.delete_launcher_item()
+    return True
 
   def parse_command(self, text):
     parts = []
@@ -485,77 +586,7 @@ class setting():
     self.menu_ui.set_message('Launcher deleted')
 
   def handle_dialog_key(self, keys):
-    dlg = self.menu_ui.dialog
-    if not dlg:
-      return False
-    if dlg['type'] == 'launcher_menu':
-      if keys == b'\x1b[B' and self.menu_ui.dialog_focus < len(dlg['options']) - 1:
-        self.menu_ui.dialog_focus += 1
-      elif keys == b'\x1b[A' and self.menu_ui.dialog_focus > 0:
-        self.menu_ui.dialog_focus -= 1
-      elif keys == b'\r':
-        sel = self.menu_ui.dialog_focus
-        if sel == 0:
-          self.menu_ui.open_dialog({
-            'type': 'add_item',
-            'title': 'Add launcher',
-            'values': ['', '', ''],
-            'labels' : ('Title', 'Command', 'Description'),
-            'button_label': 'Add',
-            'height' : 110
-            })
-        elif sel == 1:
-          self.menu_ui.close_dialog()
-          self.menu_ui.set_move_mode(True)
-          # one level copy
-          self.org_app_list = [n for n in self.menu_ui.menu_list[0][1]]
-          
-        elif sel == 2:
-          self.menu_ui.open_dialog({
-            'type': 'confirm',
-            'title': 'Delete launcher',
-            'message': 'Delete this app?',
-            'height' : 50
-          })
-      else:
-        self.menu_ui.close_dialog()
-      return True
-    if dlg['type'] == 'confirm':
-      if keys == b'\x1b[C' or keys == b'\x1b[B':
-        self.menu_ui.dialog_focus = 1
-      elif keys == b'\x1b[D' or keys == b'\x1b[A':
-        self.menu_ui.dialog_focus = 0
-      elif keys == b'\r':
-        if self.menu_ui.dialog_focus == 1:
-          self.delete_launcher_item()
-        self.menu_ui.close_dialog()
-      else:
-        self.menu_ui.close_dialog()
-      return True
-    if dlg['type'] == 'add_item':
-      vals = dlg['values']
-      if keys == b'\x1b[B':
-        if self.menu_ui.dialog_focus < 3:
-          self.menu_ui.dialog_focus += 1
-      elif keys == b'\x1b[A':
-        if self.menu_ui.dialog_focus > 0:
-          self.menu_ui.dialog_focus -= 1
-      elif keys == b'\x08':
-        if self.menu_ui.dialog_focus < 3 and len(vals[self.menu_ui.dialog_focus]) > 0:
-          vals[self.menu_ui.dialog_focus] = vals[self.menu_ui.dialog_focus][:-1]
-        else:
-          self.menu_ui.close_dialog()
-      elif keys == b'\r':
-        if self.menu_ui.dialog_focus == 3:
-          if self.add_launcher_item(vals[0], vals[1], vals[2]):
-            self.menu_ui.close_dialog()
-        else:
-          self.menu_ui.dialog_focus += 1
-      elif keys and keys[0] >= 32 and keys[0] < 127:
-        if self.menu_ui.dialog_focus < 3:
-          vals[self.menu_ui.dialog_focus] += keys.decode('ascii')
-      return True
-    return False
+    return self.menu_ui.handle_key(keys)
 
   def handle_tp_buttons(self):
     tp = self.v.get_tp_keys()
@@ -604,7 +635,7 @@ class setting():
           keys = b''.join(seq)
 
       if self.menu_ui.dialog:
-        self.handle_dialog_key(keys)
+        self.menu_ui.handle_key(keys)
         continue
 
       if self.menu_ui.move_mode:

@@ -65,14 +65,15 @@ class wav_play:
 
   def send_callback(self, index):
     #print(f"index {index} , {len(self.buf[index])}")
-    num_try = 2
+    num_try = 20
     while self.callback_lock:
       pdeck.delay_tick(10)
       num_try -= 1
       if num_try == 0:
-        # Giving up 
+        # Giving up
         return
-    
+
+    #print("enter")
     self.callback_lock=True
 
     if self.total_read >= self.h_data_chunkSize:
@@ -85,19 +86,12 @@ class wav_play:
       self.total_read = self.h_data_chunkSize
       self.callback_lock=False
       return
-    #if self.stop_next:
-    #  audio.stream_play(False)
-    #  #return
 
     self.total_read += num_read
 
     if num_read < len(self.buf[index]) and self.isstreaming:
       print(f"total_read={self.total_read}")
       audio.stream_update_length(0, self.total_read >> (self.h_fmt_numOfChannels))
-      #self.total_read = self.h_data_chunkSize
-      #self.stop_next = True
-      #return
-      
 
     self.callback_lock=False
 
@@ -128,6 +122,7 @@ class wav_play:
     num_samples = self.h_data_chunkSize // bytes_per_sample
 
     self.play_offset = 0
+    print('Filling initial buffer')
     
     self.total_read += self.f.readinto(self.buf[0])
     self.total_read += self.f.readinto(self.buf[1])

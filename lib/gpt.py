@@ -165,6 +165,43 @@ def read_api_key():
     
   #return True
 
+def make_log_filename():
+  ctime = time.gmtime(time.time()+pu.timezone*60*15)
+  return f"/sd/log/gptlog{ctime[1]:02}{ctime[2]:02}_{ctime[3]:02}{ctime[4]:02}"
+
+def append_log(filename, text):
+  try:
+    with open(filename, "a") as f:
+      f.write(text)
+    return True
+  except Exception:
+    return False
+
+def save_log(message, raw_response, log_filename=None):
+  if log_filename == None:
+    log_filename = make_log_filename()
+
+  is_new = not file_exists(log_filename)
+  mode = "w" if is_new else "a"
+
+  with open(log_filename, mode) as f:
+    if not is_new:
+      f.write("\n\n----- iteration -----\n")
+    f.write(message)
+    f.write('\n')
+    f.write(raw_response)
+
+  try:
+    pdeck.shared_filelist(log_filename)
+  except Exception:
+    pass
+  try:
+    pdeck.clipboard_copy(log_filename)
+  except Exception:
+    pass
+
+  return log_filename
+
 class chatgpt_util:
   def __init__(self,vs):
     self.vs = vs
@@ -370,8 +407,8 @@ class chatgpt_util:
   def tts_stream(self, text, voice='alloy'):
     """Converts text to speech and returns a response object with a raw stream"""
     payload = ujson.dumps({
-        #"model": "tts-1-hd",
-        "model": "gpt-4o-mini-tts",
+        "model": "tts-1-hd",
+        #"model": "gpt-4o-mini-tts",
         "input": text,
         "voice": voice,
         #"speed" : 1.1,
@@ -387,6 +424,65 @@ class chatgpt_util:
     return requests.post(self.tts_url, headers=headers, data=payload)
 
 el = elib.esclib()
+
+class ThinkingAnimation:
+  _SPIN = '|/-\\'
+  _BAR  = ' .-~^~-. '
+  _COLS = [36, 92, 33, 92]  # cyan → lightgreen → yellow → lightgreen
+
+  def __init__(self, vs, label='Asking GPT..'):
+    self.vs = vs
+    if hasattr(self.vs, 'v'):
+      self.v = vs.v
+      self.v.callback(self.update)
+    self.label = label
+    self.tick = 0
+    self.running = True
+    self._el = elib.esclib()
+    #vs.write(self._el.cursor_mode(False))
+    vs.write('\r\n\r\n')
+
+  def update(self, e):
+    if not self.running:
+      self.v.finished()
+      return
+      
+    self.tick += 1
+    if self.tick % 15:
+      self.v.finished()
+      return
+    t = self.tick // 15
+    el = self._el
+    n = len(self._BAR)
+
+    #dummy instruction to tell update screen
+    self.v.set_draw_color(1)
+
+    bar = ''.join(self._BAR[(t + i) % n] for i in range(20))
+    spin = self._SPIN[t % len(self._SPIN)]
+    col = self._COLS[(t // 8) % len(self._COLS)]
+    self.vs.write(
+      el.cur_up(2) +
+      spin + 
+      ' ' + self.label + el.erase_to_end_of_current_line() + '\r\n' +
+      bar +
+      el.erase_to_end_of_current_line() + '\r\n'
+    )
+    self.v.finished()
+    return
+
+  def stop(self):
+    self.running = False
+    if hasattr(self.vs, 'v'):
+      self.v.callback(None)
+    el = self._el
+    self.vs.write(
+      el.cur_up(2) +
+      el.erase_to_end_of_current_line() + '\r\n' +
+      el.erase_to_end_of_current_line() + '\r\n' +
+      el.cur_up(2) +
+      el.cursor_mode(True)
+    )
 
 def record_audio(vs, filename, duration_sec=15):
   """Records 16kHz mono audio"""
@@ -481,6 +577,7 @@ def main(vs, args_in):
             description='ChatGPT query' )
   parser.add_argument('-a', '--agent', action='store_true', help='Enable Agent Mode')
   parser.add_argument('-n', '--nosave',action='store_true',help='do not save the result')
+  parser.add_argument('-s', '--silent', action='store_true', help='Suppress progress output')
   parser.add_argument('-nf', '--no-format',action='store_true',help='do not format text (No bold)')
   parser.add_argument('-c', '--clipboard', action='store_true', help='use clipboard as reference text')
   parser.add_argument('-j', '--jp',action='store_true',help='Answer in Japanese')
@@ -489,10 +586,15 @@ def main(vs, args_in):
   parser.add_argument('-m', '--model',action='store',default='gpt-5.4',help='Model to use (e.g. gpt-5-mini)')
   parser.add_argument('-v', '--voice',action='store_true',help='Use voice mode (STT and TTS)')
   parser.add_argument('-vt', '--voice-type',action='store',default='coral',help='Voice type for TTS (alloy, coral, echo, fable, onyx, nova, shimmer)')
+  parser.add_argument('--log-file', action='store', default=None, help='Internal: reuse the same log filename across iterations')
   parser.add_argument('content', nargs='*',help='Content to ask')
   parser.add_argument('-q', nargs='+',help='Content to ask, use this when you want to specify content explicitly. If you specify a filename, it uses file content as a main content.')
 
   args = parser.parse_args(args_in[1:])
+
+  if not pdeck.wifi_connected():
+    print("No WiFi connection", file=vs)
+    return
 
   gpt = chatgpt_util(vs)
   if not gpt.read_api_key():
@@ -541,6 +643,10 @@ def main(vs, args_in):
   ctime = time.gmtime(time.time() + pu.timezone * 60 * 15)
   time_str = f"[User current time: {ctime[0]:04d}-{ctime[1]:02d}-{ctime[2]:02d} {ctime[3]:02d}:{ctime[4]:02d}]\n"
   message = time_str + message
+
+  log_filename = args.log_file
+  if log_filename == None:
+    log_filename = make_log_filename()
 
   if args.agent:
     idx = 0
@@ -619,8 +725,13 @@ def main(vs, args_in):
     model = 'gpt-5.5'
   elif model in ('f','fast'):
     model = 'gpt-5.4-mini'
-  print("Asking..", file=vs)
+  if not args.silent:
+    _anim = ThinkingAnimation(vs, "Asking GPT..")
+    
   raw_response = gpt.ask(gpt.make_json(message, references, images, model, instructions = instructions))
+  if not args.silent:
+    _anim.stop()
+
   if not raw_response:
     return
   
@@ -635,12 +746,14 @@ def main(vs, args_in):
     if voice:
       raw_response_sub = re.sub('\]\(ht.+?\)',']',raw_response)
       
-      #print(raw_response_sub)
-      print("TTS processing..", file=vs)
-      # We don't want gc run for a while
       gc.collect()
-      
+      if args.silent:
+        print("TTS processing..", file=vs)
+      else:
+        _anim = ThinkingAnimation(vs, "TTS..")
       res = gpt.tts_stream(raw_response_sub, voice=args.voice_type)
+      if not args.silent:
+        _anim.stop()
       print("TTS processing done", file=vs)
       if res and res.status_code == 200:
         # In MicroPython urequests, the raw socket is often .raw or .s
@@ -656,18 +769,12 @@ def main(vs, args_in):
         res.close()
 
     nosave = margs['nosave'] if 'nosave' in margs else args.nosave
-    if nosave:
-      return
-    ctime = time.gmtime(time.time()+pu.timezone*60*15)
-    filename = f"/sd/log/gptlog{ctime[1]:02}{ctime[2]:02}_{ctime[3]:02}{ctime[4]:02}"
-    pdeck.shared_filelist(filename)
-    pdeck.clipboard_copy(filename)      
-    with open(filename,"w") as f:
-      f.write(message)
-      f.write('\n')
-      f.write(raw_response)
-    
-    print(f"Saved to {filename} and the filename copied to clipboard", file = vs)
+    if not nosave:
+      try:
+        saved_filename = save_log(message, raw_response, log_filename)
+        print(f"Saved to {saved_filename} and the filename copied to clipboard", file = vs)
+      except Exception as e:
+        print(f"Failed to save log: {e}", file=vs)
       
   if args.agent:
     idx = 0
@@ -734,10 +841,16 @@ def main(vs, args_in):
       elif lang_tag == "iterate":
         print(  f"{el.set_font_color(1)}Agent: Iterating...{el.reset_font_color()}", file=vs)
         iter_args = ['gpt'] + code.split()
+        has_log_file = False
+        for item in iter_args:
+          if item == '--log-file':
+            has_log_file = True
+            break
+        if not has_log_file:
+          iter_args.extend(['--log-file', log_filename])
         for i, item in enumerate(iter_args):
           if item == '-q':
             iter_args = iter_args[0:i+1] + [" ".join(iter_args[i+2:])]
             break
         print(f"{el.set_font_color(1)}Agent: Calling main with {iter_args}{el.reset_font_color()}", file=vs)
         main(vs, iter_args)
-

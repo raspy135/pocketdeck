@@ -1,7 +1,7 @@
 
 # PEM editor
 
-PEM edit is designed for Pocket deck system, 100% written by MicroPython, good fit for monochrome display.
+PEM editor is designed for Pocket deck system, 100% written by MicroPython, good fit for monochrome display.
 
 ## Features
 
@@ -131,7 +131,7 @@ Pem has a config file, and this is located at /sd/lib/pem_keymap.py.
 
 If you want to customize keymap or some settings, copy the file under /sd/py. /sd/py has a priority over /sd/lib.
 
-init_custom() is called at initialization. km stores pem_keymap_default module instance.
+init_custom() is called at initialization. km stores pem_keymap_default.py module instance.
 
 Here is an example to change some key mapping
 
