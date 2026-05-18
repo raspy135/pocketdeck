@@ -9,6 +9,13 @@ There are two type of clients available. One is web app with Python, and another
 1.  **Python 3.7+**: Make sure Python is installed on your system.
 2.  **Web Browser**: A modern browser like Chrome, Firefox, or Edge.
 
+## Screencast frame rate
+
+To get the best Screencast frame rate, separate network traffic. Constant 40 to 50 fps is possible.
+
+- Pocket deck: Use 2.4GHz network
+- PC / iPhone / Mac : Use 5GHz network or wired network
+
 ## Starting Netserver
 
 You need to start Netserver on Pocket Deck. To start Netserver, execute `netserver` in command line. You need to connect WiFi before you start Netserver.

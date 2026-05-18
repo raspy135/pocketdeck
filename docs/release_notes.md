@@ -3,6 +3,9 @@
 ### Firmware 
 
 - Escape sequence handling bug fix
+- Netserver improvement. When traffic is separate, constant 40 to fps is possible.
+- Some extra chars are added to system fonts to support modern CLI apps.
+- More system fonts.
 
 ### Application
 
