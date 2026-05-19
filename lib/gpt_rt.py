@@ -1,10 +1,11 @@
 import network, socket, ssl, ubinascii, ujson, urandom, time
 import audio, codec_config, pdeck, pdeck_utils as pu
-import os, sys, io, _thread
+import os, sys, io
 import argparse
 import gpt
 import gc
 import esclib
+import setuni
 
 _el = esclib.esclib()
 
@@ -19,7 +20,7 @@ def load_app_list():
   return result
 
 class CaptureStream(io.IOBase):
-  _MAX = 3000
+  _MAX = 300000
 
   def __init__(self):
     self._parts = []
@@ -293,7 +294,7 @@ class SimpleWS:
 
 
 class RealtimeAgent:
-  def __init__(self, ws, vs, model, file_list, references, app_list=None, agent=False):
+  def __init__(self, ws, vs, model, file_list, references, app_list=None, agent=False, language=None):
     self.ws = ws
     self.vs = vs
     self.model = model
@@ -301,23 +302,25 @@ class RealtimeAgent:
     self.references = references
     self.app_list = app_list or []
     self.agent = agent
+    self.language = language
     self.pending_fn_calls = {}
     self.sample_rate = 24000
 
-    self.mic_buf_size = 4000
+    self.mic_buf_size = 6000
     self.mic_bufs = [memoryview(bytearray(self.mic_buf_size)), memoryview(bytearray(self.mic_buf_size))]
     self.mic_ready_idx = -1
 
     self.spk_buf_size = 6000
     self.spk_bufs = [memoryview(bytearray(self.spk_buf_size)), memoryview(bytearray(self.spk_buf_size))]
-    self.zero_buf = bytearray(self.spk_buf_size)
+    self.zero_buf = memoryview(bytearray(self.spk_buf_size))
 
-    self._audio_lock = _thread.allocate_lock()
-    self.audio_queue = []
-    self.audio_queue_head = 0
-    self.current_play_chunk = bytearray()
-    self.current_play_idx = 0
-    self.queued_bytes = 0
+    # Lock-free single-producer/single-consumer ring buffer for audio playback.
+    # Main thread writes; callback reads. No lock needed.
+    self._ring_size = 262144*2  # 256 KB ≈ 5.3 s at 24 kHz PCM16 mono
+    self._ring = bytearray(self._ring_size)
+    self._ring_mv = memoryview(self._ring)
+    self._ring_wpos = 0  # written only by main thread
+    self._ring_rpos = 0  # written only by callback
 
     self.buffering = True
     self.buffer_threshold = 16000
@@ -328,6 +331,7 @@ class RealtimeAgent:
 
     self.cb_time_max = 0
     self.underrun_count = 0
+    self.drop_count = 0
     self.last_stat_time = time.ticks_ms()
 
     self.ai_text = ""
@@ -337,60 +341,50 @@ class RealtimeAgent:
     self.user_text_printed = False
     self.agent_executed_text = ""
 
+  @micropython.native
   def mic_callback(self, index):
     self.mic_ready_idx = index
 
+  @micropython.native
   def spk_callback(self, index):
     t0 = time.ticks_us()
     dest = self.spk_bufs[index]
-    needed = len(dest)
-    pos = 0
+    buf_size = len(dest)
+    rpos = self._ring_rpos
+    fill = (self._ring_wpos - rpos + self._ring_size) % self._ring_size
 
     if self.buffering:
-      if self.queued_bytes >= self.buffer_threshold and time.ticks_diff(time.ticks_ms(), self.mute_until) >= 0:
+      if fill >= self.buffer_threshold and time.ticks_diff(time.ticks_ms(), self.mute_until) >= 0:
         self.buffering = False
       else:
-        dest[:needed] = self.zero_buf[:needed]
+        dest[:buf_size] = self.zero_buf[:buf_size]
         duration = time.ticks_diff(time.ticks_us(), t0)
         if duration > self.cb_time_max:
           self.cb_time_max = duration
         return
 
-    while needed > 0:
-      avail = len(self.current_play_chunk) - self.current_play_idx
-      if avail == 0:
-        # Try to dequeue next chunk; non-blocking so callback never stalls
-        if self._audio_lock.acquire(False):
-          has_more = self.audio_queue_head < len(self.audio_queue)
-          if has_more:
-            self.current_play_chunk = self.audio_queue[self.audio_queue_head]
-            self.audio_queue_head += 1
-            # Compact list once head advances far enough to avoid unbounded growth
-            if self.audio_queue_head >= 8:
-              del self.audio_queue[:self.audio_queue_head]
-              self.audio_queue_head = 0
-            self.current_play_idx = 0
-          self._audio_lock.release()
-          if not has_more:
-            self.buffering = True
-            self.underrun_count += 1
-            break
-          avail = len(self.current_play_chunk)
+    if fill < buf_size:
+      self.buffering = True
+      self.underrun_count += 1
+      if fill > 0:
+        end = rpos + fill
+        if end <= self._ring_size:
+          dest[:fill] = self._ring_mv[rpos:end]
         else:
-          # Main thread holds lock (appending); fill rest with silence this tick
-          break
-
-      take = min(avail, needed)
-      dest[pos:pos+take] = self.current_play_chunk[self.current_play_idx:self.current_play_idx+take]
-      self.current_play_idx += take
-      self.queued_bytes -= take
-      pos += take
-      needed -= take
-
-    if pos < len(dest):
-      dest[pos:] = self.zero_buf[:len(dest)-pos]
-
-    if pos > 0:
+          tail = self._ring_size - rpos
+          dest[:tail] = self._ring_mv[rpos:]
+          dest[tail:fill] = self._ring_mv[:fill - tail]
+        self._ring_rpos = (rpos + fill) % self._ring_size
+      dest[fill:buf_size] = self.zero_buf[:buf_size - fill]
+    else:
+      end = rpos + buf_size
+      if end <= self._ring_size:
+        dest[:buf_size] = self._ring_mv[rpos:end]
+      else:
+        tail = self._ring_size - rpos
+        dest[:tail] = self._ring_mv[rpos:]
+        dest[tail:buf_size] = self._ring_mv[:buf_size - tail]
+      self._ring_rpos = end % self._ring_size
       self.last_play_time = time.ticks_ms()
 
     duration = time.ticks_diff(time.ticks_us(), t0)
@@ -424,6 +418,7 @@ class RealtimeAgent:
       "audio": {
         "input": {
           "format": {"type": "audio/pcm", "rate": self.sample_rate},
+          "transcription": ({"model": "whisper-1", "language": self.language} if self.language else {"model": "whisper-1"}),
           "turn_detection": {"type": "server_vad"}
         },
         "output": {
@@ -502,11 +497,28 @@ class RealtimeAgent:
     else:
       audio_b64 = delta
     if audio_b64:
-      audio_bytes = ubinascii.a2b_base64(audio_b64)  # decode before acquiring lock
-      self._audio_lock.acquire()
-      self.audio_queue.append(audio_bytes)
-      self.queued_bytes += len(audio_bytes)
-      self._audio_lock.release()
+      #pdeck.led(2,0)
+      #pdeck.led(3,0)
+      raw = ubinascii.a2b_base64(audio_b64)
+      #pdeck.led(2,40)
+      n = len(raw)
+      wpos = self._ring_wpos
+      rpos = self._ring_rpos
+      fill = (wpos - rpos + self._ring_size) % self._ring_size
+      if n > self._ring_size - fill:
+        self.drop_count += 1
+        return  # ring full; drop rather than corrupt
+      end = wpos + n
+      if end <= self._ring_size:
+        self._ring_mv[wpos:end] = raw
+      else:
+        tail = self._ring_size - wpos
+        raw_mv = memoryview(raw)
+        self._ring_mv[wpos:] = raw_mv[:tail]
+        self._ring_mv[:n - tail] = raw_mv[tail:]
+      self._ring_wpos = end % self._ring_size
+      #pdeck.led(2,0)
+      #pdeck.led(3,20)
 
   def handle_text_delta(self, msg):
     delta = msg.get("delta")
@@ -553,15 +565,10 @@ class RealtimeAgent:
     self.user_text_printed = False
 
   def _mute_audio(self, ms):
-    self.buffering = True
-    self._audio_lock.acquire()
-    self.audio_queue = []
-    self.audio_queue_head = 0
-    self.current_play_chunk = bytearray()
-    self.current_play_idx = 0
-    self.queued_bytes = 0
+    self.buffering = True  # callback outputs silence; safe to reset ring now
+    self._ring_wpos = 0
+    self._ring_rpos = 0
     self.mute_until = time.ticks_add(time.ticks_ms(), ms)
-    self._audio_lock.release()
 
   def _search_free_screen(self, launched, scnum=2):
     while True:
@@ -734,14 +741,9 @@ class RealtimeAgent:
 
     elif mtype == "input_audio_buffer.speech_started":
       print("\n%s[User speaking... barge in detected]%s" % (_el.bold(), _el.bold_off()), file=self.vs)
-      self.buffering = True  # make callback output silence before we touch shared state
-      self._audio_lock.acquire()
-      self.audio_queue = []
-      self.audio_queue_head = 0
-      self.current_play_chunk = bytearray()
-      self.current_play_idx = 0
-      self.queued_bytes = 0
-      self._audio_lock.release()
+      self.buffering = True  # callback outputs silence; safe to reset ring
+      self._ring_wpos = 0
+      self._ring_rpos = 0
 
     elif mtype == "session.updated":
       pass  # print("\n[Session updated]", file=self.vs)
@@ -798,6 +800,10 @@ class RealtimeAgent:
           }
           self.ws.send(ujson.dumps(evt))
 
+    # Limit audio-delta frames per iteration so the scheduler can run the audio
+    # callback between bursts. Control events (barge-in, transcript…) are not
+    # counted and drain immediately.
+    audio_frames = 0
     while True:
       frame = self.ws.recv()
       if not frame:
@@ -805,13 +811,20 @@ class RealtimeAgent:
       try:
         msg = ujson.loads(frame)
         self.process_event(msg)
-
+        if msg.get("type") == "response.output_audio.delta":
+          audio_frames += 1
+          break
       except Exception as e:
         print("Message Error:", e, "Frame:", frame[:80], file=self.vs)
 
     if time.ticks_diff(time.ticks_ms(), self.last_stat_time) > 2000:
+      fill = (self._ring_wpos - self._ring_rpos + self._ring_size) % self._ring_size
+      print("[spk] underruns=%d drops=%d cb_max=%d us fill=%d buf=%s" % (
+        self.underrun_count, self.drop_count, self.cb_time_max,
+        fill, "Y" if self.buffering else "N"))
       self.cb_time_max = 0
       self.underrun_count = 0
+      self.drop_count = 0
       self.last_stat_time = time.ticks_ms()
 
     return True
@@ -829,11 +842,15 @@ def main(vs, args_in):
   parser.add_argument('-m', '--model', action='store', default='gpt-realtime-2', help='Model to use')
   parser.add_argument('-f', '--file', nargs='+', action='store', help='Attach file(s) as reference')
   parser.add_argument('-a', '--agent', action='store_true', help='Enable agent mode (function calling)')
+  parser.add_argument('-l', '--language', action='store', default=None, help='Preferred speech-to-text language, e.g. ja for Japanese')
   args = parser.parse_args(args_in[1:])
 
   model = args.model
   file_list = args.file or []
   agent = args.agent
+  language = args.language
+  if language == 'ja':
+    setuni.main(vs, ['setuni'])
 
   api_key = gpt.read_api_key()
   if not api_key:
@@ -863,7 +880,7 @@ def main(vs, args_in):
     print("Failed to connect: %s" % e, file=vs)
     return
 
-  ra = RealtimeAgent(ws, vs, model, file_list, references, app_list, agent)
+  ra = RealtimeAgent(ws, vs, model, file_list, references, app_list, agent, language)
   print("Starting voice agent%s... Press 'q'/B to quit, Enter to mute/unmute mic." % (" (agent mode)" if agent else ""), file=vs)
 
   # We don't want gc run for a while
@@ -885,7 +902,8 @@ def main(vs, args_in):
         elif keys == b'\r':
           ra.toggle_mic_mute()
 
-      time.sleep(0.005)
+      time.sleep(0.01)
+      #pdeck.delay_tick(12)
   finally:
     ra.terminate()
     

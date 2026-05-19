@@ -744,7 +744,7 @@
         },
         {
             "path": "gpt_rt.py",
-            "md5": "ae6f5a415b1b4f32795d9e1322530e6e"
+            "md5": "a69b6fa390815311cda32943b921b8d4"
         },
         {
             "path": "pngreader.py",
@@ -840,7 +840,7 @@
         },
         {
             "path": "pem.mpy",
-            "md5": "43df830018442ddda8a8d6e90be9008a"
+            "md5": "3256b621bdca97677ec28ca108ff4637"
         },
         {
             "path": "update_updater.py",
