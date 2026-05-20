@@ -120,6 +120,10 @@ def _hl_md(b):
         i = j + 2
         continue
     elif c == 91:  # '['
+      if i > 0 and b[i-1] == 0x1b:
+        append(b[i:i+1])
+        i += 1
+        continue
       if i + 1 < n and b[i + 1] == 91:  # '[['
         j = b.find(b']]', i + 2)
         if j != -1:
@@ -438,9 +442,12 @@ class editor:
           out += self.search_info.matched_query
         out += el.move_cursor(self.d_row +1, self.d_col + 1)
         #out += el.cur_left(len(self.search_info.matched_query))
-        out += el.reset_font_color()
+        #out += _B_HL_OFF
+        #el.reset_font_color()
         self.v.print(out)
+      self.v.print(_B_HL_OFF)
       self.v.print(el.cursor_mode(True))
+    
     bm.add_bench('status bar')
     bm.print_bench()
 
@@ -988,6 +995,7 @@ class editor:
   def set_message(self, message):
     self.status_message=message
     self.status_message_life = 1
+    self.dmod = True
 
   def _fmt_chord_key(self, k):
     if k < 0x20:
@@ -1508,7 +1516,10 @@ class editor:
       # Custom command
       for command in km.custom_map:
         if keys in km.custom_map[command]:
-          eval(f"km.{command}(e)",{ "km" : km, "e" : self })
+          try:
+            eval(f"km.{command}(e)",{ "km" : km, "e" : self })
+          except Exception as e:
+            print(e)
           return 0
 
       if int(keys[0]) >= 0x20:

@@ -1,3 +1,15 @@
+## Release Note, May 20, 2026
+
+### Firmware
+
+- Escape sequence engine overhaul, mostly for SSH apps on Linux.
+
+### Application
+
+- stt : silent and language option added
+- pem : speech-to-text command added (C-c s)
+
+
 ## Release Note, May 19, 2026
 
 ### Application

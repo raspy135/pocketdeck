@@ -1,11 +1,18 @@
 import io
 
 class mock_stream(io.IOBase):
-  def __init__(self, initial=b""):
+  def __init__(self, initial=b"", vs = None):
     self._buffer = bytearray(initial)
     self._wbuffer = bytearray()
+    self.real_vs = vs
 
+  def poll(self):
+    if self.real_vs:
+      return self.real_vs.poll()
   def read(self, n=-1):
+    if self.real_vs:
+      return self.real_vs.read(n)
+
     if n is None or n < 0:
       n = len(self._buffer)
     n = min(n, len(self._buffer))

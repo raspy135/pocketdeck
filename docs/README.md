@@ -410,12 +410,15 @@ App and agent app lists are loaded from `/config/apps.json` and `/config/agent_a
 `stt` is a Speech-to-Text app using OpenAI Whisper API. Requires OpenAI API key at `/config/openai_api_key`.
 
 ```
-stt [wav_file] [-o output_file]
+stt [options] [wav_file] [-o output_file]
 ```
 
 - With no arguments: press any key to record, then transcribes and copies result to clipboard. Press `q` to quit.
 - `wav_file`: transcribe an existing WAV file directly.
 - `-o file`: save transcription to a file instead of clipboard.
+- `-s` : Silent mode, record started immediately, and record will not repeat.
+- `-l` : Preferred language
+- `-d` : recording duration in seconds
 
 ### tts
 

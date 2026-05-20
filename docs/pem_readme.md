@@ -115,6 +115,7 @@ It has basic symbol completion, only available with Python mode. Python mode is 
 ### Miscellaneous commands
 
 - `C-c d` : (This is an example of custom command) insert today's date
+- `C-c s' : Speech to text. Requires WiFi and OpenAPI key.
 - `C-c l` : Toggle checkbox . Format is `[ ]`.
 
 

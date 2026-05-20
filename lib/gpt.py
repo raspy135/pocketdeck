@@ -301,7 +301,7 @@ class chatgpt_util:
     
     return None
 
-  def stt(self, filename):
+  def stt(self, filename, language = None):
     """Transcribes audio using Whisper (Stream Upload)"""
     boundary = "----MicroPythonPdeckBoundary"
     try:
@@ -317,11 +317,23 @@ class chatgpt_util:
     ).encode('utf-8')
     
         #'Content-Disposition: form-data; name="model"\r\n\r\nwhisper-1\r\n' +
-    footer_bytes = (
+    # Build multipart fields after the audio file.
+    # OpenAI transcription API accepts optional "language" as an ISO-639-1 code
+    # such as "en", "ja", "fr".  When provided, it improves accuracy and latency.
+    footer = (
         '\r\n--' + boundary + '\r\n' +
-        'Content-Disposition: form-data; name="model"\r\n\r\ngpt-4o-mini-transcribe\r\n' +
-        '--' + boundary + '--\r\n'
-    ).encode('utf-8')
+        'Content-Disposition: form-data; name="model"\r\n\r\ngpt-4o-mini-transcribe\r\n'
+    )
+
+    if language:
+      footer += (
+        '--' + boundary + '\r\n' +
+        'Content-Disposition: form-data; name="language"\r\n\r\n' +
+        str(language) + '\r\n'
+      )
+
+    footer += '--' + boundary + '--\r\n'
+    footer_bytes = footer.encode('utf-8')
     
     content_length = len(header_bytes) + file_size + len(footer_bytes)
     print("Uploading audio to STT (streaming)...", file=self.vs)
@@ -486,7 +498,7 @@ class ThinkingAnimation:
       el.cursor_mode(True)
     )
 
-def record_audio(vs, filename, duration_sec=15):
+def record_audio(vs, filename, duration_sec=15, silent = False):
   """Records 16kHz mono audio"""
   sample_rate = 16000
   cc = codec_config.codec_config()
@@ -494,7 +506,8 @@ def record_audio(vs, filename, duration_sec=15):
   cc.set_agc(True)
   
   audio.sample_rate(sample_rate)
-  print(f"Recording... (press any key to stop)", file=vs)
+  if not silent:
+    print(f"Recording... (press any key to stop)", file=vs)
   rec = recorder.stream_record('dummy', vs, 20000)
   # Use num_channels=1 for bandwidth savings as requested
   rec.record(filename, sample_rate * duration_sec, num_channels=1)
@@ -503,8 +516,8 @@ def record_audio(vs, filename, duration_sec=15):
   start = time.time()
   while audio.stream_record() and (time.time() - start) < duration_sec:
     pdeck.delay_tick(10)
-    ret = vs.v.read_nb(1)
-    if ret and ret[0] > 0:
+    if vs.poll():
+      ret = vs.read(1)
       break
     #if rec.time_silent == 2:
     #  break
@@ -570,7 +583,9 @@ def format(message):
       result += el.set_font_color(1)
     else:
       result += el.reset_font_color()
-    message = message[pos+2:]    
+    message = message[pos+2:]
+  if numfound & 1:
+    result += el.reset_font_coloe()
   return result
 
 def main(vs, args_in):
@@ -774,6 +789,7 @@ def main(vs, args_in):
     if not nosave:
       try:
         saved_filename = save_log(message, raw_response, log_filename)
+        print(el.bold_off(), file=vs)
         print(f"Saved to {saved_filename} and the filename copied to clipboard", file = vs)
       except Exception as e:
         print(f"Failed to save log: {e}", file=vs)

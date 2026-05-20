@@ -34,7 +34,9 @@ def main(vs, args):
   print("Hello Pocket deck", file=vs)
 ```
 
-`vs` is vscreen_stream object for the app, and `args` are command arguments passed to the app. args[0] is always the command name itself.
+`vs` is a **vscreen_stream** object — a Python IO stream that wraps the underlying C `vscreen` object. `args` are command arguments; `args[0]` is always the command name itself.
+
+> **`vs` (vscreen_stream) is not `vs.v` (vscreen).** Use `print(..., file=vs)` and `vs.read()` for text I/O on the stream. For graphics, callbacks, and non-blocking keyboard access, go through `vs.v` — the raw C vscreen object.
 
 Once you finished editing, save the file.
 
@@ -102,7 +104,7 @@ For example, `analog_clock_set_timer` command sets kitchen timer when the applic
 
 To support remote command, follow the steps:
 
-1. In the app, vscreen_stream.register() to register the application object.
+1. In the app, call `vs.register_module(self)` to register the application object.
 2. In the caller app, scan pdeck_utils.app_list and get the object, and call the function. Print message for result. The message could be used by AI.
 
 ## Pdeck module reference
@@ -142,30 +144,63 @@ Usually it will be 1(0 based number) because command shell is always running on 
 - `update_app_list(screen_num, value)` System function, internal use.
 - `vscreen()` Create and returns a Vscreen object.
 
-## vscreen module reference
+## vscreen vs vscreen_stream — object guide
 
-vscreen represents virtual screen(0-10). All graphics APIs are implemented in this class.
+These two objects are closely related but distinct. Mixing them up is a common source of bugs.
 
+| | `vs` — **vscreen_stream** | `vs.v` — **vscreen** |
+|---|---|---|
+| **Type** | Python class (`io.IOBase`) | C extension object |
+| **How obtained** | Passed as first argument to `main()` | `vs.v`, or `pdeck.vscreen(screen_num)` |
+| **Purpose** | IO stream interface — text I/O and app lifecycle | Graphics, callbacks, raw keyboard input |
+| **`print(..., file=vs)`** | ✓ works — routes through `write()` | ✗ not a stream |
+| **`vs.write(s)`** | ✓ delegates to `vs.v.print(s)` | ✗ |
+| **`vs.read(n)`** | ✓ blocking read | ✗ |
+| **`vs.v.read_nb(n)`** | ✗ | ✓ non-blocking read |
+| **`vs.poll()`** | ✓ delegates to `vs.v.poll()` | ✓ |
+| **`vs.v.callback(fn)`** | ✗ | ✓ register frame callback |
+| **`vs.v.finished()`** | ✗ | ✓ signal frame done |
+| **Drawing methods** | ✗ | ✓ `draw_box`, `draw_str`, etc. |
 
-### Graphics Operations (via vscreen object)
-
-#### Creating a vscreen object
-
-Normally you can get vscreen object via vscreen_stream, passed to main(). 
-`vs` is not vscreen object. `vs.v` is a vscreen object.
+**Rule of thumb:**
+- Text output → `print(..., file=vs)` or `vs.write(...)`
+- Blocking keyboard input → `vs.read(n)`
+- Non-blocking keyboard input → `vs.v.read_nb(n)`
+- Graphics / callbacks → `v = vs.v`, then use `v`
 
 ```python
 def main(vs, args):
-    v = vs.v #v is vscreen object, don't get confused, vs is vscrreen_strem object.
+  v = vs.v                      # vscreen — graphics and callbacks
+
+  print("hello", file=vs)       # text output via vscreen_stream
+  ch = vs.read(1)               # blocking keyboard read via vscreen_stream
+
+  v.callback(my_draw_fn)        # register draw callback via vscreen
+  nb = v.read_nb(1)             # non-blocking read via vscreen
 ```
 
-Or 
+---
+
+## vscreen module reference
+
+vscreen represents a virtual screen (0–10). All graphics APIs are on this object.
+
+### Getting a vscreen object
+
+In an app, always get it from the `vs` argument — do not create a new one:
+
+```python
+def main(vs, args):
+  v = vs.v  # vscreen object for this app's screen
+```
+
+To work with a specific screen from outside an app:
 
 ```Python
 screen = pdeck.vscreen([screen_num])
 ```
 
-This creates a new vscreen object. If `screen_num` is not provided, uses the current screen.
+If `screen_num` is omitted, uses the current screen.
 
 ### Drawing Methods
 
@@ -276,15 +311,18 @@ Callback function to be called for every frame update.
 
 ### Input/Output Operations
 
-- `print(text)` Print text to the terminal. 
+> All methods in this section are on the **vscreen** object (`vs.v`), not on `vscreen_stream` (`vs`).
+> For blocking text I/O from app code, use `vs.read()` / `print(..., file=vs)` instead.
 
-- `send_char(data)` Send character data as keyboard input.
+- `print(text)` Write text to the terminal. Prefer `print(..., file=vs)` from app code — it goes through `vscreen_stream.write()` which calls this internally.
 
-- `send_key_event(key, modifier, event_type)` Send keyboard event.
+- `send_char(data)` Inject character data as keyboard input.
 
-- `read_nb(max_bytes)` Read up to `max_bytes` from keyboard input. Returns tuple `(bytes_read, data)`. Return data type is string. If you want to convert it to bytes, use `encode('ascii')`. This is non-blocking function. Special keys are recorded as escape sequence. For example, Up arrow key is b'\x1b[A'.
+- `send_key_event(key, modifier, event_type)` Inject a keyboard event.
 
-- `poll()` Check if there's input available. Returns `True` if data is available.
+- `read_nb(max_bytes)` Non-blocking keyboard read. max_bytes can be up to 29. Returns tuple`(bytes_read, data)` where data is a string. Use `encode('ascii')` to convert to bytes. Special keys are escape sequences, e.g. Up arrow is `b'\x1b[A'`. **For blocking reads from app code, use `vs.read(n)` on the stream instead.**
+
+- `poll()` Returns `True` if keyboard input is available. Also available as `vs.poll()` on the stream.
 
 - `get_key_state(key_code)` Get the state of a specific key. Key code is listed in [[hid_usage_keyboard.h]]
 
@@ -342,24 +380,32 @@ pdeck_utils.launch(['pem','/sd/Documents/journal.md'],2)
 
 ## vscreen_stream class
 
-vscreen_stream is Python wrapper of vscreen object.  vscreen_stream provides stream object interface. read(), write(), async_read(), ioctl() and poll() are supported.
+`vscreen_stream` is a Python `io.IOBase` subclass that wraps a `vscreen` C object and exposes it as a standard IO stream. It is the `vs` argument passed to every app's `main()`.
 
-```Python
-# vs is vscreen_stream object
+```python
 def main(vs, args):
-    print("Helloworld", file=vs)
+  print("Hello", file=vs)   # text output
+  ch = vs.read(1)            # blocking keyboard input
+  v = vs.v                   # access underlying vscreen for graphics
 ```
 
+### Attributes
 
-- `v` vscreen object associated in the object. Application can get vscreen object by accessing the member.
+- `v` — the underlying `vscreen` object for this screen. Use this for all graphics, callbacks, non-blocking input, and any vscreen method not listed below.
 
+### Methods
 
-```Python
-def main(vs,args):
-  v = vs.v # Getting vscreen object for the app.
-```
+- `write(message)` — Write a string or bytes to the terminal. Called implicitly by `print(..., file=vs)`. Delegates to `vs.v.print()`.
 
-- register_module() : it's used for remote command. See Remote command section for details.
+- `read(n, wait=7)` — Blocking read of up to `n` bytes from keyboard input. Loops with `pdeck.delay_tick(wait)` until input arrives. Returns a string. Use this in app loops instead of `vs.v.read_nb()` when you want to block.
+
+- `poll()` — Returns `True` if keyboard input is available. Delegates to `vs.v.poll()`.
+
+- `async_read(n, wait=20)` — Async variant of `read()`. Rarely used — asyncio is not recommended with threads (see Limitations).
+
+- `ioctl(op, arg)` — Stream protocol support (used by MicroPython internals).
+
+- `register_module(obj)` — Register the app object for remote command access. See the Remote Command Execution section.
 
 ## dsplib module
 

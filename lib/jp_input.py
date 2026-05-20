@@ -181,7 +181,7 @@ def get_henkan_result(result, word_index, color = True, space = True):
   for word in result:
     if word_index == idx:
       if color:
-        out += '[' + el.set_font_color(7) + word[1][0] + el.set_font_color(0) + ']'
+        out += '[' +  el.bold() + word[1][0] + el.bold_off() + ']'
       else:
         if space:
           #out += '[' + word[1][0] + el.set_font_color(0) + ']'
