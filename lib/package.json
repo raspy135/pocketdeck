@@ -668,7 +668,7 @@
         },
         {
             "path": "pem_extra.py",
-            "md5": "4c00604093c6656a44e7a2e4b8fa5070"
+            "md5": "fa717b76ca1c84b541e6fe42bcac020c"
         },
         {
             "path": "copy.mpy",
@@ -676,7 +676,7 @@
         },
         {
             "path": "mock_stream.py",
-            "md5": "6c1c1f59b982a99c5d60a272ee7d8259"
+            "md5": "9ad1cf3154fbb8eba6aa9be0caa9939d"
         },
         {
             "path": "pathlib.mpy",
@@ -756,7 +756,7 @@
         },
         {
             "path": "gpt.py",
-            "md5": "67147cada71ded323c218497b463f634"
+            "md5": "729ac60d525a49d5b228863e0c76d8cd"
         },
         {
             "path": "argparse.py",
@@ -800,7 +800,7 @@
         },
         {
             "path": "stt.py",
-            "md5": "6dd077a0e6c0edcb19669d428b5c01ff"
+            "md5": "5430c4049c2b18a63b81e40d82f6cb84"
         },
         {
             "path": "reader.py",
@@ -836,7 +836,7 @@
         },
         {
             "path": "jp_input.py",
-            "md5": "ddd450ad393310dcb005b5b7cbb6b752"
+            "md5": "cbb20dd16541d3710f5e98cf8ac33fcc"
         },
         {
             "path": "pem.mpy",
@@ -848,7 +848,7 @@
         },
         {
             "path": "pem.py",
-            "md5": "ff5e5a0d2d1596ac79e341224418ecab"
+            "md5": "3adf2d0541f289a85d790a68a7855dac"
         },
         {
             "path": "recorder.py",
