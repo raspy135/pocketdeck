@@ -13,6 +13,8 @@ def is_int(s):
     return False
 
 def _is_dir(path):
+  if path == '.':
+    return True
   try:
     st = os.stat(path)
     return (st[0] & 0x4000) != 0  # stat.S_IFDIR (MicroPython uses bitmask)
@@ -77,7 +79,8 @@ month_list = ( \
 def list_file(q, recursive=False):
   q = _normalize_query_path(q)
   dirname, filename, original = _split_query(q)
-
+  #print(f"dirname:{dirname} ")
+  #print(f"filename:{filename} ")
   try:
     if not _is_dir(original):
       os.listdir(dirname)
