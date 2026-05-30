@@ -1,6 +1,10 @@
 {
     "urls": [
         [
+            "#qr.py#",
+            "#qr.py#"
+        ],
+        [
             "analog_clock.py",
             "analog_clock.py"
         ],
@@ -281,6 +285,10 @@
             "examples/pattern_example.py"
         ],
         [
+            "examples/qr_example.py",
+            "examples/qr_example.py"
+        ],
+        [
             "examples/reverb_example.py",
             "examples/reverb_example.py"
         ],
@@ -489,6 +497,10 @@
             "py_backup/pem.py"
         ],
         [
+            "qr.py",
+            "qr.py"
+        ],
+        [
             "re_findall.py",
             "re_findall.py"
         ],
@@ -553,6 +565,10 @@
             "types.mpy"
         ],
         [
+            "uQR.py",
+            "uQR.py"
+        ],
+        [
             "update_updater.py",
             "update_updater.py"
         ],
@@ -602,6 +618,10 @@
         ]
     ],
     "files": [
+        {
+            "path": "uQR.py",
+            "md5": "0b8d6609b05ffcd7f09b2b5a67a3ae61"
+        },
         {
             "path": "pngviewer.py",
             "md5": "3cd0959acf88c1480a11e0b39bd3e441"
@@ -851,12 +871,16 @@
             "md5": "cbb20dd16541d3710f5e98cf8ac33fcc"
         },
         {
+            "path": "qr.py",
+            "md5": "acdb5bb85da5cea3f5d000685ec48bc7"
+        },
+        {
             "path": "update_updater.py",
             "md5": "adfe287c00cd166f66d75484b4e43fa3"
         },
         {
             "path": "pem.py",
-            "md5": "deee250ba04280cebbde3f4d9559aaa0"
+            "md5": "d04d35fd27fe9cf5d866827f9e18b2a3"
         },
         {
             "path": "recorder.py",
@@ -911,6 +935,10 @@
             "md5": "d25730d654db7300ec710a432ac1f1e6"
         },
         {
+            "path": "#qr.py#",
+            "md5": "f6b1b2e1597876f3da1c64a03b13602b"
+        },
+        {
             "path": "remote_python_call.py",
             "md5": "11236b47d7ae3c7992ca4f56c0a4a3e8"
         },
@@ -928,7 +956,7 @@
         },
         {
             "path": "zen_chamber.py",
-            "md5": "860ee36b112efffb3f8e9d7b3ecf3c4c"
+            "md5": "86415e513b8c89c82f46db048eb24c1b"
         },
         {
             "path": "font/miranda-bolditalic.g3df",
@@ -1141,6 +1169,10 @@
         {
             "path": "examples/techno_example.py",
             "md5": "cfe9d4d3d14be63da995a77f4393fcf8"
+        },
+        {
+            "path": "examples/qr_example.py",
+            "md5": "727629a59a04f4ba289ba2954ee716b8"
         },
         {
             "path": "examples/animation_example.py",

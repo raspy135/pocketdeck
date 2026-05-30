@@ -71,7 +71,7 @@ def main(vs, args_in):
   parser.add_argument('-c', '--clipboard', action='store_true', help='Generate QR code from clipboard')
   args = parser.parse_args(args_in[1:])
 
-  text = "IO13 and IO6"
+  text = "test"
   if args.clipboard:
     text = pdeck.clipboard_paste().decode("utf-8")
   else:    
@@ -79,7 +79,7 @@ def main(vs, args_in):
       print("Specify text to convert", file=vs)
       return
     #print(args.content)
-    #text = ' '.join(args.content)
+    text = ' '.join(args.content)
     print(text)
     
   print("Generating QR Code for: {}".format(text), file=vs)
