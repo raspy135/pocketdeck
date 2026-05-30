@@ -1082,6 +1082,7 @@ class editor:
     else:
       keys = self.v.read(1)
 
+    # Catching window size change
     tw, th = self.v.get_terminal_size()
     if tw != self.text_width or th-self.h_diff != self.text_height:
       print(f'ow,oh,nw,nh = {self.text_width},{self.text_height},{tw},{th}')
@@ -1110,7 +1111,7 @@ class editor:
     # ext keys (C-x, C-c): open command chooser dialog
     # Skip when a dialog is already open so the second key (e.g. C-c in C-x C-c)
     # is handled by the dialog's direct-shortcut logic instead.
-    if keys in km.ext_keys and self.mode != self.MODE_SELECT_DIALOG:
+    if keys in km.ext_keys and self.mode == self.MODE_NORMAL:
       self._open_chord_dialog(keys)
       return 0
 

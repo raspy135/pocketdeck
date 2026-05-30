@@ -190,6 +190,7 @@ setuni | Change terminal font to CJK Unicode font,.
 setjpf | Change terminal font to Japanese. It's lighter than setuni.
 grep pattern [path] | Search text in files. `-r` recursive, `-e` regex, `-n` line numbers, `-i` ignore case, `-l` filenames only, `--include .py,.md` filter by extension, `--max N` skip files larger than N bytes.
 curl [options] url | HTTP client for simple web requests. Supports `http://` and `https://`, `-o FILE` to save body to file, `-X METHOD` to choose request method, `-d DATA` to send request body, `-i` to include response headers, `-s` for silent mode, and `-V` to show version. `-H` for header.
+qrcode [text...] | Generate and display a QR code centered on the screen. Supports `-c` to read from clipboard, `-e` to set ECC level, and `-s` to set size.
 
 ## SSH/SCP setup guide
 
@@ -440,6 +441,21 @@ stt [options] [wav_file] [-o output_file]
 ### tts
 
 TTS (Text-to-Speech) app. Requires OpenAI API key.
+
+### qrcode
+
+`qrcode` generates a QR Code from text or URL inputs and displays it centered on the display.
+
+```
+qrcode [text...] [options]
+```
+
+Options:
+- `-c` or `--clipboard`: Read content from clipboard.
+- `-e` or `--ecc` (L/M/Q/H): Set error correction level (default: M).
+- `-s` or `--size` (pixels): Set module size in pixels.
+
+Refer to [[qr_readme.md]] for more details and API usage.
 
 ### docs
 
