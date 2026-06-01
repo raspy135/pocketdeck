@@ -4,8 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
   <title>Pocket Deck Emulator</title>
-  <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,200..800;1,6..72,200..800&family=Work+Sans:wght@300;400;500;600&family=Space+Grotesk:wght@300;400;500;700&display=swap" rel="stylesheet"/>
-  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+  <link href="./fonts/webfonts/fonts.css" rel="stylesheet"/>
   <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
   <script>
     tailwind.config = {
@@ -32,7 +31,14 @@
   <script src="./fonts/u8g2font.js"></script>
   <script src="./fonts/unifont_large.js" defer></script>
   <style>
-    .material-symbols-outlined { font-variation-settings:'FILL' 0,'wght' 400,'GRAD' 0,'opsz' 24; }
+    .material-symbols-outlined {
+      font-family: 'Material Symbols Outlined';
+      font-weight: normal; font-style: normal; line-height: 1;
+      letter-spacing: normal; text-transform: none; display: inline-block;
+      white-space: nowrap; word-wrap: normal; direction: ltr;
+      -webkit-font-feature-settings: 'liga'; -webkit-font-smoothing: antialiased;
+      font-variation-settings:'FILL' 0,'wght' 400,'GRAD' 0,'opsz' 24;
+    }
     /* Custom theme tokens — defined here so they work regardless of whether
        Tailwind's Play CDN applies the tailwind.config custom theme. */
     .text-on-surface         { color: #e9e9ec }
