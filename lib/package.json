@@ -393,10 +393,6 @@
             "journal.py"
         ],
         [
-            "jp_input.py",
-            "jp_input.py"
-        ],
-        [
             "ls.py",
             "ls.py"
         ],
@@ -792,7 +788,7 @@
         },
         {
             "path": "gpt.py",
-            "md5": "dce6ca8eb92b3fd3952418050e6382aa"
+            "md5": "5ce66b202029550fd41da0b4f6ad24e9"
         },
         {
             "path": "fontloader.py",
@@ -867,10 +863,6 @@
             "md5": "2ecea33b5fb892950ca0680f59530e7c"
         },
         {
-            "path": "jp_input.py",
-            "md5": "c2b8b40b96bf198060398f2c4629609f"
-        },
-        {
             "path": "qr.py",
             "md5": "acdb5bb85da5cea3f5d000685ec48bc7"
         },
@@ -880,7 +872,7 @@
         },
         {
             "path": "pem.py",
-            "md5": "a70e64f138062feb149f83a2703ba86b"
+            "md5": "3abec4761517a8b3c0bf67565dfe6a00"
         },
         {
             "path": "recorder.py",
