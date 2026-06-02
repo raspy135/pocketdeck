@@ -292,9 +292,10 @@ const DEFAULT_FONT = '12px "Courier New",monospace';
 let curColor = 1, curDither = 16, curFont = DEFAULT_FONT, curBaseline = 'alphabetic';
 let curFontName = '';   // device font name (e.g. 'u8g2_font_profont15_mf')
 let curFontMode = 1;    // u8g2 font mode: 1 = transparent, 0 = solid (bg box)
+let curBmpTransp = 0;   // bitmap_transparency: 0 = solid (replace), 1 = transparent
 function resetRenderState() {
   curColor = 1; curDither = 16; curFont = DEFAULT_FONT; curBaseline = 'alphabetic';
-  curFontName = ''; curFontMode = 1;
+  curFontName = ''; curFontMode = 1; curBmpTransp = 0;
 }
 // CSS fallback for fonts we have no bitmap for, and for rotated (vstr) text.
 const FONT_CSS_FALLBACK = {
@@ -331,6 +332,18 @@ function invertRegion(x, y, w, h) {
     ctx.putImageData(img, x, y);
   }
 }
+
+// The device has a single buffer, so an opaque fill overwrites any text drawn
+// earlier in the same region. The emulator keeps text on a separate layer that
+// always composites on top, so without this an earlier-drawn label (e.g. the
+// calendar numbers) would show *through* a later dialog box. Clearing the text
+// layer here, in command order, restores the device's draw order: text before
+// the box is erased; text drawn after the box still lands on top.
+// Only opaque fills cover (solid bitmap mode, or a color-0 erase). A transparent
+// dithered fill (additive) leaves gaps, so it must not wipe the text under it.
+function coverText(x, y, w, h) {
+  if (curColor === 0 || curBmpTransp !== 1) tctx.clearRect(x, y, w, h);
+}
 function renderFrame(cmds) {
   clearGray();
   const ctx = gctx;
@@ -339,21 +352,18 @@ function renderFrame(cmds) {
       case 'col':   curColor = c[1]; break;
       case 'dith':  curDither = c[1]; break;
       case 'fmode': curFontMode = c[1]; break;
+      case 'bmode': curBmpTransp = c[1]; break;
       case 'font':  curFontName = c[1]; curFont = FONT_CSS_FALLBACK[c[1]] || c[1] || DEFAULT_FONT; break;
       case 'base':  curBaseline = c[1]; break;
       case 'box':   if (curColor === 2) { invertRegion(c[1], c[2], c[3], c[4]); break; }
-                    ctx.fillStyle = fg(); ctx.fillRect(c[1], c[2], c[3], c[4]);
-                    // A background (color 0) box erases everything underneath on
-                    // the real one-buffer display — including text drawn earlier
-                    // this frame (e.g. home's draw_help() erase bar over the menu).
-                    // Mirror that by clearing the same region of the text layer.
-                    if (curColor === 0) tctx.clearRect(c[1], c[2], c[3], c[4]); break;
+                    for (let yy = c[2]; yy < c[2] + c[4]; yy++) fillSpanRow(c[1], c[1] + c[3] - 1, yy);
+                    coverText(c[1], c[2], c[3], c[4]); break;
       case 'frame': ctx.strokeStyle = fg(); ctx.lineWidth = 1;
                     ctx.strokeRect(c[1]+0.5, c[2]+0.5, c[3]-1, c[4]-1); break;
       case 'line':  crispLine(c[1], c[2], c[3], c[4]); break;
       case 'rbox':  if (curColor === 2) { invertRegion(c[1], c[2], c[3], c[4]); break; }
                     crispRRect(c[1], c[2], c[3], c[4], c[5], true);
-                    if (curColor === 0) tctx.clearRect(c[1], c[2], c[3], c[4]); break;
+                    coverText(c[1], c[2], c[3], c[4]); break;
       case 'rframe':crispRRect(c[1], c[2], c[3], c[4], c[5], false); break;
       case 'circ':  ctx.strokeStyle = fg(); ctx.lineWidth = 1; ctx.beginPath();
                     ctx.arc(c[1], c[2], c[3], 0, 2*Math.PI); ctx.stroke(); break;
@@ -391,22 +401,17 @@ function crispRRect(x, y, w, h, r, fill) {
   if (w <= 0 || h <= 0) return;
   r = Math.min(r, w >> 1, h >> 1);
   const solid = curDither >= 16;
-  gctx.fillStyle = inkStyle();
-  const px = (X, Y) => { if (solid || bayerOn(X, Y)) gctx.fillRect(X, Y, 1, 1); };
-  const span = (xa, xb, Y) => {
-    if (xb < xa) return;
-    if (solid) gctx.fillRect(xa, Y, xb - xa + 1, 1);
-    else for (let X = xa; X <= xb; X++) if (bayerOn(X, Y)) gctx.fillRect(X, Y, 1, 1);
-  };
+  // Frame outline pixels follow the dither stipple (frames are usually solid).
+  const px = (X, Y) => { if (solid || bayerOn(X, Y)) { gctx.fillStyle = inkStyle(); gctx.fillRect(X, Y, 1, 1); } };
   const isq = v => Math.floor(Math.sqrt(v < 0 ? 0 : v));
 
-  if (fill) {
+  if (fill) {                                       // fill obeys replace/additive dither
     const top = y + r, bot = y + h - 1 - r;
     for (let Y = y; Y < y + h; Y++) {
       let inset = 0;
       if (Y < top)      inset = r - isq(r * r - (top - Y) * (top - Y));
       else if (Y > bot) inset = r - isq(r * r - (Y - bot) * (Y - bot));
-      span(x + inset, x + w - 1 - inset, Y);
+      fillSpanRow(x + inset, x + w - 1 - inset, Y);
     }
     return;
   }
@@ -441,6 +446,33 @@ function crispRRect(x, y, w, h, r, fill) {
 function inkStyle() { return curColor === 0 ? '#000000' : '#ffffff'; }
 function bayerOn(x, y) { return BAYER[((y & 3) << 2) + (x & 3)] < curDither; }
 
+// Fill a horizontal run honouring the device's dither semantics (see
+// u8g2_ll_hvline.c). curDither selects an ordered (Bayer) on/off pattern;
+// curBmpTransp selects how it composites:
+//   transparent (1): only the on-dither pixels are set to the ink colour; the
+//                    gaps keep whatever was underneath (additive stipple).
+//   solid (0, the device default): the whole run is REPLACED — on-dither pixels
+//                    get the ink colour, off-dither pixels get the background.
+// This is why analog_clock's inner dither(2) box overrides the outer dither(12)
+// box (solid replace) and how a single dithered shade is drawn opaquely.
+function fillSpanRow(xa, xb, y) {
+  if (xb < xa) return;
+  const ink = curColor === 0 ? '#000000' : '#ffffff';   // on-dither colour
+  const bg  = curColor === 0 ? '#ffffff' : '#000000';   // off-dither colour
+  if (curDither <= 0) {                          // dither 0 = "no on-pixels"
+    if (curBmpTransp !== 1) { gctx.fillStyle = bg; gctx.fillRect(xa, y, xb - xa + 1, 1); }
+    return;                                       // transparent: draws nothing
+  }
+  if (curDither >= 16) {                          // all on → solid ink
+    gctx.fillStyle = ink; gctx.fillRect(xa, y, xb - xa + 1, 1); return;
+  }
+  if (curBmpTransp !== 1) {                        // solid replace: lay background first
+    gctx.fillStyle = bg; gctx.fillRect(xa, y, xb - xa + 1, 1);
+  }
+  gctx.fillStyle = ink;                            // stamp the on-dither pixels
+  for (let x = xa; x <= xb; x++) if (bayerOn(x, y)) gctx.fillRect(x, y, 1, 1);
+}
+
 function crispLine(x1, y1, x2, y2) {
   if (curDither === 0) return;
   x1 = Math.round(x1); y1 = Math.round(y1); x2 = Math.round(x2); y2 = Math.round(y2);
@@ -468,8 +500,6 @@ function drawPoly(pts) {
     if (y < minY) minY = y;
     if (y > maxY) maxY = y;
   }
-  const solid = curDither >= 16;
-  gctx.fillStyle = inkStyle();
   for (let y = minY; y <= maxY; y++) {
     const xints = [];
     for (let i = 0, j = n - 1; i < n; j = i++) {
@@ -481,9 +511,7 @@ function drawPoly(pts) {
     xints.sort((a, b) => a - b);
     for (let k = 0; k + 1 < xints.length; k += 2) {
       const xa = Math.round(xints[k]), xb = Math.round(xints[k + 1]);
-      if (xb < xa) continue;
-      if (solid) { gctx.fillRect(xa, y, xb - xa + 1, 1); }
-      else { for (let x = xa; x <= xb; x++) if (bayerOn(x, y)) gctx.fillRect(x, y, 1, 1); }
+      fillSpanRow(xa, xb, y);
     }
   }
 }
@@ -497,11 +525,22 @@ function drawFaces(faces) {
 }
 function drawXbm(x, y, w, h, bytes) {
   const stride = (w + 7) >> 3;
+  const bit = (row, col) => (bytes[row * stride + (col >> 3)] >> (7 - (col & 7))) & 1;
+  if (curBmpTransp === 1) {
+    // Transparent: only set-bits draw (in the ink colour); 0-bits keep the
+    // background. Use fillRect (putImageData would overwrite the gaps).
+    gctx.fillStyle = curColor === 0 ? '#000000' : '#ffffff';
+    for (let row = 0; row < h; row++)
+      for (let col = 0; col < w; col++)
+        if (bit(row, col)) gctx.fillRect(x + col, y + row, 1, 1);
+    return;
+  }
+  // Solid: 1-bits → ink, 0-bits → background (opposite), opaque.
+  const inkV = curColor === 0 ? 0 : 255, bgV = curColor === 0 ? 255 : 0;
   const img = gctx.createImageData(w, h), d = img.data;
   for (let row = 0; row < h; row++)
     for (let col = 0; col < w; col++) {
-      const bit = (bytes[row*stride + (col>>3)] >> (7 - (col & 7))) & 1;
-      const v = bit ? 255 : 0, i = (row*w + col)*4;
+      const v = bit(row, col) ? inkV : bgV, i = (row * w + col) * 4;
       d[i] = d[i+1] = d[i+2] = v; d[i+3] = 255;
     }
   gctx.putImageData(img, x, y);
@@ -538,15 +577,17 @@ function drawU8g2Str(font, x, y, text, color, baseline, mode) {
   else if (baseline === 'middle') baseY = y + (font.ascent >> 1);
 
   if (mode === 0) {
-    // Background box spanning the glyph cell across the whole string.
+    // Solid mode: opaque background box behind the glyphs, spanning the font's
+    // reference ascent..descent (header bytes 13/14) like u8g2 — top = baseline -
+    // ascent, bottom = baseline - descent (descent is signed, negative below).
     let adv = 0;
     for (const ch of String(text)) {
       const g = font.glyph(ch.codePointAt(0));
       adv += g ? g.adv : font.maxW;
     }
-    const descent = Math.max(0, font.maxH - font.ascent);
+    const top = baseY - font.ascent, h = font.ascent - font.descent;
     tctx.fillStyle = (color === 0) ? '#ffffff' : '#000000';   // opposite of ink
-    tctx.fillRect(x, baseY - font.ascent, adv, font.ascent + descent);
+    tctx.fillRect(x, top, adv, h);
   }
 
   tctx.fillStyle = (color === 0) ? '#000000' : '#ffffff';
@@ -839,15 +880,27 @@ function keyToData(e) {
     Backspace:'\x08', Delete:'\x1b[3~', Home:'\x1b[H', End:'\x1b[F',
     PageUp:'\x1b[5~', PageDown:'\x1b[6~', Tab:'\t', Escape:'\x1b', Enter:'\r' };
   if (m[e.key]) return m[e.key];
-  // Alt = the emacs "Meta" key: send ESC followed by the key (e.g. Alt+. → ESC .)
-  if (e.altKey && e.key.length === 1) return '\x1b' + e.key;
+  // The device's keystroke channel is ASCII (a USB keyboard sends ASCII; CJK
+  // goes through henkan, not raw keys). PEM reads it with .encode('ascii'), so a
+  // non-ASCII byte crashes it. macOS composes Option+key into a non-ASCII e.key
+  // (Option+e → '´'), so derive a plain ASCII base from e.code instead.
+  const asciiBase = () => {
+    if (e.key.length === 1 && e.key.charCodeAt(0) < 128) return e.key;
+    let mm = /^Key([A-Z])$/.exec(e.code); if (mm) return mm[1].toLowerCase();
+    mm = /^Digit([0-9])$/.exec(e.code);   if (mm) return mm[1];
+    return '';
+  };
+  // Alt = the emacs "Meta" key: send ESC followed by the (ASCII) key.
+  if (e.altKey) { const b = asciiBase(); return b ? '\x1b' + b : ''; }
   // Ctrl-Space → NUL (emacs C-Space / set-mark in PEM); also covers Ctrl-@.
   if (e.ctrlKey && (e.code === 'Space' || e.key === ' ' || e.key === '@')) return '\x00';
   if (e.ctrlKey && e.key.length === 1) {
     const c = e.key.toLowerCase().charCodeAt(0) - 96;
     if (c >= 1 && c <= 26) return String.fromCharCode(c);
   }
-  if (e.key.length === 1) return e.key;
+  // Only forward ASCII single characters; drop non-ASCII keys (the device can't
+  // type them directly either, and they'd crash the ASCII-only key reader).
+  if (e.key.length === 1 && e.key.charCodeAt(0) < 128) return e.key;
   return '';
 }
 

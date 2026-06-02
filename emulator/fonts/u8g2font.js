@@ -18,7 +18,8 @@
       this.bpcx = f[6];  this.bpcy = f[7];  this.bpd = f[8];
       this.maxW = f[9];  this.maxH = f[10];
       this.xOff = s8(f[11]); this.yOff = s8(f[12]);
-      this.ascent = s8(f[13]);
+      this.ascent = s8(f[13]);    // cap ascent (header ascent_A)
+      this.descent = s8(f[14]);   // descent_g, signed (negative below baseline)
       this.startA = (f[17] << 8) | f[18];
       this.starta = (f[19] << 8) | f[20];
       this.startUni = (f[21] << 8) | f[22];   // offset to the unicode lookup table

@@ -12,6 +12,11 @@ Powered by MicroPython, it offers a powerful API, responsive graphics, and high-
 
 https://shop.nunomo.net
 
+# Emulator
+
+There are some limitations, but you can try Pocket Deck here:
+https://pdemulator.nunomo.net/emulator/
+
 # Features
 
 ## Hardware

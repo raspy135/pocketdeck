@@ -142,8 +142,14 @@ class Vscreen:
     # u8g2 font mode: 1 = transparent (glyph only), 0 = solid (opaque bg box of
     # the opposite color). Used e.g. by analog_clock to invert the selected day.
     self._emit('fmode', int(mode))
+
+  def set_bitmap_mode(self, mode):
+    # Device's bitmap_transparency (default 0 = solid). It governs how dithered
+    # fills composite: solid (0) REPLACES the region (on-dither→ink, off→bg),
+    # transparent (1) only sets the on-dither pixels and leaves the rest. This is
+    # why analog_clock's inner light box overrides the outer darker one.
+    self._emit('bmode', int(mode))
   def set_font_direction(self, d): pass
-  def set_bitmap_mode(self, mode): pass
   def set_font_pos_baseline(self): self._baseline = 'alphabetic'; self._emit('base', 'alphabetic')
   def set_font_pos_top(self):      self._baseline = 'top';        self._emit('base', 'top')
   def set_font_pos_bottom(self):   self._baseline = 'bottom';     self._emit('base', 'bottom')
