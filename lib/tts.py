@@ -37,7 +37,40 @@ def strip_urls(text):
   return text
 
 
+# The OpenAI TTS endpoint rejects input longer than 4096 characters, so long
+# text has to be sent as several separate requests. We keep a safety margin
+# under the hard limit and break at the most natural boundary we can find
+# (paragraph > line > sentence > word) inside each window, falling back to a
+# hard cut only if a single run has no break at all.
+TTS_CHAR_LIMIT = 4000
+
+
+def split_text(text, limit=TTS_CHAR_LIMIT):
+  chunks = []
+  while len(text) > limit:
+    window = text[:limit]
+    cut = -1
+    for sep in ('\n\n', '\n', '. ', '。', '！', '？', '! ', '? ', '; ', ', ', ' '):
+      pos = window.rfind(sep)
+      if pos > 0:
+        cut = pos + len(sep)
+        break
+    if cut <= 0:
+      cut = limit  # no break found: hard-cut at the limit
+    chunks.append(text[:cut])
+    text = text[cut:]
+  if text:
+    chunks.append(text)
+  return chunks
+
+
+def _res_stream(res):
+  return getattr(res, 'raw', getattr(res, 's', res))
+
+
 def play_stream(vs, stream):
+  """Play one WAV stream. Returns True if the user pressed a key to stop."""
+  interrupted = False
   wp = wav_play.wav_play(16000)
   wp.open_stream(stream)
   wp.play()
@@ -45,19 +78,49 @@ def play_stream(vs, stream):
     pdeck.delay_tick(5)
     ret = vs.v.read_nb(1)
     if ret and ret[0] > 0:
+      interrupted = True
       break
   wp.stop()
   wp.close()
+  return interrupted
 
 
-def save_stream_and_fix_header(res, filename):
+def save_chunks_and_fix_header(gpt, chunks, voice, filename, vs):
+  """Generate every chunk and concatenate the audio into one WAV file. The
+  first chunk's 44-byte WAV header is kept; later chunks have their header
+  stripped so only their PCM data is appended. The combined header is fixed up
+  at the end. Returns True on success."""
   try:
     with open(filename, 'wb') as f:
-      while True:
-        chunk = res.raw.read(1024)
-        if not chunk:
-          break
-        f.write(chunk)
+      for i, chunk in enumerate(chunks):
+        if len(chunks) > 1:
+          print('Generating part {}/{}...'.format(i + 1, len(chunks)), file=vs)
+        res = gpt.tts_stream(chunk, voice=voice)
+        if not res or res.status_code != 200:
+          print('TTS failed on part {}'.format(i + 1), file=vs)
+          try:
+            if res:
+              res.close()
+          except Exception:
+            pass
+          return False
+        # Drop the 44-byte RIFF/WAV header from every chunk after the first.
+        skip = 0 if i == 0 else 44
+        try:
+          stream = _res_stream(res)
+          while True:
+            data = stream.read(1024)
+            if not data:
+              break
+            if skip:
+              if len(data) <= skip:
+                skip -= len(data)
+                continue
+              data = data[skip:]
+              skip = 0
+            f.write(data)
+        finally:
+          res.close()
     return fix_wav_header(filename)
   except Exception:
     return False
@@ -93,29 +156,35 @@ def main(vs, args_in):
     print('Set OpenAI key in /config/openai_api_key', file=vs)
     return
 
-  print('Generating speech...', file=vs)
-  res = gpt.tts_stream(text, voice=args.voicemodel)
-  if not res or res.status_code != 200:
-    print(f'TTS failed', file=vs)
-    try:
-      if res:
-        res.close()
-    except Exception:
-      pass
-    return
+  # The TTS API caps input at ~4096 chars, so split long text and send one
+  # request per chunk.
+  chunks = split_text(text)
 
   if args.output:
+    print('Generating speech ({} part(s))...'.format(len(chunks)), file=vs)
     print('Saving to {}...'.format(args.output), file=vs)
-    ok = save_stream_and_fix_header(res, args.output)
-    res.close()
+    ok = save_chunks_and_fix_header(gpt, chunks, args.voicemodel, args.output, vs)
     if not ok:
       print('Failed to save or fix WAV header', file=vs)
       return
     print('Saved to {}'.format(args.output), file=vs)
   else:
-    print('Streaming audio... press any key to stop', file=vs)
-    try:
-      stream = getattr(res, 'raw', getattr(res, 's', res))
-      play_stream(vs, stream)
-    finally:
-      res.close()
+    print('Streaming audio ({} part(s))... press any key to stop'.format(len(chunks)), file=vs)
+    for i, chunk in enumerate(chunks):
+      if len(chunks) > 1:
+        print('Generating part {}/{}...'.format(i + 1, len(chunks)), file=vs)
+      res = gpt.tts_stream(chunk, voice=args.voicemodel)
+      if not res or res.status_code != 200:
+        print('TTS failed on part {}'.format(i + 1), file=vs)
+        try:
+          if res:
+            res.close()
+        except Exception:
+          pass
+        return
+      try:
+        interrupted = play_stream(vs, _res_stream(res))
+      finally:
+        res.close()
+      if interrupted:
+        break

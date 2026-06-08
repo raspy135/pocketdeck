@@ -66,6 +66,16 @@ def main(vs, args):
 `
   },
 
+/*
+  'boot_anim': {
+    label: 'Boot Splash',
+    desc: 'The device boot animation: dots crawl the edges of an isometric cube. On hardware this runs in C during boot; press any key to quit.',
+    code: `import boot_anim
+def main(vs, args):
+  boot_anim.main(vs, args)
+`
+  },
+*/
 };
 
 // ── Worker machinery ─────────────────────────────────────────────────────────

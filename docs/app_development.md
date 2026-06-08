@@ -113,6 +113,12 @@ Pdeck module controls Pocket Deck system features and peripherals.
 
 - `change_screen(screen)` Change screen to the given number.
 
+- `lock(pin=None)` Lock the device. The display switches to a firmware-driven lock screen that asks for a numeric PIN; while locked, screen switching and all system shortcuts are disabled. Pass `pin` as a string of digits (e.g. `pdeck.lock('0912')`) to set the PIN (stored in NVM) and lock. Call with no argument to lock using the already-stored PIN. Raises `ValueError` if the PIN is not 1–10 digits, or if no PIN has ever been set. The PIN can be entered with the USB keyboard or the touchpad (3×3 numpad: top row 7 8 9, middle 4 5 6, bottom 1 2 3; bottom-left button = 0; B = backspace). It unlocks automatically once the correct number of digits is entered — no Enter required. The lock state survives reboot. After 10 wrong attempts the device enters a 2-hour cooldown and then auto-resets (the PIN is cleared) so a forgotten PIN can be recovered.
+
+- `set_lock_pin(pin)` Store/replace the lock PIN (string of digits) without locking. Pass an empty string to clear the PIN and any lock state. Raises `ValueError` for a non-digit PIN.
+
+- `has_lock_pin()` Returns `True` if a lock PIN is currently stored.
+
 - `wifi_connected()` returns wifi connection status.
 
 - `change_priority(priority)` Set current application as priority. This might cause system performance issue, basically it's not recommend to use. Priority is bool. True for priority task.

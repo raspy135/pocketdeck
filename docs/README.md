@@ -153,6 +153,21 @@ Press the button two times (like double click) to shutdown the device.
 - S-C-c : Copy current line to system clipboard. This is useful with text applications.
 - S-C-v : Paste data from system clipboard
 
+## Locking the device
+
+Pocket deck can be locked with a numeric PIN. The lock is handled by the firmware, so while locked the screen cannot be switched and the system shortcuts (restart, quit, etc.) are disabled until the correct PIN is entered.
+
+- Lock from the command line: `lock 0912` sets the PIN to `0912` and locks; later `lock` locks again using the stored PIN.
+- Lock from the Home app: **System → Lock device**. Set or change the PIN with **System → Set / change PIN**.
+- From Python / REPL: `pdeck.lock('0912')` to set the PIN and lock, or `pdeck.lock()` to lock with the stored PIN.
+
+Entering the PIN on the lock screen:
+
+- **USB keyboard**: type the digits. The device unlocks automatically as soon as the right number of digits is entered — no Enter needed. Backspace edits.
+- **Touchpad** as a 3×3 numpad: top row `7 8 9`, middle row `4 5 6`, bottom row `1 2 3`. The bottom-left square button is `0` and the **B** button is backspace.
+
+The lock survives a reboot — if the device was locked it comes back up locked. If you forget the PIN, enter a wrong PIN 10 times: the device shows a 2‑hour countdown and, once it elapses, clears the PIN and unlocks so you can set a new one. (Note: this is a convenience lock — the SD card can still be removed physically.)
+
 ## Basic file structure
 
 - `/` : Root folder (Internal flash)
@@ -201,6 +216,7 @@ tail [-n N] file [file...] | Print last lines of file(s). Default N is 10.
 cat file | Print a file content
 cd [dir] | Change working directory. Note this is global value, shared between shells and applications. The applicaitons (such as pem editor) do not know the change.
 pwd | Get current working directory
+lock [pin] | Lock the device. `lock 0912` sets the PIN to `0912` and locks; `lock` locks using the already-stored PIN. See "Locking the device" below.
 netserver | launch network server to serve services. It provide screencast and clipboard sharing. See [[netserver/GETTING_STARTED]] for detail.
 setuni | Change terminal font to CJK Unicode font,.
 setjpf | Change terminal font to Japanese. It's lighter than setuni.

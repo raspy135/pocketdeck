@@ -173,6 +173,27 @@ def _dirname(p):
         return "."
     return p[:i] or "/"
 
+def _trim_path(path, maxlen):
+  # Shorten a long path for the status bar while keeping the informative tail
+  # (the filename and as many trailing folders as fit). A leading '*' marks
+  # that some parent folders were dropped, e.g.
+  #   /long/path/to/the/file/structure.md -> *the/file/structure.md
+  if maxlen <= 0 or len(path) <= maxlen:
+    return path
+  parts = path.split('/')
+  # Always keep the last component (the filename), tail-truncated if it alone
+  # is still too long to fit alongside the '*' marker.
+  result = parts[-1]
+  if len(result) + 1 > maxlen:
+    return '*' + result[-(maxlen - 1):]
+  # Grow leftward one whole component at a time while it still fits.
+  for i in range(len(parts) - 2, -1, -1):
+    candidate = parts[i] + '/' + result
+    if len(candidate) + 1 > maxlen:
+      break
+    result = candidate
+  return '*' + result
+
 def file_exists(name):
   if name == None:
     return False
@@ -583,7 +604,9 @@ class editor:
   def print_input_line_dialog(self):
     self.v.print(el.set_font_color(7)) #invert
     title = f"  ** {self.sl_info.subject} ** "
-    self.v.print(title + " "*(self.text_width - len(title)))
+    # Clamp to the screen width so a long subject can't wrap and corrupt the
+    # layout (mirrors print_select_dialog). Padding is "" when already over.
+    self.v.print(title[:self.text_width] + " "*(self.text_width - len(title)))
     self.v.print("\r\n")
     self.v.print(el.set_font_color(0))
     
@@ -633,6 +656,15 @@ class editor:
     # device) so the cursor hide/redraw/show doesn't flicker on PC terminals.
     self.v.begin_frame()
 
+    # Hide the cursor for the whole frame up front. On a PC terminal the real
+    # hardware caret sits at the last write position, so any redraw that doesn't
+    # end by repositioning+showing it (select dialog) or that skips the main
+    # render (dmod False / dialogs opened with a dry-run render) would leave the
+    # caret stranded at a "random" spot. Hiding here unconditionally and letting
+    # each mode below re-show it after a move makes cursor visibility
+    # deterministic. No-op visually on device (cursor is composited).
+    self.v.print(el.cursor_mode(False))
+
     # While a region mark is active, re-render every refresh so the highlight
     # tracks the moving cursor (plain cursor moves otherwise skip rendering).
     if self.dmod or self.file.mark_row is not None:
@@ -663,7 +695,8 @@ class editor:
 
         max_filename_length = self.file.w - (len(filestat) + 5 + 2 + 2 + 1 + 2)
         if len(filename) > max_filename_length:
-          filename = filename[:max_filename_length]
+          # Trim parent folders (not the filename) and mark with a leading '*'.
+          filename = _trim_path(filename, max_filename_length)
         filestat = filename + " " + filestat
         
         filestat_left = f"Mode:{'EN' if self.file.input_method == self.IM_EN else 'JP'},{self.file.mode}"
@@ -1022,7 +1055,7 @@ class editor:
       return
     self.process_open_file(item.encode('utf-8'))
     
-  def process_open_file(self, name, linenum = 0, colnum = 0, force = False):
+  def process_open_file(self, name, linenum = None, colnum = None, force = False):
     #print(f"Opening.. file={name.decode()}")
     name = _expand_user(name.decode()).encode('utf-8')
 
@@ -1032,6 +1065,15 @@ class editor:
       return
 
     if not force and (name.decode() == self.file.filename or self.switch_buf_if_exists(name.decode())):
+      # File is already open (the current buffer, or another one just switched
+      # to by switch_buf_if_exists). When a jump target was given (symbol jump,
+      # md link, remote open) honor it instead of staying at the current/saved
+      # position -- otherwise jumping to a symbol that lives in the file you're
+      # already editing silently does nothing. linenum None means "no target,
+      # keep the existing position" (plain open / buffer switch).
+      if linenum is not None:
+        self.file_row = linenum
+        self.file_col = colnum or 0
       if self.file_row >= len(self.file.rows):
         self.file_row = len(self.file.rows)-1
         self.file_col = 0
@@ -1049,8 +1091,8 @@ class editor:
     self.scroll_row = 0
     self.scroll_col = 0
     self.file = editor_file(self.v, filename, self.text_height, self.text_width - 1, self.tab_size)
-    
-    self.file_row, self.file_col = self.file.open(linenum, colnum)
+
+    self.file_row, self.file_col = self.file.open(linenum or 0, colnum or 0)
 
     if filename is None or not file_exists(filename):
       self.set_message("New file  F1:Help")
@@ -1663,7 +1705,10 @@ class editor:
 
       else:
         d = self._open_default_dir()
-        self.open_input_line_dialog("Open file in "+d, "Filename",
+        # Keep the editable input on the full path (default_str) but trim the
+        # title's directory tail so the "  ** Open file in <dir> ** " line fits.
+        title_dir = _trim_path(d, self.text_width - 22)
+        self.open_input_line_dialog("Open file in "+title_dir, "Filename",
                                     self.process_open_file,
                                     default_str=d.encode('utf-8'))
 

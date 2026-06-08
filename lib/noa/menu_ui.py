@@ -420,6 +420,12 @@ class menu_ui:
         self.delegate.save_settings()
         self.set_message('Setting saved.')
         return True
+      if typ == 'lock_device':
+        self.delegate.lock_device()
+        return True
+      if typ == 'set_lock_pin':
+        self.delegate.open_set_pin_dialog()
+        return True
       if typ == 'program':
         pref_scnum = item.get('screen_number')
         self.delegate.launch_app(item['command'], pref_scnum)

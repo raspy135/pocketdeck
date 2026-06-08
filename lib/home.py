@@ -205,6 +205,16 @@ menu_list = [
      'format' : format_autosleep
      }
      ],
+     ['Lock device',
+     { 'description': 'Lock the device (asks for PIN to unlock)',
+     'type' : 'lock_device'
+     }
+     ],
+     ['Set / change PIN',
+     { 'description': 'Set the unlock PIN (digits only)',
+     'type' : 'set_lock_pin'
+     }
+     ],
    ],
  ],
  [ 'Reload app list', { 'type' : 'reload_applist' } ],
@@ -463,6 +473,45 @@ class setting():
       values.get('command', ''),
       values.get('description', '')
     )
+
+  def lock_device(self, arg=None):
+    try:
+      pdeck.lock()
+    except ValueError:
+      self.menu_ui.set_message('Set a PIN first')
+      return False
+    return True
+
+  def open_set_pin_dialog(self, arg=None):
+    label = 'Change PIN' if pdeck.has_lock_pin() else 'Set PIN'
+    self.menu_ui.open_dialog({
+      'type': 'v_container',
+      'name': 'dialog_set_pin',
+      'title': label,
+      'items': [
+        {
+          'type': 'textbox',
+          'name': 'pin',
+          'label': 'PIN'
+        },
+        {
+          'type': 'button',
+          'label': 'Save',
+          'onPress': [self.set_pin_from_dialog, 'dialog_set_pin']
+        }
+      ]
+    })
+    return False
+
+  def set_pin_from_dialog(self, values):
+    pin = values.get('pin', '')
+    try:
+      pdeck.set_lock_pin(pin)
+    except ValueError:
+      self.menu_ui.set_message('PIN must be digits only')
+      return True
+    self.menu_ui.set_message('PIN cleared' if pin == '' else 'PIN saved')
+    return True
 
   def begin_move_launcher(self, arg=None):
     self.menu_ui.set_move_mode(True)
