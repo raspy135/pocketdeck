@@ -1,3 +1,11 @@
+## Release Note June 16, 2026
+
+### firmware
+
+- PEM bug fix
+- Boot banner
+
+
 ## Release Note June 6, 2026
 
 ### Firmware

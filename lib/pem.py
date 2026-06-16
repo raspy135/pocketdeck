@@ -921,8 +921,6 @@ class editor:
     if r >= len(self.file.rows):
       r = len(self.file.rows)-1
       c = 0
-    if r == len(self.file.rows) - 1:
-      c = 0
     range_ret = self.file.in_screen(r,c)
     if stay_if_possible and range_ret == 0:
       # in_screen
@@ -2870,6 +2868,11 @@ if pdeck_enabled:
     def __init__(self, vs):
       self.v = vs.v
       self.background_update = None
+      # Optional zero-arg callable invoked while read() waits for a key, so a
+      # plugin can apply asynchronous work (e.g. a background AI result) without
+      # the user having to press a key. Kept separate from background_update,
+      # which pem reassigns for its own scroll/animation updates.
+      self.idle_callback = None
 
     def poll(self):
       return self.v.poll()
@@ -2895,8 +2898,13 @@ if pdeck_enabled:
         if ret:
           if ret[0] > 0:
             break
+        if self.idle_callback:
+          try:
+            self.idle_callback()
+          except Exception:
+            pass
         if self.v.active:
-          
+
           if self.background_update:
             if not self.background_update():
               pdeck.delay_tick(7)
@@ -2927,6 +2935,10 @@ else:
       # a queued remote-open (from pem_client) can be serviced without clobbering
       # a dialog or a multi-byte escape sequence.
       self.allow_remote_open = True
+      # See the device screen_interface: a plugin can register a zero-arg
+      # callable here to run while read() waits, so background work is applied
+      # without needing a keystroke.
+      self.idle_callback = None
     def poll(self):
       return False
 
@@ -2969,6 +2981,11 @@ else:
           break
         if open_pending_list and self.allow_remote_open:
           return km.map['open'][0]   # synthesize C-x C-f to drain the queue
+        if self.idle_callback:       # select timed out: run idle work, then re-wait
+          try:
+            self.idle_callback()
+          except Exception:
+            pass
       b = os.read(self.fd, 1)
       # Assemble a full UTF-8 character (e.g. Japanese via the OS IME); the
       # continuation bytes are already available on the fd.

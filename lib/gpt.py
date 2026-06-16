@@ -11,11 +11,18 @@
 #   - an optional conversation mode (-C) that keeps the context across turns
 #     using previous_response_id (server-side state).
 
+import sys
+# On a PC (CPython) install stand-ins for the device-only modules below before
+# any of them (or the MicroPython builtins) are imported. Skipped on the device.
+_IS_PC = sys.implementation.name != 'micropython'
+if _IS_PC:
+  import pc_compat
+  pc_compat.install()
+
 import ujson
 import ubinascii
 import time
 import os
-import sys
 import io
 import argparse
 import re
@@ -1000,6 +1007,18 @@ def read_line(vs, prompt, history, on_shift_tab=None, lead="\n",
   caller's persistent state and returns the new on/off bool; ime_on is the state
   at entry. While composing, keys feed the IME and a highlighted pre-edit is
   shown at the caret; the line caret does not move until text is committed."""
+  if _IS_PC:
+    # Cooked-mode stdin can't do the raw per-key editor, but input() already
+    # gives line editing and history (via readline). Ctrl-C cancels the line
+    # (return None, like the device); Ctrl-D quits the conversation.
+    p = prompt() if callable(prompt) else prompt
+    try:
+      return input(p)
+    except KeyboardInterrupt:
+      vs.write("^C\r\n")
+      return None
+    except EOFError:
+      return "/quit"
   def render_prompt():
     return prompt() if callable(prompt) else prompt
   buf = []
@@ -1173,6 +1192,8 @@ def main(vs, args_in):
   parser.add_argument('-vt', '--voice-type', action='store', default='coral', help='Voice type for TTS')
   parser.add_argument('-r', '--role', action='store', default=None, help="Role preset 'assistant' or 'coder', a /sd/roles/<name>.txt file, or literal text. Default: assistant.")
   parser.add_argument('--log-file', action='store', default=None, help='Internal: reuse the same log filename across iterations')
+  parser.add_argument('--resume', action='store_true', help='Save this turn\'s response id to the session list so a later call can continue the conversation')
+  parser.add_argument('--resume-id', '--resume_id', dest='resume_id', action='store', default=None, help="Continue a prior conversation: a response id, or 'last' for the most recent saved session")
   parser.add_argument('content', nargs='*', help='Content to ask')
   parser.add_argument('-q', nargs='+', help='Content to ask, use this when you want to specify content explicitly.')
 
@@ -1186,6 +1207,19 @@ def main(vs, args_in):
   if not gpt_obj.read_api_key():
     return
   gpt_obj.mode = 'plan' if args.plan else 'auto'
+
+  # Conversation continuity across separate gpt invocations: --resume-id seeds
+  # the previous_response_id (server-side state), --resume persists the new id
+  # afterward. 'last' resolves to the most recent entry in the session list.
+  resumed_from = None
+  if args.resume_id:
+    resumed_from = gpt.last_session_id() if args.resume_id == 'last' else args.resume_id
+    gpt_obj.prev_response_id = resumed_from
+    if not args.silent:
+      if resumed_from:
+        print("Resuming session %s" % resumed_from[:24], file=vs)
+      else:
+        print("No previous session to resume; starting new.", file=vs)
 
   message = ""
   tts_response = False
@@ -1276,6 +1310,12 @@ def main(vs, args_in):
   role, role_wants_agent = resolve_role(args.role)
   agent = args.agent or (role_wants_agent is True)
 
+  # Agent tools drive the device (run modules, screens, apps) and don't exist on
+  # a PC, so plain chat is the only supported PC mode.
+  if _IS_PC and agent:
+    print("Agent mode is unavailable on PC; continuing as plain chat.", file=vs)
+    agent = False
+
   # gptn's own screen, so we can tell the agent to switch the foreground back
   # here when it wants the user to read its answer.
   try:
@@ -1322,6 +1362,13 @@ def main(vs, args_in):
     finally:
       pdeck.led(1, 0)
       pdeck.led(2, 0)
+    # Persist the (new) response id so a later --resume-id can continue this
+    # chat. A new id distinct from what we resumed from means the turn produced
+    # a fresh response; if they match (or it's None) the turn failed, so skip.
+    if args.resume:
+      new_id = gpt_obj.prev_response_id
+      if new_id and new_id != resumed_from:
+        gpt.save_session(new_id, message, replace_id=resumed_from)
     return
 
   # ---- Conversation mode ----
@@ -1504,3 +1551,9 @@ def main(vs, args_in):
   pdeck.led(1, 0)  # leaving conversation: clear status LEDs
   gpt_obj.led2_gen += 1  # invalidate any pending auto-off timer
   pdeck.led(2, 0)
+
+
+# On a PC the device shell isn't there to call main(vs, args); provide an entry
+# point so `python3 gpt.py ...` works. (On the device gpt is imported, not run.)
+if __name__ == '__main__':
+  main(pc_compat.PCStream(), ['gpt'] + sys.argv[1:])

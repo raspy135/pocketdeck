@@ -1,3 +1,11 @@
+import sys
+# On a PC (CPython) install stand-ins for the device-only modules below before
+# they are imported. On the device this branch is skipped entirely.
+_IS_PC = sys.implementation.name != 'micropython'
+if _IS_PC:
+  import pc_compat
+  pc_compat.install()
+
 import network, socket
 import auto_connect
 import codec_config
@@ -20,6 +28,8 @@ import re
 import gc
 
 API_KEY_FILENAME = "/config/openai_api_key"
+# On a PC the key lives under ~/.config/gpt/ (with $OPENAI_API_KEY as fallback).
+PC_API_KEY_FILENAME = "~/.config/gpt/openai_api_key"
 
 def file_exists(name):
   if name == None:
@@ -166,20 +176,116 @@ def parse_inline_directives(message, references, images, args, vs):
 
   return result, changed, mod_args
 
+def api_key_location():
+  """Human-readable hint of where the key is expected, for error messages."""
+  if _IS_PC:
+    return PC_API_KEY_FILENAME + " (or set $OPENAI_API_KEY)"
+  return API_KEY_FILENAME
+
 def read_api_key():
-  try:
-    with open(API_KEY_FILENAME,"r") as f:
-      api_key = f.read().strip()
-    return api_key
-  except Exception as e:
-    print(f"Error to open API key. Put API key to {API_KEY_FILENAME}", file=self.vs)
-    return False
-    
-  #return True
+  """Return the OpenAI API key, or False if none is configured. On the device it
+  comes from /config/openai_api_key; on a PC from ~/.config/gpt/openai_api_key
+  and, failing that, the $OPENAI_API_KEY environment variable."""
+  paths = [API_KEY_FILENAME]
+  if _IS_PC:
+    paths = [os.path.expanduser(PC_API_KEY_FILENAME)]
+  for path in paths:
+    try:
+      with open(path, "r") as f:
+        key = f.read().strip()
+      if key:
+        return key
+    except OSError:
+      pass
+  if _IS_PC:
+    key = os.environ.get("OPENAI_API_KEY")
+    if key:
+      return key.strip()
+  return False
 
 def make_log_filename():
   ctime = time.gmtime(time.time()+pu.timezone*60*15)
-  return f"/sd/log/gptlog{ctime[1]:02}{ctime[2]:02}_{ctime[3]:02}{ctime[4]:02}.md"
+  name = f"gptlog{ctime[1]:02}{ctime[2]:02}_{ctime[3]:02}{ctime[4]:02}.md"
+  if _IS_PC:
+    log_dir = os.path.expanduser("~/.config/gpt/log")
+    try:
+      os.makedirs(log_dir, exist_ok=True)
+    except Exception:
+      pass
+    return log_dir + "/" + name
+  return "/sd/log/" + name
+
+# ----------------------------------------------------------------------------
+# Conversation session list (for --resume / --resume-id)
+# ----------------------------------------------------------------------------
+# A small rolling log of recent conversations so a separate gpt invocation can
+# continue one server-side (Responses API previous_response_id). Each line is:
+#   response_id, YYYY-MM-DD HH:MM, trimmed initial prompt
+# Only the response id and datetime are parsed back; the prompt is a human hint.
+
+SESSION_LIST_FILENAME = "/sd/log/gpt_session_list"
+PC_SESSION_LIST_FILENAME = "~/.config/gpt/gpt_session_list"
+SESSION_MAX = 10
+
+def session_list_path():
+  if _IS_PC:
+    p = os.path.expanduser(PC_SESSION_LIST_FILENAME)
+    try:
+      os.makedirs(os.path.dirname(p), exist_ok=True)
+    except Exception:
+      pass
+    return p
+  return SESSION_LIST_FILENAME
+
+def read_sessions():
+  """Return [(response_id, datetime_str, prompt), ...], oldest first."""
+  out = []
+  try:
+    with open(session_list_path(), "r") as f:
+      for line in f:
+        line = line.rstrip("\n")
+        if not line:
+          continue
+        parts = line.split(",", 2)   # prompt (last field) may contain commas
+        if len(parts) == 3:
+          out.append((parts[0].strip(), parts[1].strip(), parts[2].strip()))
+  except OSError:
+    pass
+  return out
+
+def last_session_id():
+  sessions = read_sessions()
+  return sessions[-1][0] if sessions else None
+
+def save_session(new_id, prompt, replace_id=None):
+  """Record `new_id` as the latest session. If `replace_id` matches an existing
+  entry (the same conversation continuing), move that entry to the end with the
+  new id and keep its original prompt; otherwise append a new entry. Keeps only
+  the most recent SESSION_MAX entries."""
+  if not new_id:
+    return
+  sessions = read_sessions()
+  t = time.gmtime(time.time() + pu.timezone * 60 * 15)
+  now = "%04d-%02d-%02d %02d:%02d" % (t[0], t[1], t[2], t[3], t[4])
+  trimmed = " ".join((prompt or "").split())[:60]   # collapse whitespace, cap
+  moved = False
+  if replace_id:
+    for i in range(len(sessions)):
+      if sessions[i][0] == replace_id:
+        keep_prompt = sessions[i][2]
+        del sessions[i]
+        sessions.append((new_id, now, keep_prompt))
+        moved = True
+        break
+  if not moved:
+    sessions.append((new_id, now, trimmed))
+  sessions = sessions[-SESSION_MAX:]
+  try:
+    with open(session_list_path(), "w") as f:
+      for rid, dt, pr in sessions:
+        f.write("%s, %s, %s\n" % (rid, dt, pr))
+  except OSError:
+    pass
 
 def append_log(filename, text):
   try:
@@ -232,7 +338,10 @@ class chatgpt_util:
 
   def read_api_key(self):
     self.api_key = read_api_key()
-    return False if self.api_key == False else True
+    if self.api_key == False:
+      print("No API key found. Put your key in %s" % api_key_location(), file=self.vs)
+      return False
+    return True
     
 
   def make_json(self, message, references, images=None, model="gpt-5.5", instructions = None, effort="medium"):
@@ -459,13 +568,17 @@ class ThinkingAnimation:
 
   def __init__(self, vs, label='Asking GPT..'):
     self.vs = vs
-    if hasattr(self.vs, 'v'):
-      self.v = vs.v
-      self.v.callback(self.update)
     self.label = label
     self.tick = 0
     self.running = True
     self._el = elib.esclib()
+    if _IS_PC:
+      # No frame callback on a PC: just print the label once.
+      print(label, file=vs)
+      return
+    if hasattr(self.vs, 'v'):
+      self.v = vs.v
+      self.v.callback(self.update)
     vs.write('\r\n\r\n')
 
   def update(self, e):
@@ -501,6 +614,8 @@ class ThinkingAnimation:
 
   def stop(self):
     self.running = False
+    if _IS_PC:
+      return
     if hasattr(self.vs, 'v'):
       self.v.callback(None)
     el = self._el
@@ -566,6 +681,12 @@ def play_audio_stream(vs, stream):
   wp.close()
 
 def get_message(vs):
+  if _IS_PC:
+    # Cooked-mode stdin already echoes and edits, so read a whole line.
+    try:
+      return input()
+    except EOFError:
+      return ""
   message=""
   while True:
     ch = vs.read(1)
