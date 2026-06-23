@@ -298,7 +298,9 @@ See [[ssh_scp_readme]]
 
 Setup (`setup`) configures boot sequence.
 
-If you want to change boot sequence, execute `setup` command. It will ask initial app on boot, BLE keyboard, and network connection on boot. It's great for pure writing experience.
+If you want to change boot sequence, execute `setup` command. It will ask initial app on boot, BLE keyboard, and network connection on boot.
+
+Editor on boot is great for pure writing experience.
 
 
 ### Home app
@@ -414,6 +416,14 @@ voicerecorder [filename] [-l length] [-s sample_rate]
 - `-s`: sample rate (default 8000)
 - `-l`: length in seconds, or minutes with `m` suffix e.g. `30m` (default 7200)
 - Press Enter or `q` to stop. The filename is copied to clipboard when done.
+
+### clip
+
+`clip` is a simple application to save the content of clipboard to file.
+
+```
+clip file
+```
 
 ### nudoc
 

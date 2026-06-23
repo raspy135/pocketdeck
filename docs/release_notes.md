@@ -1,3 +1,14 @@
+## Release Note June 22, 2026
+
+### firmware
+
+Now gpt, gpt_rt, home and some libraries are part of the firmware. You can still customize them by copying the Python files to /sd/py.
+
+### Application
+
+- gpt_rt: Menu to reset session When BS is pressed.
+- clip: A new app. The app saves clipboard content to file.
+
 ## Release Note June 16, 2026
 
 ### firmware
