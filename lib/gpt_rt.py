@@ -343,10 +343,11 @@ class SimpleWS:
 
 
 class RealtimeAgent:
-  def __init__(self, ws, vs, model, file_list, references, app_list=None, agent=False, language=None):
+  def __init__(self, ws, vs, model, file_list, references, app_list=None, agent=False, language=None, headers=None):
     self.ws = ws
     self.vs = vs
     self.model = model
+    self.headers = headers or {}
     self.file_list = file_list or []
     self.references = references
     self.app_list = app_list or []
@@ -1038,6 +1039,79 @@ class RealtimeAgent:
     self._send_create_response(not self.mic_muted)
     print("\n%s[Mic %s]%s" % (_el.bold(), "MUTED" if self.mic_muted else "ON", _el.bold_off()), file=self.vs)
 
+  def _render_menu(self, options, sel, redraw):
+    # Draw (or redraw in place) the option list. On redraw we step the cursor
+    # back up over the lines drawn last time, then rewrite each one.
+    if redraw:
+      self.vs.write(_el.cur_up(len(options)))
+    for i, item in enumerate(options):
+      if i == sel:
+        self.vs.write("\r%s%s> %s%s\n" % (
+          _el.erase_to_end_of_current_line(), _el.bold(), item[1], _el.bold_off()))
+      else:
+        self.vs.write("\r%s  %s\n" % (_el.erase_to_end_of_current_line(), item[1]))
+
+  def pause_menu(self):
+    # Opened when the user presses B / Backspace. Arrow-key navigable: Up/Down
+    # move the selection, Enter confirms, Esc/B resumes. The realtime loop keeps
+    # running so audio stays live while the menu is open. Returns 'reset',
+    # 'quit', or 'resume'.
+    options = (('reset', 'Reset session'), ('quit', 'Quit'))
+    sel = 0
+    print("\n%s[Menu]%s Up/Down to move, Enter to select, Esc/B to resume" % (
+      _el.bold(), _el.bold_off()), file=self.vs)
+    self._render_menu(options, sel, False)
+    while True:
+      self.loop()
+      ret = self.vs.v.read_nb_bytes(8)
+      if ret and ret[0] > 0:
+        k = ret[1]
+        # A non-blocking read can occasionally land mid escape-sequence; if we
+        # only got a bare ESC (or ESC prefix), let the rest of it arrive.
+        if k in (b'\x1b', b'\x1b[', b'\x1bO'):
+          time.sleep(0.01)
+          r2 = self.vs.v.read_nb_bytes(8)
+          if r2 and r2[0] > 0:
+            k += r2[1]
+        if k in (b'\x1b[A', b'\x1bOA'):       # Up
+          sel = (sel - 1) % len(options)
+          self._render_menu(options, sel, True)
+        elif k in (b'\x1b[B', b'\x1bOB'):     # Down
+          sel = (sel + 1) % len(options)
+          self._render_menu(options, sel, True)
+        elif k in (b'\r', b'\n'):             # Enter: confirm
+          return options[sel][0]
+        elif k in (b'\x1b', b'\b'):           # Esc / B button: resume
+          print("%s[Resumed]%s" % (_el.bold(), _el.bold_off()), file=self.vs)
+          return 'resume'
+      time.sleep(0.005)
+
+  def reset_session(self):
+    # Tear down the realtime connection and open a fresh one, dropping all
+    # conversation context. The audio streams keep running, so we only reset
+    # the ring buffer and per-turn state. Returns False if reconnect fails.
+    print("\n%s[Resetting session...]%s" % (_el.bold(), _el.bold_off()), file=self.vs)
+    try:
+      self.ws.close()
+    except:
+      pass
+    self._mute_audio(500)
+    self.pending_fn_calls = {}
+    self.pending_image = None
+    self.fn_calls_executed = 0
+    self.reset_turn_text()
+    gc.collect()
+    try:
+      self.ws = SimpleWS("api.openai.com", "/v1/realtime?model=%s" % self.model, headers=self.headers)
+    except Exception as e:
+      print("Failed to reconnect: %s" % e, file=self.vs)
+      return False
+    self.send_session_update()
+    # Force loop() to re-sync the mic create_response flag on the new session.
+    self.vs_active = None
+    print("%s[Session reset. Ready.]%s" % (_el.bold(), _el.bold_off()), file=self.vs)
+    return True
+
   def loop(self):
     # In agent mode gpt_rt is a background helper that drives other screens, so
     # it keeps listening even when its own screen is not the foreground. Plain
@@ -1151,8 +1225,8 @@ def main(vs, args_in):
     print("Failed to connect: %s" % e, file=vs)
     return
 
-  ra = RealtimeAgent(ws, vs, model, file_list, references, app_list, agent, language)
-  print("Starting voice agent%s... Press 'q'/B to quit, Enter to mute/unmute mic." % (" (agent mode)" if agent else ""), file=vs)
+  ra = RealtimeAgent(ws, vs, model, file_list, references, app_list, agent, language, headers)
+  print("Starting voice agent%s... Press B for menu (reset/quit), 'q' to quit, Enter to mute/unmute mic." % (" (agent mode)" if agent else ""), file=vs)
 
   # We don't want gc run for a while
   gc.collect()
@@ -1167,9 +1241,17 @@ def main(vs, args_in):
       ret = vs.v.read_nb(1)
       if ret and ret[0] > 0:
         keys = ret[1].encode('ascii')
-        if keys in (b'q', b'\b'):
+        if keys == b'q':
           print("\nExiting...", file=vs)
           break
+        elif keys == b'\b':
+          choice = ra.pause_menu()
+          if choice == 'quit':
+            print("\nExiting...", file=vs)
+            break
+          elif choice == 'reset':
+            if not ra.reset_session():
+              break
         elif keys == b'\r':
           ra.toggle_mic_mute()
 
