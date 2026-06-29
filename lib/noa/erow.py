@@ -164,10 +164,19 @@ class erow:
       
     if self.hl_mode in ('md', 'py', 'c'):
       cur = 0
-      while True:     
+      while True:
         next_stop = self.expanded_to_pos(cur, self.w)
         #print(f"{idx}:{cur} {next_stop}, {self.get_len()}")
-        self.hl_bytes[cur] = _hl_line(self.substr(cur,next_stop), self.hl_mode)
+        # Highlight the tab-expanded display slice, not the raw chars: a literal
+        # tab byte left in the output advances the display to its own tab stop,
+        # misaligning everything after it. (cur is always < len here -- the loop
+        # only continues while next_stop < len, and empty lines are never tabbed.)
+        if self.tab_detected:
+          d_start = self.bdmap[self.cbmap[cur]]
+          seg = self.ex_chars[d_start:d_start + self.w]
+        else:
+          seg = self.substr(cur, next_stop)
+        self.hl_bytes[cur] = _hl_line(seg, self.hl_mode)
         if next_stop >= self.get_len():
           break
         cur = next_stop

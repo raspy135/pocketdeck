@@ -22,7 +22,7 @@ def load_app_list():
   return result
 
 class CaptureStream(io.IOBase):
-  _MAX = 300000
+  _MAX = 50000
 
   def __init__(self):
     self._parts = []
@@ -382,6 +382,14 @@ class RealtimeAgent:
     self.mic_muted = False
     self.vs_active = None
     self.last_play_time = 0
+
+    # Idle auto-mute: when this screen is not the foreground one, the mic stops
+    # transmitting anyway, but after auto_mute_ms of being inactive we also flip
+    # the explicit mute state. auto_muted lets loop() undo it (and only it) when
+    # the screen becomes active again, without clobbering a deliberate mute.
+    self.auto_muted = False
+    self.inactive_since = None     # ticks_ms when the screen went inactive, else None
+    self.auto_mute_ms = 30000      # idle time before auto-muting while inactive
 
     self.cb_time_max = 0
     self.underrun_count = 0
@@ -1036,8 +1044,17 @@ class RealtimeAgent:
 
   def toggle_mic_mute(self):
     self.mic_muted = not self.mic_muted
+    self.auto_muted = False  # a manual toggle takes ownership of the mute state
     self._send_create_response(not self.mic_muted)
     print("\n%s[Mic %s]%s" % (_el.bold(), "MUTED" if self.mic_muted else "ON", _el.bold_off()), file=self.vs)
+
+  def _auto_mute(self):
+    # Mute the mic after the screen has been idle (inactive) long enough. Marks
+    # auto_muted so loop() can auto-unmute when the screen becomes active again.
+    self.mic_muted = True
+    self.auto_muted = True
+    self._send_create_response(False)
+    print("\n%s[Mic auto-muted (idle)]%s" % (_el.bold(), _el.bold_off()), file=self.vs)
 
   def _render_menu(self, options, sel, redraw):
     # Draw (or redraw in place) the option list. On redraw we step the cursor
@@ -1118,8 +1135,23 @@ class RealtimeAgent:
     # voice mode still gates on the active screen.
     active = True if self.agent else self.vs.v.active
     if active != self.vs_active:
+      # Screen just became active from inactive: undo an idle auto-mute so the
+      # mic is live again. A deliberate (manual) mute is left untouched.
+      if active and self.vs_active is not None and self.auto_muted:
+        self.mic_muted = False
+        self.auto_muted = False
+        print("\n%s[Mic auto-unmuted]%s" % (_el.bold(), _el.bold_off()), file=self.vs)
+      # Remember when we went inactive so the idle timer below can fire.
+      self.inactive_since = None if active else time.ticks_ms()
       self.vs_active = active
       self._send_create_response(active and not self.mic_muted)
+
+    # While inactive, auto-mute the mic once it has been idle long enough.
+    # (inactive_since is only set when not active, which never happens in agent
+    # mode, so this stays a no-op there.)
+    if self.inactive_since is not None and not self.mic_muted:
+      if time.ticks_diff(time.ticks_ms(), self.inactive_since) >= self.auto_mute_ms:
+        self._auto_mute()
 
     if self.mic_ready_idx != -1:
       idx = self.mic_ready_idx

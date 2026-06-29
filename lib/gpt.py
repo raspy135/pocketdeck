@@ -67,7 +67,7 @@ def load_app_list():
 
 
 class CaptureStream(io.IOBase):
-  _MAX = 300000
+  _MAX = 50000
 
   def __init__(self):
     self._parts = []
@@ -132,10 +132,8 @@ def build_agent_instructions(app_list, my_screen=None):
     "output to you (plain print() goes to the REPL and is NOT captured).\n"
     "Use command_with_return to look up information too (e.g. list files with "
     "'ls /sd/Documents/word*', read a file with 'cat /path', search with grep).\n "
-    "BE TOKEN-EFFICIENT WITH TOOL CALLS. Each command_with_return call is "
-    "expensive, so make every one count: think before you call, get the command "
-    "syntax right the first time, and prefer one precise command over several "
-    "exploratory ones. Pocket Deck is not Linux. Read README.md and use only the options "
+    "BE TOKEN-EFFICIENT WITH TOOL CALLS. "
+    "Pocket Deck is not Linux. Read README.md and use only the options "
     "that is mentioned in the manual."
     "cat, grep, ls, head, tail are great tools to reduce funciton calls. See README.md for full command list.\n"
     "You can see and drive other apps running on the device. Use list_running_apps "
@@ -199,7 +197,7 @@ def build_tools(app_list, agent=False, web_search=True):
   tools.append({
     "type": "function",
     "name": "write_file",
-    "description": "Write text content to a file on the device filesystem. Creates or overwrites the file. The original file will be backed up under /sd/backup, so you don't need to take a backup file",
+    "description": "Write text content to a file on the device filesystem. Creates or overwrites the file. For long file, making a patch Micropython code is preferred. The original file will be backed up under /sd/backup, so you don't need to take a backup file",
     "parameters": {
       "type": "object",
       "properties": {

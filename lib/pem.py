@@ -2572,7 +2572,10 @@ class editor_file:
             #if not row.tab_detected and expos >= len(row.cbmap):
             if self.input_method != IM_JP and ln[1] != filerow:
               if not ln[2] in row.hl_bytes:
-                row.hl_bytes[ln[2]] = _hl_line(bytes(row.chars), self.mode)
+                # Highlight the visible (tab-expanded) segment that out_line
+                # already holds -- not bytes(row.chars), which kept literal tabs
+                # and highlighted the whole row instead of this wrapped segment.
+                row.hl_bytes[ln[2]] = _hl_line(out_line, self.mode)
               out_line = row.hl_bytes[ln[2]]
             else:
               out_line = _hl_line(out_line, self.mode)
