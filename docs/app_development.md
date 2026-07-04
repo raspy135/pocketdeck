@@ -10,7 +10,7 @@ Pocket deck uses Micropython as core development language, and graphics and soun
 
 ### Examples
 
-Examples are located in /sd/lib/examples.
+Examples are located in /sd/lib/examples. Pocket Deck uses tab-width=2 for Python Code.
 
 ### Screen specification
 
@@ -247,8 +247,8 @@ All drawing methods work when the vscreen is active (current screen). Basically 
 
 #### Text Operations
 
-- `draw_str(x, y, text)`
-- `draw_utf8(x, y, text)`
+- `draw_str(x, y, text)`, note y is letter's baseline.
+- `draw_utf8(x, y, text)`, UTF-8 version of draw_str. note y is letter's baseline.
 - `draw_utf8_v(x, y, text)` - draws UTF8, Japanese style vertical text
 - `draw_button_utf8(x, y, flags, width, padding_h, padding_v, text)`
 - `get_str_width(text)` - returns text width in pixels
@@ -358,9 +358,61 @@ byte | bit | Description
 6 | 0 | 'A' button
 6 | 1 | 'B' Button
 
+### System shortcuts (Slider + key)
+
+A **system shortcut** runs a Python callback when the user holds the touch
+**slider** as a modifier and then presses a second key (A, B, a D-pad direction,
+or a bottom button). Because the slider/touchpad is scanned in firmware, a
+registered shortcut fires **even when the registering app is in the background**
+— unlike normal keyboard input, which only reaches the foreground screen.
+
+Shortcuts are registered on the **vscreen** (`vs.v`), per screen:
+
+- `register_shortcut(shortcut_pad_bit, callback)` — Register `callback` for the
+  given second key. `callback` is called as `callback(shortcut_pad_bit)` on each
+  press while the slider is held, and the key's normal action (e.g. Enter for A)
+  is suppressed for that press. Passing `callback=None` unregisters. Re-registering
+  the same key replaces the previous callback (one callback per screen+key).
+
+- `unregister_shortcut(shortcut_pad_bit)` — Remove this screen's shortcut for that key.
+
+- `clear_shortcuts()` — Remove all of this screen's shortcuts. Called automatically
+  when an app launched via `pdeck_utils` exits, so a backgrounded shortcut can never
+  call back into a closed app. Still, unregister explicitly in your cleanup if you
+  hold the screen open.
+
+`shortcut_pad_bit` uses the **same bit layout as `get_tp_keys()`**, encoded as
+`byte_index * 8 + bit_in_byte`. The slider (byte 0) is always the modifier.
+`pdeck` exposes named constants for the common second keys:
+
+constant | value | key
+-------- | ----- | ---
+`pdeck.SHORTCUT_A` | 48 | 'A' button
+`pdeck.SHORTCUT_B` | 49 | 'B' button
+`pdeck.SHORTCUT_UP` / `RIGHT` / `DOWN` / `LEFT` | 40 / 42 / 44 / 46 | D-pad cardinals
+`pdeck.SHORTCUT_BL` / `SHORTCUT_BR` | 24 / 25 | bottom-left / bottom-right button
+
+The callback is dispatched from the firmware touch task via the MicroPython
+scheduler, so keep it short — typically just set a flag your main loop consumes
+(doing network or blocking I/O directly inside the callback is discouraged).
+
+```python
+def main(vs, args):
+  def on_mute(bit):
+    # runs even if another screen is foreground
+    state['mute'] = not state['mute']
+  vs.v.register_shortcut(pdeck.SHORTCUT_A, on_mute)  # Slider + A
+  try:
+    ...
+  finally:
+    vs.v.unregister_shortcut(pdeck.SHORTCUT_A)
+```
+
 ### Terminal Settings
 
 - `get_terminal_size()` Returns terminal dimensions as tuple `(width, height)`.
+
+- `get_console_log(num_lines)` Returns the last `num_lines` of the terminal's text output (scrollback plus the visible screen) as a single `str`, lines joined by `\n`. Trailing blank lines are trimmed. Reads the text grid directly, so it works on any screen whether or not it is in the foreground — e.g. `pdeck.vscreen(scnum).get_console_log(40)` reads another screen's console. Handy for reading back what a command-line app printed (used by the AI agent's `read_console_log` tool to answer questions like "what's the error in the console?").
 
 - `set_terminal_font(normal_font, bold_font, width, height)` Set terminal font from binary data.
 
@@ -417,6 +469,59 @@ def main(vs, args):
 - `ioctl(op, arg)` — Stream protocol support (used by MicroPython internals).
 
 - `register_module(obj)` — Register the app object for remote command access. See the Remote Command Execution section.
+
+- `record_event(content)` — Append one line describing a system/app event to the daily event log, tagged with this app's name. See the Event log section.
+
+## Event log
+
+Pocket Deck keeps a lightweight, human- and AI-readable activity log. Each event
+is one line appended to a per-day markdown file at `/sd/elog/yyyy-mm-dd.md`
+(timestamps are local time). A new day's file starts with a `# yyyy-mm-dd`
+header. The intent is a rolling history of what happened on the device (`boot`,
+opening files, launching apps, ...) that an AI assistant can read for context.
+
+From inside an app, log through the `vs` stream so the entry is tagged with the
+app name:
+
+```python
+def main(vs, args):
+  vs.record_event('boot')
+  vs.record_event('open file %s' % args[1])
+```
+
+This produces lines like:
+
+```
+# 2026-06-29
+
+- 09:14:02 [pem] open file /sd/Documents/notes.md
+- 09:15:40 [home] launch flashcards
+```
+
+System code (or any code without a `vs`) can call the module-level function
+directly, optionally passing an app/source name:
+
+```python
+import pdeck_utils
+pdeck_utils.record_event('boot')                 # - HH:MM:SS boot
+pdeck_utils.record_event('wifi up', 'system')    # - HH:MM:SS [system] wifi up
+```
+
+`record_event` is best-effort and never raises — if the SD card is missing or
+the write fails it just returns `False`. Concurrent calls from multiple app
+threads are serialized with a lock, so lines never interleave.
+
+### Automatic launch events
+
+Every application launch is logged automatically — both commands typed in the
+shell and programmatic `pdeck_utils.launch()` calls — so apps don't need to log
+their own startup. The line records the cleaned command (the `r` reload prefix
+and screen-number prefix are stripped) together with its arguments:
+
+```
+- 09:14:01 launch pem /sd/Documents/notes.md
+- 09:18:22 launch flashcards
+```
 
 ## dsplib module
 

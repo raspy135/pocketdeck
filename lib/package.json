@@ -213,6 +213,18 @@
             "examples/cube_test.py"
         ],
         [
+            "examples/dashboard_bars.py",
+            "examples/dashboard_bars.py"
+        ],
+        [
+            "examples/dashboard_gauge.py",
+            "examples/dashboard_gauge.py"
+        ],
+        [
+            "examples/dashboard_line.py",
+            "examples/dashboard_line.py"
+        ],
+        [
             "examples/dither_test.py",
             "examples/dither_test.py"
         ],
@@ -333,6 +345,10 @@
             "gpt.py"
         ],
         [
+            "gpt_c.py",
+            "gpt_c.py"
+        ],
+        [
             "gpt_l.py",
             "gpt_l.py"
         ],
@@ -369,6 +385,10 @@
             "journal.py"
         ],
         [
+            "listup.py",
+            "listup.py"
+        ],
+        [
             "lock.py",
             "lock.py"
         ],
@@ -387,6 +407,10 @@
         [
             "mv.py",
             "mv.py"
+        ],
+        [
+            "noa/ai_improve.py",
+            "noa/ai_improve.py"
         ],
         [
             "noa/anm.py",
@@ -439,6 +463,10 @@
         [
             "noa/fontloader.py",
             "noa/fontloader.py"
+        ],
+        [
+            "noa/gpt_tools.py",
+            "noa/gpt_tools.py"
         ],
         [
             "noa/imagelib.py",
@@ -511,6 +539,10 @@
         [
             "noa/pngwriter.py",
             "noa/pngwriter.py"
+        ],
+        [
+            "noa/pstdin.py",
+            "noa/pstdin.py"
         ],
         [
             "noa/re_findall.py",
@@ -613,6 +645,10 @@
             "setup.py"
         ],
         [
+            "skills/dashboard_design.md",
+            "skills/dashboard_design.md"
+        ],
+        [
             "sound.py",
             "sound.py"
         ],
@@ -692,7 +728,7 @@
         },
         {
             "path": "rm.py",
-            "md5": "d90a1774c22deb0592cd829a69701296"
+            "md5": "812835e7e78bce2c25108a59b7457b94"
         },
         {
             "path": "setuni.py",
@@ -700,11 +736,11 @@
         },
         {
             "path": "analog_clock.py",
-            "md5": "baf7d053000166d79fbe9d9e6cee78d5"
+            "md5": "04fb7c37bc3761c59dfc4c17785c43aa"
         },
         {
             "path": "head.py",
-            "md5": "d4f2fc0733a1e84d25bc277b07e952ce"
+            "md5": "89ef9fd3d78b936131728739a473ccf0"
         },
         {
             "path": "tasks.py",
@@ -736,7 +772,7 @@
         },
         {
             "path": "curl.py",
-            "md5": "2594ffec911c19a9c9dbd90c47d5d419"
+            "md5": "fc5264fc4756848a831549a6c1774480"
         },
         {
             "path": "journal.py",
@@ -761,6 +797,10 @@
         {
             "path": "pem_client.py",
             "md5": "8effa3217c4e54ec12dd092672bc0379"
+        },
+        {
+            "path": "listup.py",
+            "md5": "bc6984554e88131ceb64c07b86809fae"
         },
         {
             "path": "home.py",
@@ -788,7 +828,7 @@
         },
         {
             "path": "gpt_rt.py",
-            "md5": "caf0daf9d3c9a853f3d0ebc5cce0b013"
+            "md5": "433ab01662745ed70a676e6b8689b3c7"
         },
         {
             "path": "clip.py",
@@ -804,7 +844,7 @@
         },
         {
             "path": "gpt.py",
-            "md5": "0ef37dcac30d9d32f3859ea73834077a"
+            "md5": "e7c93f00ae1116019600503167740062"
         },
         {
             "path": "diff.py",
@@ -820,7 +860,7 @@
         },
         {
             "path": "tail.py",
-            "md5": "b21517883000b3bcbe8cd549729c260a"
+            "md5": "35e176b0a053722d36ae4bbd1b3376fb"
         },
         {
             "path": "wavtest.py",
@@ -863,12 +903,16 @@
             "md5": "acdb5bb85da5cea3f5d000685ec48bc7"
         },
         {
+            "path": "gpt_c.py",
+            "md5": "1680c33ad44358e5617e5da497139268"
+        },
+        {
             "path": "update_updater.py",
             "md5": "adfe287c00cd166f66d75484b4e43fa3"
         },
         {
             "path": "pem.py",
-            "md5": "249a30877d3162d8817897630362742b"
+            "md5": "f5bbb5a3f13071c9153aa04cce0fb087"
         },
         {
             "path": "recorder.py",
@@ -904,7 +948,7 @@
         },
         {
             "path": "grep.py",
-            "md5": "dfc63640bda168401591d2fd0d4ef9f3"
+            "md5": "66d259173474ea7c59ee0d023944fa5c"
         },
         {
             "path": "sync.py",
@@ -959,6 +1003,10 @@
             "md5": "5d2ecd665cf6ce71a181cc4728b00d4e"
         },
         {
+            "path": "skills/dashboard_design.md",
+            "md5": "30dd850099fa4b238cdbb7b26e8164f4"
+        },
+        {
             "path": "noa/uQR.py",
             "md5": "0b8d6609b05ffcd7f09b2b5a67a3ae61"
         },
@@ -1011,6 +1059,10 @@
             "md5": "f01067a4d408cf410b55d6d898f4bfec"
         },
         {
+            "path": "noa/gpt_tools.py",
+            "md5": "74096250bcdf26c5ba01f6839462169f"
+        },
+        {
             "path": "noa/pdeck_complete.py",
             "md5": "96622cfec4b762a912fe42dea72ddc28"
         },
@@ -1029,6 +1081,10 @@
         {
             "path": "noa/codec_config.py",
             "md5": "41f79b63f5611c2d808712b2884e6ded"
+        },
+        {
+            "path": "noa/ai_improve.py",
+            "md5": "8a072e33d346ca04dc2bc277bcda7c13"
         },
         {
             "path": "noa/font2d.py",
@@ -1075,12 +1131,16 @@
             "md5": "2ecea33b5fb892950ca0680f59530e7c"
         },
         {
+            "path": "noa/pstdin.py",
+            "md5": "1bb619ca6f59e8b2ddbd763dd00e07e4"
+        },
+        {
             "path": "noa/jp_input.py",
             "md5": "c2b8b40b96bf198060398f2c4629609f"
         },
         {
             "path": "noa/erow.py",
-            "md5": "e3b949c8ef36f7622bdfb94eb6e90631"
+            "md5": "6c49a2ac74ba7843ad7548dd4e6be805"
         },
         {
             "path": "noa/overlay.py",
@@ -1144,7 +1204,7 @@
         },
         {
             "path": "data/apps_db.json",
-            "md5": "afa659e47573af40ecf320ccadb9f3c0"
+            "md5": "b0d9977f73e98a27d8a92094f9dea82a"
         },
         {
             "path": "data/cat3.xbmr",
@@ -1291,6 +1351,10 @@
             "md5": "727629a59a04f4ba289ba2954ee716b8"
         },
         {
+            "path": "examples/dashboard_gauge.py",
+            "md5": "6de5cd43dfd8e91cef9d7ee210c498a7"
+        },
+        {
             "path": "examples/animation_example.py",
             "md5": "8a5093305d02b4ceff2b06d1c648dae5"
         },
@@ -1319,8 +1383,16 @@
             "md5": "e69557af6821fe00816dce9b7bf6ba39"
         },
         {
+            "path": "examples/dashboard_bars.py",
+            "md5": "81a894b422223610c9341d1f7163a122"
+        },
+        {
             "path": "examples/hello_graphic.py",
             "md5": "bbb3080e521b2b611bb504d98377acce"
+        },
+        {
+            "path": "examples/dashboard_line.py",
+            "md5": "cd94bca3d4ef6e6f8656ed4386fdb061"
         },
         {
             "path": "examples/pattern_example.py",

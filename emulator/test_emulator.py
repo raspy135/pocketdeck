@@ -59,7 +59,7 @@ async def run():
     app_items = await page.query_selector_all('.ios-list-item')
     app_count = len(app_items)
     labels = [await it.inner_text() for it in app_items]
-    print(f"{'✓' if app_count == 5 else '✗'} App list: {app_count} apps {labels}")
+    print(f"{'✓' if app_count == 8 else '✗'} App list: {app_count} apps {labels}")
 
     results = {}
 
@@ -144,6 +144,22 @@ async def run():
     results['graph'] = graph_ok
     print(f"{'✓' if graph_ok else '✗'} Graph rendered: pixsum {g}")
 
+    # ── Dashboard examples: each should render its animated content ─────────
+    for nth, key in ((6, 'dashboard_bars'), (7, 'dashboard_line'), (8, 'dashboard_gauge')):
+      print(f"\n── {key} ─────────────────────────────────────────────")
+      await page.click(f'.ios-list-item:nth-child({nth})')
+      await page.wait_for_function(
+        "() => document.getElementById('status-text')?.textContent.includes('Running')",
+        timeout=15_000
+      )
+      await asyncio.sleep(2.0)
+      s = await page.evaluate(CANVAS_SUM)
+      ok = s > 0
+      results[key] = ok
+      print(f"{'✓' if ok else '✗'} {key} rendered: pixsum {s}")
+      await page.keyboard.press('q')       # quit before launching the next
+      await asyncio.sleep(0.5)
+
     passed = all(results.values())
 
     # ── Summary ───────────────────────────────────────────────────────────
@@ -160,7 +176,7 @@ async def run():
       print(f"  {'PASS' if v else 'FAIL'}  {k}")
 
     await browser.close()
-    return 0 if (app_count == 5 and passed) else 1
+    return 0 if (app_count == 8 and passed) else 1
 
 if __name__ == '__main__':
   sys.exit(asyncio.run(run()))

@@ -1,6 +1,21 @@
 import time as _time
 import sys
 
+# System-shortcut second-key ids: get_tp_keys() bit = byte_index*8 + bit.
+# Used with vscreen.register_shortcut(). Slider is the implicit modifier.
+SHORTCUT_BL = 24
+SHORTCUT_BR = 25
+SHORTCUT_UP = 40
+SHORTCUT_UPRIGHT = 41
+SHORTCUT_RIGHT = 42
+SHORTCUT_DOWNRIGHT = 43
+SHORTCUT_DOWN = 44
+SHORTCUT_DOWNLEFT = 45
+SHORTCUT_LEFT = 46
+SHORTCUT_UPLEFT = 47
+SHORTCUT_A = 48
+SHORTCUT_B = 49
+
 def vscreen(screen_num=None):
   from vscreen import VscreenStream
   return VscreenStream()

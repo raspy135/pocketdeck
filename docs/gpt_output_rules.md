@@ -14,7 +14,7 @@ print('hello', file=vs)
 Otherwise, the output goes to screen 0.
 - if you want to check existing apps, /sd/lib is where system apps are, and /sd/lib/noa is for libraries.
 - You should use argparse module when it's needed. 
-- MicroPython's Tab width must be 2. 
+- IMPORTANT: MicroPython's Tab width must be 2. 
 
 ## working folder
 

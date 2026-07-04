@@ -66,6 +66,33 @@ def main(vs, args):
 `
   },
 
+  'dashboard_bars': {
+    label: 'Dashboard · Bars',
+    desc: 'Flat bar-chart dashboard example. Left/Right = switch metric, q = quit.',
+    code: `import dashboard_bars
+def main(vs, args):
+  dashboard_bars.main(vs, args)
+`
+  },
+
+  'dashboard_line': {
+    label: 'Dashboard · Line',
+    desc: 'Line/area trend dashboard example. Left/Right = switch metric, q = quit.',
+    code: `import dashboard_line
+def main(vs, args):
+  dashboard_line.main(vs, args)
+`
+  },
+
+  'dashboard_gauge': {
+    label: 'Dashboard · Gauge',
+    desc: 'Radial gauge dashboard example. Left/Right = scenario, r = refresh, q = quit.',
+    code: `import dashboard_gauge
+def main(vs, args):
+  dashboard_gauge.main(vs, args)
+`
+  },
+
 /*
   'boot_anim': {
     label: 'Boot Splash',

@@ -1,11 +1,7 @@
 
 # gpt
 
-`gpt` is a ChatGPT frontend for Pocket Deck. It supports text queries, voice
-input/output, file and image attachments, and an **agent mode** in which the
-model uses native function calling (tools) to write files, run and debug code,
-and even see and drive other apps on the device. An optional **conversation
-mode** keeps context across turns.
+`gpt` is a ChatGPT frontend for Pocket Deck. It supports text queries, voice input/output, file and image attachments, and an **agent mode** in which the model uses native function calling (tools) to write files, run and debug code, and even see and drive other apps on the device. **conversation mode** keeps context across turns.
 
 Requires an OpenAI API key stored at `/config/openai_api_key`.
 
@@ -30,7 +26,8 @@ gpt what is the capital of France
 gpt -f notes.txt notes2.txt -q summarize this
 gpt -v
 gpt -a write a temp script that prints the first 10 primes and run it
-gpt -C -r coder          # interactive coding session with tools on
+gpt -C -a  # Conversation mode with agent mode
+gpt -Ca -r coder -f pd/app_development.md         # Set role as coder, agent mode, and let AI read development documentation
 ```
 
 ## Options
@@ -46,8 +43,9 @@ Option | Description
 `-f file [file...]` | Attach one or more files as reference context. Also accepts URLs.
 `-i img [img...]` | Attach image files or URLs for vision queries.
 `-c` | Use clipboard content as reference text.
-`-m model` | Model to use. Shortcuts: `f`/`fast` → gpt-5.4-mini, `m`/`medium` → ngpt-5.4, `h`/`high` → gpt-5.5. Default: `gpt-5.4`.
-`-e level` | Reasoning effort: `low`, `medium` (default), or `high`.
+`-m model` | Model to use — a `name` from `/config/gpt.json`, a shortcut (`f`/`fast` → gpt-5.4-mini, `m`/`medium` → ngpt-5.4, `h`/`high` → gpt-5.5), or a raw model id. Default: the registry `default`. See [Model configuration](#model-configuration-configgptjson).
+`--base-url url` | Override the endpoint base URL for this run.
+`-e level` | Reasoning effort: `low`, `medium` (default), or `high`. Responses models only.
 `-j` | Answer in Japanese. Also switches terminal font to Unicode automatically.
 `-v` | Voice mode: record audio → STT → ask GPT → TTS reads answer aloud.
 `-vt type` | TTS voice type. Options: `alloy`, `coral` (default), `echo`, `fable`, `onyx`, `nova`, `shimmer`.
@@ -135,39 +133,38 @@ gpt -a -q prompt.md
 Responses are saved to `/sd/log/` by default (created automatically). The log
 filename is copied to the clipboard after each session. Use `-n` to skip saving.
 
+## File attachment (`-f`)
+
+File attachment (-f) is one of the powerful option in gpt command. By attaching files, you can teach extra instruction or knowledge to AI. You can specify multiple files to AI.
+
 ## Agent Mode (`-a`)
 
-Agent mode gives the model a set of **function tools** it calls directly (native
-function calling over the Responses API) instead of emitting special markdown
-blocks. The core loop is write → run → read output → fix → re-run.
+Agent mode gives the AI model to read/write file, check status and make an application on the fly.
 
-`/sd/Documents/pd/README.md` and `/sd/Documents/pd/gpt_output_rules.md` are
-attached automatically so the model knows the Pocket Deck basics.
+In agent mode, the AI knows what Pocket Deck is and how to operate the device. In coder role (-r coder), it also knows how to code.
 
 When the model invokes a tool you'll see a `[Call]` line and a `[Result]` line.
-The `coder` role (`-r coder`) also turns agent mode on automatically.
 
-### Tools
+### Tools in agent mode
 
-Tool | What it does
------|-------------
-`command_with_return` | Run a module/command (e.g. `ls`, `cat`, `grep`, or any app's `main(vs, args)`) and return its captured output. Prefix with `r ` to force a fresh reload of a module you just edited.
-`write_file` | Create or overwrite a file. The previous version is backed up under `/sd/backup/` automatically.
-`launch_app` | Launch a Pocket Deck app by name, optionally with arguments (e.g. a file to open).
-`list_running_apps` | List which app is on which screen.
-`switch_screen` | Bring a screen to the foreground (0-based in the tool; the GUI shows 1-based).
-`capture_screen` | Take a screenshot of a screen and feed it back to the model as an image.
-`send_keys` | Type text / keystrokes into the foreground app (supports escape sequences for arrows, Esc, Backspace, Ctrl-X, etc.).
+AI can do the following things in agent mode.
 
-### write_file output
+- Command execution
+- PEM file editing. AI can read the editor status and edit the currently open file.
+- Read / write files. The old files are copied to /sd/backup.
+- Launch application
+- Take screenshot
+- Send keycode
+- Read the console output (scrollback) of a command-line app, so you can ask things like "what's the error in the console?"
+- Read the device activity log at `/sd/elog/YYYY-MM-DD.md` (one file per day: app launches, file opens/saves, commands) to see what you've recently been doing or resume your work.
+- (Voice agent only) Run a **timed routine** — a stretch or yoga sequence, workout intervals, guided breathing — pacing itself through the schedule with `wait_and_resume` (it speaks each move, then holds for the right number of seconds before the next).
 
-When `write_file` runs, the full file content is **not** dumped to the screen.
-Instead:
+In the voice agent (`gpt_rt -a`), press **`u`** for a quick "what's up?" — it silently checks today's activity log and what you're currently editing in PEM, then speaks a one-line summary (or says things look quiet).
 
-- **Updating an existing file** — a diff (via the `diff` command) is shown, so
-  you see exactly what changed. The original is backed up to `/sd/backup/`.
-- **Creating a new file** — the content is printed once under a `[New file]`
-  header (there is nothing to diff against).
+**Timed programs (voice agent).** Ask the voice agent to walk you through anything with a timeline — e.g. *"instruct me through the stretch routine in stretch.md, following the timing."* It speaks the current step, then waits the right number of seconds and speaks the next one, and so on. The wait runs **in the background with the mic still live**, so you can interrupt hands-free at any time ("hold on", "my back hurts", "how many left?"); doing so pauses the program, and the agent picks the routine back up when you're ready.
+
+**Skills.** Put reusable procedures in `/sd/Documents/skills/`, one markdown file per skill — a routine with steps and timings, a recurring workflow (a morning writing setup), or a document format to follow. The agent knows the folder: ask by name (*"do my morning ritual"*, *"coach me through the surf warm-up"*) or ask *"what skills do I have?"* and it reads the file and follows it. You can also invoke a skill explicitly, Claude-CLI style, by typing a slash and its name — `/morning_ritual` — with `/skills` to list them. Built-in system skills ship in `/sd/lib/skills/` (e.g. `dashboard_design` for building graphical apps); your own skills in `/sd/Documents/skills/` take precedence on a name clash. When you teach it a procedure worth repeating, it can save the procedure there as a new skill.
+
 
 ### Auto vs Plan mode
 
@@ -185,10 +182,10 @@ In conversation mode, **Shift-Tab** toggles Auto/Plan, or use `/mode`,
 
 ## Conversation Mode (`-C`)
 
-`gpt -C` opens an interactive session that keeps context across turns
-(server-side, via `previous_response_id`), so you can have a back-and-forth
-without re-sending history. Combine with `-a`/`-r coder` for an interactive
-coding assistant.
+`gpt -C` opens an interactive session that keeps context across turns, so you can
+have a back-and-forth without re-sending history (Responses models keep it
+server-side via `previous_response_id`; Chat Completions models keep it locally).
+Combine with `-a`/`-r coder` for an interactive coding assistant.
 
 Line editing: arrows move the cursor, Up/Down browse history, Ctrl-A/E jump to
 start/end, Ctrl-K/U kill to end/start, Ctrl-C cancels the current line.
@@ -202,14 +199,19 @@ Command | Effect
 --------|-------
 `/help` | Show command help.
 `/quit`, `/exit` | Leave the conversation.
-`/clear`, `/reset` | Start fresh (clear the server-side context).
-`/model [name]` | Show or set the model (`m`/`medium`, `h`/`high`, `f`/`fast`, or an id).
-`/effort [level]` | Show or set reasoning effort (`low`/`medium`/`high`).
+`/clear`, `/reset` | Start fresh (clear the conversation context).
+`/model [name]` | Show or set the model — a `name` from `/config/gpt.json`, a shortcut (`f`/`m`/`h`), or a raw id. Switching to a different endpoint resets the context.
+`/models` | List the models configured in `/config/gpt.json`.
+`/effort [level]` | Show or set reasoning effort (`low`/`medium`/`high`). Responses models only.
 `/role [name\|text]` | Show or set the role (`assistant` or `coder`; resets context).
 `/tools` | Toggle the function-calling tools on/off.
-`/mode [auto\|plan]` | Show/set execution mode (no arg toggles); also `/auto`, `/plan`.
 `/file <path>` | Attach a file as reference for the next message.
-`/history` | Show recent input history.
+`/skills` | List available skills (your own plus the built-in system skills).
+`/<skill-name>` | Run a skill by name, e.g. `/morning_ritual` (hyphens, underscores and spaces all match). The agent reads the skill file and carries it out; anything after the name is passed as extra input.
+`/compact` | Summarize and shrink the running context now. Chat Completions models only.
+`/auto-compact [n]` | Auto-compact every `n` turns (`off` to disable). Chat Completions models only.
+`/improve` | Improve AI agent knowledge. Save learned preferences and stable behavior notes from recent interaction history into a long-term memo; does not change core system rules or persona.
+`/auto-improve [n]` | Auto-run `/improve` every `n` completed turns (`off` to disable). On by default (every 8 turns); shows the current setting when given no argument.
 
 ## Roles (`-r`)
 
@@ -220,3 +222,48 @@ A role sets the assistant's persona / system prompt.
   for Pocket Deck; **this preset turns the tools on**.
 - A path or a name under `/sd/roles/<name>.txt` — your own role text from a file.
 - Any other text is used verbatim as the role.
+
+## Model configuration (`/config/gpt.json`)
+
+`gpt` is the single frontend for every model. Which models are available — and
+which API each one speaks — is defined in `/config/gpt.json`, an Ollama-style
+registry. It's created with OpenAI defaults the first time `gpt` runs.
+
+```json
+{
+  "default": "gpt-5.4",
+  "models": [
+    { "name": "gpt-5.4", "api": "responses", "model": "gpt-5.4" },
+    { "name": "gpt-5.5", "api": "responses", "model": "gpt-5.5" },
+    { "name": "llama3",  "api": "chat",
+      "base_url": "http://192.168.1.50:11434/v1", "model": "llama3.1" }
+  ]
+}
+```
+
+Per-entry fields (only `name` is required):
+
+Field | Meaning
+------|--------
+`name` | The label you pass to `-m` and `/model` (e.g. `-m llama3`).
+`api` | `responses` — OpenAI's Responses API (server-side context, reasoning `effort`, built-in web search). `chat` — the portable Chat Completions API used by Ollama, local servers, and other providers.
+`base_url` | Endpoint base. Default: `https://api.openai.com/v1`.
+`model` | The actual model id sent to the API. Default: same as `name`.
+`effort` | Optional default reasoning effort for a `responses` entry.
+
+`default` names the entry used when `-m` is omitted. An OpenAI endpoint needs a
+key in `/config/openai_api_key`; local endpoints (Ollama, etc.) need none.
+
+**Selecting a model:** `gpt -m llama3 ...`, or in conversation mode `/model llama3`
+(with `/models` to list them). You can even switch between an OpenAI model and a
+local model in the middle of one conversation — the context resets on the switch.
+
+`/compact` and `/auto-compact [n]` (summarize and shrink the running context) are
+offered for `chat` models, where the whole history is resent each turn; `/effort`
+applies to `responses` models. A raw model id or a shortcut (`f`/`m`/`h`) still
+works with `-m` even if it isn't registered — it's treated as an OpenAI Responses
+model.
+
+> The Chat Completions client lives in the internal `gpt_c` module; you don't run
+> it directly anymore. An old `gpt_c ...` command still works — it's routed
+> through `gpt`.

@@ -106,6 +106,19 @@ import pem_keymap_default as km
 
 open_pending_list= []
 
+# Remote AI edit queue, drained the same way as open_pending_list: the editor's
+# read loop notices a pending request and synthesizes REMOTE_EDIT_KEY, which
+# process_key services on the editor's own thread (the only place it is safe to
+# mutate rows and re-render). Each item is [line_from, line_to, content, result],
+# where result is a dict the requesting thread polls for completion.
+edit_pending_list = []
+# Remote AI buffer-switch queue, drained the same way (on the editor's thread via
+# REMOTE_EDIT_KEY). Each item is [filename, result]; result is a dict the
+# requesting thread polls for completion.
+switch_pending_list = []
+# Internal sentinel returned by read(); a multi-byte value no real key produces.
+REMOTE_EDIT_KEY = b'\x00\x11pem_edit'
+
 try:
   import pem_keymap as custom_keymap
   custom_keymap.init_custom(km)
@@ -468,6 +481,7 @@ class editor:
     self.IM_JP = 2
     self.h_diff = 1
     self.v = v
+    self.vs = None  # set in main(); used to record file-open events (None on PC)
     self.in_ext_mode = False
     self.pending_keys = None
     self._chord_items = []
@@ -515,6 +529,11 @@ class editor:
     self.tab_size = 2
     self.jpfont_loaded = False
 
+  def record_event(self, content):
+    # self.vs is None on PC (only set in main() on the device), so skip there.
+    if self.vs is not None:
+      self.vs.record_event(content)
+
   def load_jpfont(self):
     # The device must load a CJK bitmap font into its terminal; a desktop
     # terminal already renders Japanese with its own font, so this is a no-op.
@@ -543,6 +562,192 @@ class editor:
     # (open-file) key. linenum/colnum are 1-based, matching the open-file
     # handler and the desktop pem_client protocol.
     open_pending_list.append((filename, linenum, colnum))
+
+  def pub_get_status(self):
+    # Remote/AI read-only status. Safe to call from another task: it only reads
+    # scalar editor state (no rows mutation, no rendering). Row/col are 1-based to
+    # match the status line and pub_edit_block. Returns a dict.
+    cur = self.file
+    open_files = []
+    for f in [cur] + self.file_list:
+      open_files.append(f.filename if f.filename is not None else '** New file **')
+    return {
+      'filename': cur.filename,
+      'row': self.file_row + 1,
+      'col': self.file_col + 1,
+      'num_lines': len(cur.rows),
+      'modified': cur.modified,
+      'open_files': open_files,
+    }
+
+  def pub_edit_block(self, line_from, line_to, content, timeout_ms=4000):
+    # Remote/AI entry point: replace lines [line_from, line_to] (1-based,
+    # inclusive) of the CURRENT file with `content`. Like pub_open_file this runs
+    # on a different task than the editor loop, so it must NOT touch rows/render
+    # here. Queue the request and block (bounded) until the editor's own loop
+    # applies it via drain_remote_edits and fills in `result`. Returns
+    # (ok: bool, message: str).
+    result = {'done': False, 'ok': False, 'msg': ''}
+    item = [line_from, line_to, content, result]
+    edit_pending_list.append(item)
+    deadline = time.ticks_add(time.ticks_ms(), timeout_ms)
+    while not result['done']:
+      if time.ticks_diff(deadline, time.ticks_ms()) <= 0:
+        try:
+          edit_pending_list.remove(item)
+        except ValueError:
+          pass  # the editor picked it up between our check and removal
+        if not result['done']:
+          return (False, 'timeout: editor did not apply the edit (is PEM running and at the main editing screen?)')
+        break
+      time.sleep_ms(20)
+    return (result['ok'], result['msg'])
+
+  def drain_remote_edits(self):
+    # Runs on the editor's own thread (via the synthesized REMOTE_EDIT_KEY in
+    # process_key), so it is safe to mutate rows and request a redraw here.
+    applied = False
+    while edit_pending_list:
+      line_from, line_to, content, result = edit_pending_list.pop(0)
+      try:
+        ok, msg = self._apply_edit_block(line_from, line_to, content)
+      except Exception as e:
+        ok, msg = False, 'edit failed: %s' % str(e)
+      result['ok'] = ok
+      result['msg'] = msg
+      result['done'] = True
+      if ok:
+        applied = True
+    if applied:
+      self.dmod = True  # main loop re-renders after process_key returns
+
+  def _apply_edit_block(self, line_from, line_to, content):
+    f = self.file
+    nrows = len(f.rows)
+    if not (isinstance(line_from, int) and isinstance(line_to, int)):
+      return (False, 'line_from and line_to must be integers (1-based)')
+    if line_from < 1 or line_to < line_from:
+      return (False, 'invalid range: need 1 <= line_from <= line_to')
+    if line_from > nrows + 1:
+      return (False, 'line_from %d is past end of file (%d lines)' % (line_from, nrows))
+    if line_to > nrows:
+      line_to = nrows
+    # Build the replacement rows from `content` (newline-separated). An empty
+    # string deletes the range outright (no blank line left behind); the
+    # at-least-one-row safeguard below keeps an emptied file valid.
+    new_rows = []
+    if content != "":
+      for ln in content.split('\n'):
+        row = erow(ln.encode('utf-8'), f.tab_size, f.w)
+        row.hl_mode = f.mode
+        new_rows.append(row)
+    # Snapshot for undo BEFORE mutating so the user can C-z the AI's edit.
+    f.undo.record(self, 'other')
+    f.rows[line_from - 1:line_to] = new_rows
+    # A file must always have at least one row for the renderer/cursor logic.
+    if len(f.rows) == 0:
+      row = erow(b"", f.tab_size, f.w)
+      row.hl_mode = f.mode
+      f.rows.append(row)
+    f.modified = True
+    f.num_updated = 0  # force syntax re-highlight from the top
+    # Clamp the cursor into the (possibly shorter) buffer.
+    if self.file_row >= len(f.rows):
+      self.file_row = len(f.rows) - 1
+      self.file_col = 0
+    rlen = f.rows[self.file_row].get_len()
+    if self.file_col > rlen:
+      self.file_col = rlen
+    if len(new_rows) == 0:
+      return (True, 'deleted lines %d-%d; file now has %d line(s)'
+                    % (line_from, line_to, len(f.rows)))
+    return (True, 'replaced lines %d-%d with %d line(s); file now has %d line(s)'
+                  % (line_from, line_to, len(new_rows), len(f.rows)))
+
+  def pub_read_content(self, line_from=1, line_to=None):
+    # Remote/AI read-only access to the CURRENT file's text. Safe to call from
+    # another task: it only reads rows (like pub_get_status). line_from/line_to
+    # are 1-based and INCLUSIVE; line_to=None (or beyond EOF) reads to the end.
+    # Returns (ok: bool, text-or-error: str). The text is newline-joined.
+    f = self.file
+    nrows = len(f.rows)
+    try:
+      line_from = int(line_from)
+    except (TypeError, ValueError):
+      return (False, 'line_from must be an integer (1-based)')
+    if line_to is None:
+      line_to = nrows
+    else:
+      try:
+        line_to = int(line_to)
+      except (TypeError, ValueError):
+        return (False, 'line_to must be an integer (1-based) or null')
+    if line_from < 1:
+      line_from = 1
+    if line_to > nrows:
+      line_to = nrows
+    if line_from > nrows:
+      return (True, '')  # range starts past EOF -> empty
+    if line_to < line_from:
+      return (False, 'invalid range: need line_from <= line_to')
+    lines = []
+    for i in range(line_from - 1, line_to):
+      lines.append(f.rows[i].decode())
+    return (True, '\n'.join(lines))
+
+  def pub_switch_buffer(self, filename, timeout_ms=4000):
+    # Remote/AI entry point: make `filename` (one of the already-open buffers) the
+    # current editing file. Mutates editor state + renders, so (like pub_edit_block)
+    # it queues the request and blocks (bounded) until the editor's own loop applies
+    # it via drain_remote_edits. Returns (ok: bool, message: str).
+    result = {'done': False, 'ok': False, 'msg': ''}
+    item = [filename, result]
+    switch_pending_list.append(item)
+    deadline = time.ticks_add(time.ticks_ms(), timeout_ms)
+    while not result['done']:
+      if time.ticks_diff(deadline, time.ticks_ms()) <= 0:
+        try:
+          switch_pending_list.remove(item)
+        except ValueError:
+          pass  # the editor picked it up between our check and removal
+        if not result['done']:
+          return (False, 'timeout: editor did not switch buffer (is PEM running and at the main editing screen?)')
+        break
+      time.sleep_ms(20)
+    return (result['ok'], result['msg'])
+
+  def drain_remote_switches(self):
+    # Runs on the editor's own thread (see drain_remote_edits). Safe to switch the
+    # current buffer and re-render here.
+    applied = False
+    while switch_pending_list:
+      filename, result = switch_pending_list.pop(0)
+      try:
+        ok, msg = self._apply_switch_buffer(filename)
+      except Exception as e:
+        ok, msg = False, 'switch failed: %s' % str(e)
+      result['ok'] = ok
+      result['msg'] = msg
+      result['done'] = True
+      if ok:
+        applied = True
+    if applied:
+      self.dmod = True
+
+  def _apply_switch_buffer(self, filename):
+    if not isinstance(filename, str) or filename == '':
+      return (False, 'filename must be a non-empty string')
+    cur = self.file.filename
+    if cur == filename or cur == filename + '.md':
+      return (True, '%s is already the current buffer' % filename)
+    # switch_buf_if_exists matches against self.file_list and switches via
+    # process_file_select (the same path the file-select menu uses).
+    if self.switch_buf_if_exists(filename):
+      return (True, 'switched to %s' % (self.file.filename or '** New file **'))
+    open_names = []
+    for f in [self.file] + self.file_list:
+      open_names.append(f.filename if f.filename is not None else '** New file **')
+    return (False, '%s is not open; open buffers: %s' % (filename, ', '.join(open_names)))
 
   def open(self, filename, linenum=0, colnum=0):
     self.file = editor_file(self.v, filename, self.text_height, self.text_width - 1, self.tab_size)
@@ -1062,6 +1267,10 @@ class editor:
       self.process_open_file_select(0, name.decode())
       return
 
+    _open_path = name.decode()
+    if _open_path:
+      self.record_event('open file ' + _open_path)
+
     if not force and (name.decode() == self.file.filename or self.switch_buf_if_exists(name.decode())):
       # File is already open (the current buffer, or another one just switched
       # to by switch_buf_if_exists). When a jump target was given (symbol jump,
@@ -1104,7 +1313,7 @@ class editor:
     fname = name.decode()
     self.filename = fname
     self.file.filename = fname
-    print(f"Saving.. file={name.decode()}")
+    self.record_event(f"Saving.. file={name.decode()}")
     total = self.file.save()
     self.file.save_last_filename(self.file_row, self.file_col)
       
@@ -1544,6 +1753,14 @@ class editor:
     else:
       keys = self.v.read(1)
 
+    # Remote AI edits are serviced here (read() synthesizes REMOTE_EDIT_KEY when
+    # edit_pending_list is non-empty), so the buffer is only mutated on this,
+    # the editor's own, thread. Mirrors the open_pending_list / C-x C-f path.
+    if keys == REMOTE_EDIT_KEY:
+      self.drain_remote_edits()
+      self.drain_remote_switches()
+      return 0
+
     # Catching window size change
     tw, th = self.v.get_terminal_size()
     if tw != self.text_width or th-self.h_diff != self.text_height:
@@ -1682,6 +1899,7 @@ class editor:
       else:
         while True:
           total = self.file.save()
+          self.record_event(f"Saving.. file={self.file.filename}")
           self.file.save_last_filename(self.file_row, self.file_col)
           if total != 0:
             break
@@ -2898,6 +3116,8 @@ if pdeck_enabled:
         ret = self.v.read_nb_bytes(1)
         if len(open_pending_list) > 0:
           return km.map['open'][0]
+        if (edit_pending_list or switch_pending_list) and getattr(self, 'allow_remote_open', True):
+          return REMOTE_EDIT_KEY
         if ret:
           if ret[0] > 0:
             break
@@ -2979,11 +3199,13 @@ else:
       # Stdin always has priority, so this never interrupts an escape sequence.
       while True:
         r, _, _ = select.select([self.fd], [], [],
-                                0 if (open_pending_list and self.allow_remote_open) else 0.2)
+                                0 if ((open_pending_list or edit_pending_list or switch_pending_list) and self.allow_remote_open) else 0.2)
         if r:
           break
         if open_pending_list and self.allow_remote_open:
           return km.map['open'][0]   # synthesize C-x C-f to drain the queue
+        if (edit_pending_list or switch_pending_list) and self.allow_remote_open:
+          return REMOTE_EDIT_KEY     # synthesize the remote-edit drain key
         if self.idle_callback:       # select timed out: run idle work, then re-wait
           try:
             self.idle_callback()
@@ -3109,6 +3331,7 @@ def main(vs, args_in):
 
   try: 
     e = editor(v, args.japanese)
+    e.vs = vs  # enable file-open event logging (vs is None on desktop CPython)
     # Register the editor for remote control so the pem_open command can open
     # files in this already-running instance (app_list['obj']). vs is None on
     # desktop CPython, where the pem_client TCP server provides the same

@@ -306,6 +306,11 @@ class Vscreen:
     # Matches displayapi.c font_size 0: 8×16 cell → 50×15 on the 400×240 screen.
     return (CANVAS_W // 8, CANVAS_H // 16)
 
+  def get_console_log(self, num_lines):
+    # The emulator streams terminal output to the browser and keeps no
+    # Python-side scrollback, so there is nothing to read back here.
+    return ''
+
   @property
   def suspend_inactive_screen(self): return False
   @suspend_inactive_screen.setter
@@ -323,6 +328,18 @@ class Vscreen:
 
   def unsubscribe_callback(self):
     self.callback(None)
+
+  # ── system shortcuts (Slider + key) ──
+  # The emulator has no slider-modifier input path, so these are no-ops kept for
+  # API parity with the device firmware.
+  def register_shortcut(self, bit, callback):
+    pass
+
+  def unregister_shortcut(self, bit):
+    pass
+
+  def clear_shortcuts(self):
+    pass
 
   def finished(self):
     # Presentation is driven once per frame by the runner; nothing to do here.
@@ -355,6 +372,11 @@ class VscreenStream:
     return 0
 
   def register_module(self, obj): pass
+
+  def record_event(self, content):
+    # No SD card in the emulator; surface events on the console instead.
+    print("[elog] %s" % content, file=sys.stderr)
+    return True
 
   def __enter__(self): return self
   def __exit__(self, *a): pass

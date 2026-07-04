@@ -42,7 +42,9 @@ def _file_size(path):
 
 def grep_path(pattern, path=".", recursive=False, show_line_numbers=False,
               ignore_case=False, list_files_only=False, includes=None,
-              max_bytes=None, out=None, regex=True, invert=False):
+              max_bytes=None, out=None, regex=True, invert=False,
+              after=0, before=0, count_only=False, max_count=None,
+              no_filename=False, stdin_text=None):
   if out is None:
     out = sys.stdout
   if includes is None:
@@ -84,32 +86,78 @@ def grep_path(pattern, path=".", recursive=False, show_line_numbers=False,
         return False
     return True
 
+  def emit(fp, ln, s, is_match):
+    # Match lines use ':' separators, context lines '-' (like real grep).
+    # fp is None for piped stdin, which carries no filename to prefix.
+    sep = ":" if is_match else "-"
+    if no_filename or fp is None:
+      if show_line_numbers:
+        out.write("{}{} {}\n".format(ln, sep, s))
+      else:
+        out.write(s + "\n")
+    elif show_line_numbers:
+      out.write("{}{}{}{}{}{} {}\n".format(el.set_font_color(1), fp, el.reset_font_color(), sep, ln, sep, s))
+    else:
+      out.write("{}{}{}{} {}\n".format(el.set_font_color(1), fp, el.reset_font_color(), sep, s))
+
+  # Scan an iterable of lines. fp is the display name for output prefixes, or
+  # None for piped stdin (no filename shown). Used for both files and stdin.
+  def scan_lines(fp, line_source):
+    matched_this_file = False
+    count = 0
+    before_buf = []   # (ln, text) of the last `before` lines not yet printed
+    after_left = 0    # context lines still owed after the last match
+    last_printed = 0  # line number of the last written line (for '--' gaps)
+    ln = 0
+    for line in line_source:
+      ln += 1
+      s = line.rstrip("\n")
+      hit = bool(_match_line(s, pat, ignore_case, use_regex))
+      if invert:
+        hit = not hit
+      if hit and (max_count is None or count < max_count):
+        count += 1
+        matched_this_file = True
+        if list_files_only:
+          out.write((fp if fp is not None else "(standard input)") + "\n")
+          return True
+        if not count_only:
+          # '--' between non-adjacent match groups when context is on.
+          first_ln = before_buf[0][0] if before_buf else ln
+          if (after or before) and last_printed and first_ln > last_printed + 1:
+            out.write("--\n")
+          for bln, bs in before_buf:
+            emit(fp, bln, bs, False)
+          before_buf = []
+          emit(fp, ln, s, True)
+          last_printed = ln
+          after_left = after
+      elif after_left > 0 and not count_only:
+        emit(fp, ln, s, False)
+        last_printed = ln
+        after_left -= 1
+      elif before > 0 and not count_only:
+        before_buf.append((ln, s))
+        if len(before_buf) > before:
+          before_buf.pop(0)
+      # -m: once the cap is hit and trailing context is done, stop reading.
+      if max_count is not None and count >= max_count and after_left == 0:
+        break
+    if count_only:
+      if no_filename or fp is None:
+        out.write("{}\n".format(count))
+      else:
+        out.write("{}{}{}: {}\n".format(el.set_font_color(1), fp, el.reset_font_color(), count))
+    return matched_this_file
+
   def scan_file(fp):
     if not allowed_file(fp):
       return False
-    #print(fp)
-    matched_this_file = False
     try:
       with open(fp, "r") as f:
-        ln = 0
-        for line in f:
-          ln += 1
-          s = line.rstrip("\n")
-          hit = bool(_match_line(s, pat, ignore_case, use_regex))
-          if invert:
-            hit = not hit
-          if hit:
-            matched_this_file = True
-            if list_files_only:
-              out.write(fp + "\n")
-              return True
-            if show_line_numbers:
-              out.write("{}{}{}:{}: {}\n".format(el.set_font_color(1), fp, el.reset_font_color(), ln, s))
-            else:
-              out.write("{}{}{}: {}\n".format(el.set_font_color(1), fp, el.reset_font_color(), s))
+        return scan_lines(fp, f)
     except Exception:
       return False
-    return matched_this_file
 
   def walk(p):
     if _is_dir(p):
@@ -122,6 +170,13 @@ def grep_path(pattern, path=".", recursive=False, show_line_numbers=False,
     else:
       scan_file(p)
 
+  if stdin_text is not None:
+    try:
+      scan_lines(None, iter(stdin_text.splitlines()))
+    except Exception:
+      pass
+    return
+
   walk(path)
 
 def build_parser():
@@ -129,7 +184,7 @@ def build_parser():
     description="Simple grep implementation for MicroPython"
   )
   parser.add_argument("pattern", help="Search pattern")
-  parser.add_argument("path", nargs="?", default=".", help="File or directory to search")
+  parser.add_argument("path", nargs="*", help="Files or directories to search (default: .)")
   parser.add_argument("-r", "-R", "--recursive", action="store_true", help="Recursive search")
   # Pattern is a regex by default (Linux-like). -E is accepted as an alias and
   # -e is kept for backward compatibility; both are no-ops now. Use -F for literal.
@@ -139,6 +194,20 @@ def build_parser():
   parser.add_argument("-n", action="store_true", dest="show_line_numbers", help="Show line numbers")
   parser.add_argument("-i", "--ignore-case", action="store_true", dest="ignore_case", help="Ignore case")
   parser.add_argument("-l", action="store_true", dest="list_files_only", help="Show filenames only")
+  # Context lines. -h is taken by help on the device's argparse, so the
+  # filename-suppress option is long-form only (--no-filename).
+  parser.add_argument("-A", "--after-context", type=int, default=0, dest="after",
+                      metavar="N", help="Show N lines after each match")
+  parser.add_argument("-B", "--before-context", type=int, default=0, dest="before",
+                      metavar="N", help="Show N lines before each match")
+  parser.add_argument("-C", "--context", type=int, default=0, dest="context",
+                      metavar="N", help="Show N lines before and after each match")
+  parser.add_argument("-c", "--count", action="store_true", dest="count_only",
+                      help="Print only a count of matching lines per file")
+  parser.add_argument("-m", "--max-count", type=int, default=None, dest="max_count",
+                      metavar="N", help="Stop after N matching lines per file")
+  parser.add_argument("--no-filename", action="store_true", dest="no_filename",
+                      help="Suppress the filename prefix on output lines")
   parser.add_argument(
     "--include",
     default=None,
@@ -161,18 +230,57 @@ def main(vs, argv):
   except SystemExit:
     return 2
 
-  grep_path(
-    args.pattern,
-    path=args.path,
-    recursive=args.recursive,
-    show_line_numbers=args.show_line_numbers,
-    ignore_case=args.ignore_case,
-    list_files_only=args.list_files_only,
-    includes=args.include,
-    max_bytes=args.max_bytes,
-    out=vs,
-    regex=not args.fixed,
-    invert=args.invert
-  )
+  # -C sets both sides; explicit -A/-B may extend one side further.
+  after = args.after or 0
+  before = args.before or 0
+  if args.context:
+    after = max(after, args.context)
+    before = max(before, args.context)
+
+  # No path (or an explicit '-') plus piped stdin from the shell: search that
+  # instead of the filesystem. Without piped input, keep the Linux-unlike but
+  # long-standing default of searching the cwd so interactive `grep pattern`
+  # behaves as before.
+  paths = args.path
+  if not paths or paths == ["-"]:
+    import pstdin
+    if pstdin.has():
+      grep_path(
+        args.pattern,
+        show_line_numbers=args.show_line_numbers,
+        ignore_case=args.ignore_case,
+        list_files_only=args.list_files_only,
+        out=vs,
+        regex=not args.fixed,
+        invert=args.invert,
+        after=after,
+        before=before,
+        count_only=args.count_only,
+        max_count=args.max_count,
+        no_filename=args.no_filename,
+        stdin_text=pstdin.take()
+      )
+      return 0
+
+  paths = paths if paths else ["."]
+  for p in paths:
+    grep_path(
+      args.pattern,
+      path=p,
+      recursive=args.recursive,
+      show_line_numbers=args.show_line_numbers,
+      ignore_case=args.ignore_case,
+      list_files_only=args.list_files_only,
+      includes=args.include,
+      max_bytes=args.max_bytes,
+      out=vs,
+      regex=not args.fixed,
+      invert=args.invert,
+      after=after,
+      before=before,
+      count_only=args.count_only,
+      max_count=args.max_count,
+      no_filename=args.no_filename
+    )
   return 0
 

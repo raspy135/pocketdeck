@@ -167,6 +167,8 @@ class analog_clock:
     self.kt.org_second = self.kt.second
     self.kt.stat = KT_RUNNING
     self.page = 'timer'
+    if self.vs is not None:
+      self.vs.record_event('set_timer %d min' % minute)
 
   def wavplay_alarm(self):
     self.sampler.play(0)
@@ -327,6 +329,8 @@ class analog_clock:
         kt.second = 0
         kt.stat = KT_ALARM
         self.wavplay_alarm()
+        self.vs.record_event('Timer triggered')
+        
     if not self.v.active:
       return
           

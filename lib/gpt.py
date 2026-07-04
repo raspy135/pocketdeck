@@ -33,6 +33,8 @@ import pngwriter
 import setuni
 import auto_connect
 import gpt_l as gpt
+import gpt_tools  # shared tool schema + transport-independent executors
+import ai_improve  # self-evolving long-term memory (/improve, update_memory)
 
 # Optional Japanese IME (romaji -> kana -> kanji), shared with pem. If the
 # module is unavailable the conversation prompt simply stays ASCII-only.
@@ -66,55 +68,73 @@ def load_app_list():
   return result
 
 
-class CaptureStream(io.IOBase):
-  _MAX = 50000
+# ----------------------------------------------------------------------------
+# Skills — one markdown file per named procedure. Users invoke a skill from the
+# prompt with a slash, Claude-CLI style: /<skill-name>. User skills live in
+# /sd/Documents/skills (they win on a name clash); read-only system skills that
+# ship with the device live in /sd/lib/skills.
+# ----------------------------------------------------------------------------
 
-  def __init__(self):
-    self._parts = []
-    self._total = 0
-
-  def write(self, data):
-    if isinstance(data, (bytes, bytearray)):
-      data = data.decode('utf-8', 'replace')
-    remaining = self._MAX - self._total
-    if remaining <= 0:
-      return
-    if len(data) > remaining:
-      data = data[:remaining]
-    self._parts.append(data)
-    self._total += len(data)
-
-  def read(self, n=1):
-    return ''
-
-  def getvalue(self):
-    return ''.join(self._parts)
+SKILL_DIRS = ('/sd/Documents/skills', '/sd/lib/skills')
 
 
-def _parse_cmd_string(text):
-  parts = []
-  cur = ''
-  in_quote = False
-  quote = ''
-  for ch in text:
-    if in_quote:
-      if ch == quote:
-        in_quote = False
-      else:
-        cur += ch
-    else:
-      if ch in ('"', "'"):
-        in_quote = True
-        quote = ch
-      elif ch == ' ':
-        if cur:
-          parts.append(cur)
-          cur = ''
-      else:
-        cur += ch
-  if cur:
-    parts.append(cur)
-  return parts
+def _skill_key(name):
+  # Normalize a skill name / filename to the token typed after the slash, so
+  # "Morning Ritual.md", "morning-ritual" and "morning_ritual" all match.
+  name = name.strip().lower()
+  if name.endswith('.md'):
+    name = name[:-3]
+  return name.replace('-', '_').replace(' ', '_')
+
+
+def list_skills():
+  """All skills as (token, path, source); user skills first, de-duped by token."""
+  out = []
+  seen = {}
+  for source, d in (('user', SKILL_DIRS[0]), ('system', SKILL_DIRS[1])):
+    try:
+      files = sorted(os.listdir(d))
+    except OSError:
+      continue
+    for f in files:
+      if not f.lower().endswith('.md'):
+        continue
+      token = _skill_key(f)
+      if token in seen:
+        continue
+      seen[token] = True
+      out.append((token, d + '/' + f, source))
+  return out
+
+
+def find_skill(name):
+  """Resolve a typed name to (path, content), or None if no skill matches."""
+  key = _skill_key(name)
+  for token, path, _source in list_skills():
+    if token == key:
+      try:
+        with open(path, 'r') as fh:
+          return (path, fh.read())
+      except OSError:
+        return None
+  return None
+
+
+def compose_skill_message(path, content, arg):
+  """Turn a skill file into a user message that asks the agent to carry it out."""
+  head = "The user invoked the skill `%s`." % path
+  if arg:
+    head += " Extra input for this run: %s" % arg
+  return (head + " Read it and carry it out step by step, following its "
+          "instructions exactly.\n\n----- skill: %s -----\n%s\n----- end skill -----"
+          % (path, content))
+
+
+# CaptureStream / _parse_cmd_string moved to pdeck_utils (shared with the
+# device shell pipeline). Re-exported here for any callers that still
+# reference them via this module.
+CaptureStream = pu.CaptureStream
+_parse_cmd_string = pu.parse_cmd_string
 
 
 def build_agent_instructions(app_list, my_screen=None):
@@ -133,9 +153,27 @@ def build_agent_instructions(app_list, my_screen=None):
     "Use command_with_return to look up information too (e.g. list files with "
     "'ls /sd/Documents/word*', read a file with 'cat /path', search with grep).\n "
     "BE TOKEN-EFFICIENT WITH TOOL CALLS. "
-    "Pocket Deck is not Linux. Read README.md and use only the options "
+    "Pocket Deck is not Linux, you cannot use pipe '|'. Read README.md and use only the options "
     "that is mentioned in the manual."
     "cat, grep, ls, head, tail are great tools to reduce funciton calls. See README.md for full command list.\n"
+    "The device keeps an activity log under /sd/elog/, one markdown file per day "
+    "named YYYY-MM-DD.md, each line an event: app launches, file opens/saves, and "
+    "shell commands the user ran. Read the current day's file (its name is today's "
+    "date; 'ls /sd/elog' if unsure, then cat it) to see what the user has recently "
+    "been doing, resume their work, or answer questions about recent activity.\n"
+    "The user keeps SKILLS at /sd/Documents/skills/ — one markdown file per "
+    "skill: a named, reusable procedure you can perform (a routine with steps "
+    "and timings, a recurring workflow like a morning writing setup, a document "
+    "format to follow). When the user asks for something by name ('do my morning "
+    "ritual', 'make the weekly report'), or asks what you can do, 'ls "
+    "/sd/Documents/skills' and cat the matching file, then follow its "
+    "instructions step by step. When the user teaches you a repeatable procedure "
+    "worth keeping, offer to save it there as a new skill file (the folder may "
+    "not exist yet — 'mkdir /sd/Documents/skills' first if needed).\n"
+    "The device also ships read-only SYSTEM skills at /sd/lib/skills/. Before you "
+    "write a graphical app (dashboard, chart, meter), cat "
+    "/sd/lib/skills/dashboard_design.md and follow it; 'ls /sd/lib/skills' for the "
+    "rest.\n"
     "You can see and drive other apps running on the device. Use list_running_apps "
     "to see which app is on which screen. Use switch_screen to bring a screen to "
     "the foreground. IMPORTANT: screen numbers in these tools are 0-based and match "
@@ -149,6 +187,9 @@ def build_agent_instructions(app_list, my_screen=None):
     "special keys (Up=\\x1b[A, Down=\\x1b[B, Right=\\x1b[C, Left=\\x1b[D, Esc=\\x1b, "
     "Backspace=\\x08, Ctrl-X=\\x18). After acting, capture_screen again to confirm "
     "the result before continuing.\n"
+    "To read TEXT a command-line app printed (e.g. to diagnose an error the user "
+    "asks about), prefer read_console_log over a screenshot — it returns the "
+    "recent console text directly and cheaply.\n"
   )
   if my_screen is not None:
     text += ("\nIMPORTANT: your own screen — where your typed answers are shown — "
@@ -169,142 +210,152 @@ def build_agent_instructions(app_list, my_screen=None):
   return text
 
 
-def build_tools(app_list, agent=False, web_search=True):
-  """Tool schemas for the Responses API (flat function format). Function tools
-  are only included in agent mode; plain mode keeps just web_search."""
-  tools = []
-  if web_search:
-    tools.append({"type": "web_search"})
-  if not agent:
-    return tools
+# build_tools moved to gpt_tools (shared, single source of truth). Re-exported
+# here so existing callers (and gpt_c.build_tools_c) keep using gpt.build_tools.
+build_tools = gpt_tools.build_tools
 
-  tools.append({
-    "type": "function",
-    "name": "command_with_return",
-    "description": "Run a device command (or any installed module) and return its captured output. This is your primary tool for TESTING AND VERIFYING CODE: after you write a script with write_file, run it here by name and read the output to confirm it works, see errors, and iterate. A runnable script/app is a module exposing main(vs, args); invoke it by its name plus arguments, e.g. 'temp_foo arg1' for /sd/py/temp_foo.py, or any existing app/command. IMPORTANT: if you EDIT a script and run it again, prefix the command with 'r ' to reload it (e.g. 'r temp_foo arg1') — without 'r' the previous, cached version runs instead of your new code. Built-in commands include: ls (glob patterns like 'word*'; 'ls -r path' lists recursively), cat (read file), head, tail, rm, mv, cp, mkdir, rmdir, grep (search in files), ping, dic (dictionary lookup), curl (fetch web content), and 'analog_clock_set_timer <minutes>'. grep behaves like Linux grep: the PATTERN is a regex by default (no -e needed), with -i ignore-case, -n line numbers, -r recursive, -l filenames only, -v invert, -F literal/fixed-string match, and --include .py,.md to filter by extension; e.g. 'grep -rn \"def .*main\" /sd/py'. No shell pipes ('|') — this is not Linux, so do NOT chain commands or use redirects, backticks, &&, or subshells; run one command at a time. See README.md for command usage.",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "command": {
-          "type": "string",
-          "description": "Command with arguments, e.g. 'ls /sd/Documents' or 'ls /sd/Documents/word*' or 'cat /sd/notes.txt'"
-        }
-      },
-      "required": ["command"]
-    }
-  })
 
-  tools.append({
-    "type": "function",
-    "name": "write_file",
-    "description": "Write text content to a file on the device filesystem. Creates or overwrites the file. For long file, making a patch Micropython code is preferred. The original file will be backed up under /sd/backup, so you don't need to take a backup file",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "path": {
-          "type": "string",
-          "description": "Absolute file path to write to, e.g. '/sd/data/puzzle.txt'"
-        },
-        "content": {
-          "type": "string",
-          "description": "Text content to write to the file"
-        }
-      },
-      "required": ["path", "content"]
-    }
-  })
+# ----------------------------------------------------------------------------
+# Model registry (/config/gpt.json)
+# ----------------------------------------------------------------------------
+# An Ollama-style list of named model entries. Each entry selects an API
+# ('responses' -> this module's Responses client, 'chat' -> gpt_c's Chat
+# Completions client) plus its base_url and model id. -m and the /model command
+# pick an entry by name. The file is created with OpenAI defaults on first run.
+# The API key stays separate in /config/openai_api_key; local endpoints need no
+# key.
 
-  if app_list:
-    tools.append({
-      "type": "function",
-      "name": "launch_app",
-      "description": "Launch a Pocket Deck application by its exact name, optionally passing arguments such as a file path to open",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "app_name": {
-            "type": "string",
-            "description": "The exact name of the app to launch as listed"
-          },
-          "args": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "Optional extra arguments for the app, e.g. a file path like '/sd/test.txt'"
-          }
-        },
-        "required": ["app_name"]
-      }
-    })
+OPENAI_BASE = "https://api.openai.com/v1"
 
-  tools.append({
-    "type": "function",
-    "name": "list_running_apps",
-    "description": "List the apps currently running and which screen number each is on. Use this before switching, capturing, or driving an app.",
-    "parameters": {"type": "object", "properties": {}, "required": []}
-  })
+DEFAULT_REGISTRY_MODELS = [
+  {"name": "gpt-5.4", "api": "responses", "model": "gpt-5.4"},
+  {"name": "gpt-5.5", "api": "responses", "model": "gpt-5.5"},
+  {"name": "gpt-5.4-mini", "api": "responses", "model": "gpt-5.4-mini"},
+]
+DEFAULT_REGISTRY_DEFAULT = "gpt-5.4"
 
-  tools.append({
-    "type": "function",
-    "name": "switch_screen",
-    "description": "Bring a screen to the foreground so it becomes active. Required before capturing or sending keys to that screen. Note the screen number in the function is 0-based, however, screen number shown in GUI is 1-based. So if the user wants to switch to screen 2, send 1 as an argument.",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "screen": {"type": "integer", "description": "Screen number to switch to (0-9)"}
-      },
-      "required": ["screen"]
-    }
-  })
 
-  tools.append({
-    "type": "function",
-    "name": "capture_screen",
-    "description": "Take a screenshot of a screen and return it to you as an image so you can read what is on it. If screen is given, switches to it first.",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "screen": {"type": "integer", "description": "Optional screen number to switch to and capture. If omitted, captures the current foreground screen."}
-      },
-      "required": []
-    }
-  })
+def config_path():
+  if _IS_PC:
+    d = os.path.expanduser("~/.config/gpt")
+    try:
+      os.makedirs(d, exist_ok=True)
+    except Exception:
+      pass
+    return d + "/gpt.json"
+  return "/config/gpt.json"
 
-  tools.append({
-    "type": "function",
-    "name": "launch_command_shell",
-    "description": "Launch a new command-line shell on a given screen so you can drive it with switch_screen / send_keys / capture_screen (e.g. to run interactive commands that command_with_return cannot). The screen number is 0-based and matches list_running_apps (screen 0 is the Python REPL). Valid screens are 2-9; the screen must be free (nothing already running there). Returns whether the shell was started.",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "screen": {"type": "integer", "description": "0-based screen number to start the shell on (2-9, must be free)"}
-      },
-      "required": ["screen"]
-    }
-  })
 
-  tools.append({
-    "type": "function",
-    "name": "send_keys",
-    "description": "Type text / keystrokes into the foreground app. Use escape sequences for special keys (arrows \\x1b[A/B/C/D, Esc \\x1b, Backspace \\x08, Ctrl-X \\x18).",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "text": {"type": "string", "description": "Characters to inject as keyboard input"},
-        "screen": {"type": "integer", "description": "Optional screen number to switch to before typing (input only reaches the foreground app)"},
-        "enter": {"type": "boolean", "description": "If true, press Enter (carriage return) after the text"}
-      },
-      "required": ["text"]
-    }
-  })
+def _format_registry(models, default):
+  # Hand-formatted (not ujson.dump) so the on-device file stays one entry per
+  # line and is easy to read and edit.
+  lines = ['{', '  "default": "%s",' % default, '  "models": [']
+  for i, m in enumerate(models):
+    parts = ['"name": "%s"' % m.get("name", ""),
+             '"api": "%s"' % m.get("api", "responses")]
+    if m.get("base_url"):
+      parts.append('"base_url": "%s"' % m["base_url"])
+    parts.append('"model": "%s"' % m.get("model", m.get("name", "")))
+    comma = "," if i < len(models) - 1 else ""
+    lines.append("    {" + ", ".join(parts) + "}" + comma)
+  lines.append("  ]")
+  lines.append("}")
+  return "\n".join(lines) + "\n"
 
-  return tools
+
+def load_registry(vs=None):
+  """Return {'default': name, 'models': [entry, ...]}. Creates the file with
+  OpenAI defaults on first run. A malformed file falls back to the built-in
+  defaults untouched."""
+  default_reg = {"default": DEFAULT_REGISTRY_DEFAULT,
+                 "models": list(DEFAULT_REGISTRY_MODELS)}
+  path = config_path()
+  try:
+    with open(path, "r") as f:
+      data = ujson.load(f)
+    if isinstance(data, dict) and isinstance(data.get("models"), list) and data["models"]:
+      return data
+    return default_reg
+  except OSError:
+    pass  # missing -> create below with defaults
+  except Exception:
+    return default_reg  # malformed -> use defaults without clobbering the file
+  try:
+    with open(path, "w") as f:
+      f.write(_format_registry(DEFAULT_REGISTRY_MODELS, DEFAULT_REGISTRY_DEFAULT))
+    if vs is not None:
+      print("Created model config %s (edit to add models/endpoints)." % path, file=vs)
+  except Exception:
+    pass
+  return default_reg
+
+
+def _normalize_entry(entry):
+  """Fill defaults so callers can rely on every field being present."""
+  name = entry.get("name") or entry.get("model") or DEFAULT_REGISTRY_DEFAULT
+  api = (entry.get("api") or "responses").lower()
+  if api in ("completions", "chat_completions", "openai_chat"):
+    api = "chat"
+  return {"name": name, "api": api,
+          "base_url": entry.get("base_url") or OPENAI_BASE,
+          "model": entry.get("model") or name,
+          "effort": entry.get("effort")}
+
+
+def resolve_entry(registry, name):
+  """Resolve a model name to a normalized entry. None -> the registry default;
+  a registered name -> that entry; a legacy shortcut (f/m/h...) or any other
+  string -> an ad-hoc OpenAI Responses entry with that model id."""
+  models = registry.get("models") or []
+  if not name:
+    name = registry.get("default") or (models[0].get("name") if models else DEFAULT_REGISTRY_DEFAULT)
+  for m in models:
+    if isinstance(m, dict) and m.get("name") == name:
+      return _normalize_entry(m)
+  # Not registered: a legacy shortcut or raw model id -> ad-hoc Responses entry.
+  return _normalize_entry({"name": name, "api": "responses", "model": resolve_model(name)})
+
+
+def make_client(entry, vs):
+  """Build the API client for a normalized registry entry: the Responses client
+  (this module) for api 'responses', else gpt_c's Chat Completions client."""
+  if entry["api"] == "chat":
+    import gpt_c  # lazy: gpt_c imports this module at top level
+    obj = gpt_c.chatgpt_chat(vs, base_url=entry["base_url"])
+  else:
+    obj = chatgpt_agent(vs)
+    obj.url = entry["base_url"].rstrip("/") + "/responses"
+  obj.base_url = entry["base_url"]  # remembered so /model can detect endpoint changes
+  return obj
+
+
+def init_client(entry, vs, plan_mode):
+  """Build a client for `entry`, load the API key and set the execution mode.
+  OpenAI endpoints require a key (returns None if missing); other endpoints
+  (Ollama, local servers) proceed keyless."""
+  obj = make_client(entry, vs)
+  is_openai = entry["base_url"].rstrip("/") == OPENAI_BASE
+  if is_openai:
+    if not obj.read_api_key():
+      return None
+  else:
+    obj.api_key = gpt.read_api_key() or ""  # optional for local endpoints
+  obj.mode = 'plan' if plan_mode else 'auto'
+  return obj
 
 
 # ----------------------------------------------------------------------------
 # Agent client
 # ----------------------------------------------------------------------------
 
-class chatgpt_agent(gpt.chatgpt_util):
+class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
+  # Capability flags + hooks the shared driver in main() reads so it can drive
+  # either client uniformly. gpt_c.chatgpt_chat overrides these for Chat
+  # Completions (no server-side effort, no built-in web_search, can compact).
+  API = "responses"
+  USE_EFFORT = True
+  USE_WEB_SEARCH = True
+  CAN_COMPACT = False
   def __init__(self, vs):
     super().__init__(vs)
     self.app_list = []
@@ -348,6 +399,34 @@ class chatgpt_agent(gpt.chatgpt_util):
       _thread.start_new_thread(_worker, ())
     except Exception:
       pass
+
+  # --- uniform client interface (shared driver in main() calls these) --------
+
+  def reset_context(self):
+    self.prev_response_id = None
+
+  def build_tools_for(self, app_list, agent):
+    return build_tools(app_list, agent=agent, web_search=True)
+
+  def resume_from(self, rid, vs=None, silent=False):
+    """Seed server-side context from a saved session id ('last' = most recent).
+    Returns the id resumed from, or None."""
+    resumed = gpt.last_session_id() if rid == 'last' else rid
+    self.prev_response_id = resumed
+    if not silent and vs is not None:
+      if resumed:
+        print("Resuming session %s" % resumed[:24], file=vs)
+      else:
+        print("No previous session to resume; starting new.", file=vs)
+    return resumed
+
+  def persist_session(self, turn_message, resumed_from):
+    """Save the new response id so a later --resume-id can continue this chat.
+    A new id distinct from what we resumed from means the turn produced a fresh
+    response; if they match (or it's None) the turn failed, so skip."""
+    new_id = self.prev_response_id
+    if new_id and new_id != resumed_from:
+      gpt.save_session(new_id, turn_message, replace_id=resumed_from)
 
   # --- request payload -------------------------------------------------------
 
@@ -556,105 +635,8 @@ class chatgpt_agent(gpt.chatgpt_util):
       return False, ""
     return False, r
 
-  # --- tool implementations (ported from gpt_rt.py, screen/file only) --------
-
-  def execute_function_call(self, call_id, name, arguments):
-    if name == "command_with_return":
-      return self.execute_command_with_return(arguments)
-    if name == "write_file":
-      return self.execute_write_file(arguments)
-    if name == "list_running_apps":
-      return self.execute_list_running_apps(arguments)
-    if name == "switch_screen":
-      return self.execute_switch_screen(arguments)
-    if name == "capture_screen":
-      return self.execute_capture_screen(arguments)
-    if name == "send_keys":
-      return self.execute_send_keys(arguments)
-    if name == "launch_command_shell":
-      return self.execute_launch_command_shell(arguments)
-    if name == "launch_app":
-      return self.execute_launch_app(arguments)
-    return "Unknown function: %s" % name
-
-  def execute_command_with_return(self, arguments):
-    try:
-      args = ujson.loads(arguments) if arguments else {}
-    except:
-      return "Error: invalid arguments"
-    command = args.get("command", "").strip()
-    if not command:
-      return "Error: no command specified"
-    parts = _parse_cmd_string(command)
-    if not parts:
-      return "Error: empty command"
-    # 'r' prefix forces a fresh re-import of the module, exactly like the device
-    # shell (pdeck_utils.process_prefix). Essential after editing a script you
-    # already ran, since MicroPython otherwise reuses the cached module.
-    if parts[0] == 'r' and len(parts) > 1:
-      parts.pop(0)
-      if parts[0] in sys.modules:
-        del sys.modules[parts[0]]
-    modname = parts[0]
-    # Refuse to launch the assistant from inside itself: a nested agent session
-    # would re-enter the whole loop (networking + JSON) on the already-deep
-    # 8KB command stack and overflow.
-    if modname in ('gpt', 'gpt_l', 'gptn'):
-      return "Error: refusing to run '%s' recursively from inside the assistant." % modname
-    cap = CaptureStream()
-    try:
-      exec("import %s" % modname, {})
-      sys.modules[modname].main(cap, parts)
-    except BaseException as e:
-      # Catch BaseException, not just Exception: a module that calls sys.exit()/
-      # quit() (SystemExit) or raises KeyboardInterrupt would otherwise escape
-      # and kill gptn. Capture the full traceback so the model can debug it.
-      cap.write("\nError running '%s':\n" % modname)
-      sys.print_exception(e, cap)
-    result = cap.getvalue()
-    if not result:
-      return "(no output)"
-    if cap._total >= CaptureStream._MAX:
-      result += "\n...(truncated)"
-    return result
-
-  def execute_write_file(self, arguments):
-    try:
-      args = ujson.loads(arguments) if arguments else {}
-    except:
-      return "Error: invalid arguments"
-    path = args.get("path", "").strip()
-    content = args.get("content", "")
-    if not path:
-      return "Error: no path specified"
-    try:
-      backup_msg = ""
-      backup_path = None
-      try:
-        with open(path, "r") as f:
-          existing = f.read()
-        t = time.gmtime(time.time() + pu.timezone * 60 * 15)
-        filename = path.split("/")[-1]
-        backup_name = "%s_%02d%02d_%02d%02d" % (filename, t[1], t[2], t[3], t[4])
-        try:
-          os.mkdir("/sd/backup")
-        except:
-          pass
-        backup_path = "/sd/backup/" + backup_name
-        with open(backup_path, "w") as f:
-          f.write(existing)
-        backup_msg = " (backup: %s)" % backup_path
-      except OSError:
-        backup_path = None  # no existing file: this is a fresh create, not an update
-      with open(path, "w") as f:
-        f.write(content)
-      # Show the user what changed: a diff against the backup for an update,
-      # or the content itself for a brand-new file. (The model still gets the
-      # short summary below as the tool result.)
-      self._show_write(path, backup_path, content)
-      return "Written %d bytes to %s%s" % (len(content), path, backup_msg)
-    except Exception as e:
-      return "Error: %s" % str(e)
+  # --- tool implementations: the transport-independent ones come from
+  # gpt_tools.ToolExecBase. Only _show_write (needs a screen) is overridden here.
 
   def _show_write(self, path, backup_path, content):
     """Display the effect of a write_file call. For an update (backup_path set),
@@ -670,148 +652,6 @@ class chatgpt_agent(gpt.chatgpt_util):
         print("(diff unavailable: %s)" % e, file=vs)
     print("%s[New file]%s %s" % (el.bold(), el.bold_off(), path), file=vs)
     print(content, file=vs)
-
-  def execute_list_running_apps(self, arguments):
-    lines = ["screen 0: Python REPL"]
-    try:
-      apps_scnums = []
-      for key in pu.app_list:
-        app = pu.app_list[key]
-        name = app.get('name', '?') if isinstance(app, dict) else str(app)
-        lines.append("screen %s: %s" % (key, name))
-        apps_scnums.append(key)
-      for i in range(1, 10):
-        if pdeck.cmd_exists(i) and i not in apps_scnums:
-          lines.append("screen %d: command line shell" % i)
-      lines.sort()
-    except Exception as e:
-      return "Error: %s" % str(e)
-    if not lines:
-      return "(no running apps)"
-    return "\n".join(lines)
-
-  def execute_switch_screen(self, arguments):
-    try:
-      args = ujson.loads(arguments) if arguments else {}
-      scnum = int(args.get("screen"))
-    except:
-      return "Error: invalid arguments"
-    pdeck.change_screen(scnum)
-    pdeck.show_screen_num()
-    return "Switched to screen %d" % scnum
-
-  def execute_capture_screen(self, arguments):
-    try:
-      args = ujson.loads(arguments) if arguments else {}
-    except:
-      return "Error: invalid arguments"
-    scnum = args.get("screen", None)
-    if scnum is not None:
-      try:
-        scnum = int(scnum)
-      except:
-        return "Error: invalid screen"
-      pdeck.change_screen(scnum)
-      pdeck.show_screen_num()
-      # Give the target one frame to render before capture.
-      pdeck.delay_tick(40)
-    target = "screen %d" % scnum if scnum is not None else "the current screen"
-    if self.capture_buf is None:
-      # 400x240 1-bit = 50 bytes/row * 240 rows.
-      self.capture_buf = bytearray(12000)
-    try:
-      v = pdeck.vscreen()
-      if not v.take_screenshot(0, 0, 400, 240, self.capture_buf):
-        return "Error: screenshot timed out (display busy or screen not active)"
-      png = pngwriter.encode_mono_xbm(self.capture_buf, 400, 240)
-      b64 = ubinascii.b2a_base64(png).decode().strip()
-    except Exception as e:
-      return "Error capturing screen: %s" % str(e)
-    # Fed back as a user image on the next request.
-    self.pending_image = b64
-    return ("Captured %s. The screenshot is attached as an image; look at it and "
-            "describe what you see." % target)
-
-  def execute_send_keys(self, arguments):
-    try:
-      args = ujson.loads(arguments) if arguments else {}
-    except:
-      return "Error: invalid arguments"
-    text = args.get("text", "")
-    if args.get("enter"):
-      text += "\r"
-    if not text:
-      return "Error: no text specified"
-    scnum = args.get("screen", None)
-    if scnum is not None:
-      try:
-        pdeck.change_screen(int(scnum))
-        pdeck.delay_tick(40)
-      except:
-        return "Error: invalid screen"
-    try:
-      v = pdeck.vscreen()
-      v.send_char(text)
-    except Exception as e:
-      return "Error sending keys: %s" % str(e)
-    return "Sent %d key(s)" % len(text)
-
-  def execute_launch_command_shell(self, arguments):
-    try:
-      args = ujson.loads(arguments) if arguments else {}
-      scnum = int(args.get("screen"))
-    except:
-      return "Error: invalid arguments"
-    if pdeck.cmd_exists(scnum):
-      return "Error: screen %d is already in use" % scnum
-    try:
-      ok = pdeck.command_shell(scnum)
-    except Exception as e:
-      return "Error launching command shell: %s" % str(e)
-    if not ok:
-      return ("Error: could not launch a shell on screen %d (must be a free "
-              "screen 2-9 other than the current one)" % scnum)
-    return "Launched a command shell on screen %d" % scnum
-
-  def _search_free_screen(self, launched, scnum=2):
-    while True:
-      if not pdeck.cmd_exists(scnum) and scnum not in launched:
-        return scnum
-      scnum += 1
-      if scnum == 10:
-        return -1
-
-  def execute_launch_app(self, arguments):
-    try:
-      args = ujson.loads(arguments) if arguments else {}
-    except:
-      return "Error: invalid arguments"
-    app_name = args.get("app_name", "")
-    extra_args = args.get("args", [])
-    for item in self.app_list:
-      if not (isinstance(item, list) and len(item) == 2 and item[0] == app_name):
-        continue
-      info = item[1]
-      if not (isinstance(info, dict) and info.get('type') == 'program'):
-        continue
-      command = [list(c) for c in info.get('command', [])]
-      if extra_args and command:
-        command[0] = [command[0][0]] + extra_args
-      pref_scnum = info.get('screen_number', None)
-      launched = []
-      first = True
-      for one in command:
-        scnum = self._search_free_screen(launched, pref_scnum if pref_scnum else 2)
-        if scnum == -1:
-          break
-        launched.append(scnum)
-        if first:
-          pdeck.change_screen(scnum)
-          first = False
-        pu.launch(one, scnum)
-      pdeck.show_screen_num()
-      return "Launched %s" % app_name
-    return "App not found: %s" % app_name
 
 
 # ----------------------------------------------------------------------------
@@ -881,8 +721,7 @@ TTS_NOTE = ("Your reply will be fed to a TTS engine; optimize for text-to-speech
 
 # Auto-attached in agent mode so the model knows Pocket Deck basics.
 DEFAULT_AGENT_REFS = ["/sd/Documents/pd/README.md",
-                      "/sd/Documents/pd/gpt_output_rules.md",
-                      "/sd/Documents/pd/gpt_readme.md"]
+                      "/sd/Documents/pd/gpt_output_rules.md"]
 
 # Named role presets so users don't have to write a persona from scratch.
 # Maps name -> (role_text, wants_agent). wants_agent=True turns on the tools.
@@ -934,6 +773,8 @@ def assemble_instructions(role, tts, agent, app_list, my_screen=None):
     text += "\n\n" + TTS_NOTE
   if agent:
     text += "\n\n" + build_agent_instructions(app_list, my_screen)
+    # Fold in the self-evolving memory (learned in past sessions) in agent mode.
+    text += ai_improve.memory_block()
   return text
 
 
@@ -1184,8 +1025,9 @@ def main(vs, args_in):
   parser.add_argument('-j', '--jp', action='store_true', help='Answer in Japanese')
   parser.add_argument('-f', '--file', nargs='+', action='store', help='Attach file(s) as reference. file1 file2...')
   parser.add_argument('-i', '--image', nargs='+', action='store', help='Attach image file(s) or image url(s). img1 img2...')
-  parser.add_argument('-m', '--model', action='store', default='gpt-5.4', help='Model to use (e.g. gpt-5-mini)')
-  parser.add_argument('-e', '--effort', action='store', default='medium', help='Reasoning effort (low, medium, high)')
+  parser.add_argument('-m', '--model', action='store', default=None, help='Model to use: a name from /config/gpt.json, a shortcut (f/m/h), or a raw model id. Default: the registry default.')
+  parser.add_argument('--base-url', action='store', default=None, help='Override the endpoint base URL for this run')
+  parser.add_argument('-e', '--effort', action='store', default='medium', help='Reasoning effort (low, medium, high) - Responses models only')
   parser.add_argument('-v', '--voice', action='store_true', help='Use voice mode (STT and TTS)')
   parser.add_argument('-vt', '--voice-type', action='store', default='coral', help='Voice type for TTS')
   parser.add_argument('-r', '--role', action='store', default=None, help="Role preset 'assistant' or 'coder', a /sd/roles/<name>.txt file, or literal text. Default: assistant.")
@@ -1201,23 +1043,15 @@ def main(vs, args_in):
     print("Network is not available", file=vs)
     return
 
-  gpt_obj = chatgpt_agent(vs)
-  if not gpt_obj.read_api_key():
+  # Model registry: -m selects an entry (name/shortcut/raw id); the entry picks
+  # the API (Responses here vs Chat Completions in gpt_c), base_url and model id.
+  registry = load_registry(None if args.silent else vs)
+  entry = resolve_entry(registry, args.model)
+  if args.base_url:
+    entry = dict(entry); entry['base_url'] = args.base_url
+  gpt_obj = init_client(entry, vs, args.plan)
+  if gpt_obj is None:
     return
-  gpt_obj.mode = 'plan' if args.plan else 'auto'
-
-  # Conversation continuity across separate gpt invocations: --resume-id seeds
-  # the previous_response_id (server-side state), --resume persists the new id
-  # afterward. 'last' resolves to the most recent entry in the session list.
-  resumed_from = None
-  if args.resume_id:
-    resumed_from = gpt.last_session_id() if args.resume_id == 'last' else args.resume_id
-    gpt_obj.prev_response_id = resumed_from
-    if not args.silent:
-      if resumed_from:
-        print("Resuming session %s" % resumed_from[:24], file=vs)
-      else:
-        print("No previous session to resume; starting new.", file=vs)
 
   message = ""
   tts_response = False
@@ -1295,9 +1129,34 @@ def main(vs, args_in):
           print("Error when opening image %s" % img_path, file=vs)
           return
 
-  model = resolve_model(margs['model'] if 'model' in margs else args.model)
+  # An inline [[-m ...]] directive can pick a different registry entry; if it
+  # changes the API/endpoint, rebuild the client before the first turn.
+  if 'model' in margs:
+    new_entry = resolve_entry(registry, margs['model'])
+    if args.base_url:
+      new_entry = dict(new_entry); new_entry['base_url'] = args.base_url
+    if (new_entry['api'] != gpt_obj.API or
+        new_entry['base_url'].rstrip('/') != gpt_obj.base_url.rstrip('/')):
+      rebuilt = init_client(new_entry, vs, args.plan)
+      if rebuilt is None:
+        return
+      rebuilt.jp_font_loaded = gpt_obj.jp_font_loaded
+      gpt_obj = rebuilt
+    entry = new_entry
+  model = entry['model']
 
+  # Conversation continuity across separate gpt invocations: --resume-id seeds
+  # the prior context, --resume persists it afterward. 'last' resolves to the
+  # most recent saved session. Both clients implement resume_from/persist_session.
+  resumed_from = None
+  if args.resume_id:
+    resumed_from = gpt_obj.resume_from(args.resume_id, vs, args.silent)
+
+  # Reasoning effort applies to Responses models only; a registry entry may set
+  # a default that a command-line -e (or inline directive) still overrides.
   effort = margs['effort'] if 'effort' in margs else args.effort
+  if 'effort' not in margs and args.effort == 'medium' and entry.get('effort'):
+    effort = entry['effort']
   if effort not in ('low', 'medium', 'high'):
     print("Invalid effort: %s. Using medium." % effort, file=vs)
     effort = 'medium'
@@ -1336,13 +1195,14 @@ def main(vs, args_in):
   # Mutable per-conversation config so slash commands can change it on the fly.
   ctx = {
     'model': model,
+    'entry': entry,
     'effort': effort,
     'role': role,
     'tts': tts_response,
     'agent': agent,
     'app_list': app_list,
     'instructions': assemble_instructions(role, tts_response, agent, app_list, my_screen),
-    'tools': build_tools(app_list, agent=agent, web_search=True),
+    'tools': gpt_obj.build_tools_for(app_list, agent),
   }
 
   def run_turn(turn_message, refs, imgs):
@@ -1360,22 +1220,100 @@ def main(vs, args_in):
     finally:
       pdeck.led(1, 0)
       pdeck.led(2, 0)
-    # Persist the (new) response id so a later --resume-id can continue this
-    # chat. A new id distinct from what we resumed from means the turn produced
-    # a fresh response; if they match (or it's None) the turn failed, so skip.
+    # Persist the conversation so a later --resume-id can continue it. Each
+    # client saves what it needs (a response id for Responses, the messages list
+    # for Chat Completions).
     if args.resume:
-      new_id = gpt_obj.prev_response_id
-      if new_id and new_id != resumed_from:
-        gpt.save_session(new_id, message, replace_id=resumed_from)
+      gpt_obj.persist_session(message, resumed_from)
     return
 
   # ---- Conversation mode ----
   history = []
   pending_refs = []   # files queued via /file for the next message
+  # Auto-compaction (Chat Completions clients only): 'every' = compact after
+  # this many turns (0 = off); 'since' = turns completed since last compaction.
+  compact_state = {'every': 0, 'since': 0}
+  # Auto-improve: run /improve every this many completed turns (0 = off) to
+  # distill the session into long-term memory, mirroring gpt_rt's periodic run.
+  improve_state = {'every': 8, 'since': 0}
 
   def refresh():
     ctx['instructions'] = assemble_instructions(ctx['role'], ctx['tts'], ctx['agent'], ctx['app_list'], my_screen)
-    ctx['tools'] = build_tools(ctx['app_list'], agent=ctx['agent'], web_search=True)
+    ctx['tools'] = gpt_obj.build_tools_for(ctx['app_list'], ctx['agent'])
+
+  def switch_model(name):
+    """Switch to registry entry `name`. If the API or endpoint changes, rebuild
+    the client (which resets the conversation context); otherwise just retarget
+    the model id on the current client."""
+    nonlocal gpt_obj
+    new_entry = resolve_entry(registry, name)
+    same = (new_entry['api'] == gpt_obj.API and
+            new_entry['base_url'].rstrip('/') == gpt_obj.base_url.rstrip('/'))
+    if same:
+      ctx['model'] = new_entry['model']
+      ctx['entry'] = new_entry
+      print("Model: %s (%s API)." % (new_entry['name'], new_entry['api']), file=vs)
+      return
+    new_obj = init_client(new_entry, vs, gpt_obj.mode == 'plan')
+    if new_obj is None:
+      print("Could not switch to %s (no API key for %s)." %
+            (new_entry['name'], new_entry['base_url']), file=vs)
+      return
+    new_obj.jp_ime = gpt_obj.jp_ime
+    new_obj.jp_font_loaded = gpt_obj.jp_font_loaded
+    new_obj.app_list = ctx['app_list']
+    gpt_obj.led2_gen += 1        # cancel any pending LED timer on the old client
+    gpt_obj = new_obj
+    ctx['model'] = new_entry['model']
+    ctx['entry'] = new_entry
+    compact_state['since'] = 0
+    improve_state['since'] = 0
+    refresh()
+    print("Switched to %s (%s API); context reset." %
+          (new_entry['name'], new_entry['api']), file=vs)
+
+  def do_compact(auto=False):
+    """Summarize and shrink the conversation (Chat Completions only)."""
+    if not gpt_obj.CAN_COMPACT:
+      if not auto:
+        print("Compaction isn't available for this model.", file=vs)
+      return False
+    before = len(gpt_obj.messages)
+    summary = gpt_obj.compact(ctx['model'], silent=args.silent)
+    if summary is None:
+      if not auto:
+        print("Nothing to compact yet (conversation too short)." if before <= 3
+              else "Compaction failed; context unchanged.", file=vs)
+      return False
+    compact_state['since'] = 0
+    print("%sContext compacted: %d -> %d messages." %
+          ("[Auto-compact] " if auto else "", before, len(gpt_obj.messages)), file=vs)
+    if not auto:
+      print(gpt.format(summary), file=vs)
+    return True
+
+  def run_improve(reason=None, auto=False):
+    """Distill the session into long-term memory (the /improve action). Auto runs
+    stay quiet unless they actually update the memory; manual runs are verbose.
+    On success the instructions are refreshed so the freshened memory applies on
+    the next turn (memory is injected in agent mode)."""
+    improve_state['since'] = 0
+    if not auto:
+      print("[ Improving — distilling lessons into long-term memory... ]", file=vs)
+    try:
+      ok, msg = gpt_obj.run_self_improve(reason)
+    except Exception as e:
+      ok, msg = False, str(e)
+    if ok:
+      refresh()
+    if auto:
+      if ok:
+        print("[ Auto-improve: %s ]" % msg, file=vs)
+    else:
+      print(("Memory updated: %s" % msg) if ok else ("Improve skipped: %s" % msg), file=vs)
+      if ok and not ctx['agent']:
+        print("(Tip: memory is loaded into the prompt in agent mode; enable with /tools.)", file=vs)
+    return ok
 
   def mode_prompt():
     # Replaces the old "You:" prompt; shows the current execution mode in bold,
@@ -1402,47 +1340,74 @@ def main(vs, args_in):
     return gpt_obj.jp_ime
 
   def show_help():
-    print(
-      "Commands:\n"
-      "  /help              this help\n"
-      "  /quit  /exit       leave conversation\n"
-      "  /clear /reset      start fresh (clear server-side context)\n"
-      "  /model [name]      show or set model (m/medium, h/high, f/fast, or id)\n"
-      "  /effort [level]    show or set reasoning effort (low|medium|high)\n"
-      "  /role [name|text]  show/set role: presets 'assistant' or 'coder' (resets context)\n"
-      "  /tools             toggle function-calling tools (agent) on/off\n"
-      "  /mode [auto|plan]  show/set execution mode (no arg toggles); also /auto, /plan\n"
-      "  /file <path>       attach a file as reference for the next message\n"
-      "  /history           show recent input history\n"
-      "Plan mode confirms each command_with_return / write_file before it runs.\n"
-      "Japanese input: Alt+` or Alt+j toggles the kana IME (best with -j font).\n"
-      "Editing: arrows move, Up/Down history, Ctrl-A/E start/end, Ctrl-K/U kill, Ctrl-C cancel, Shift-Tab toggles mode.",
-      file=vs)
+    lines = [
+      "Commands:",
+      "  /help              this help",
+      "  /quit  /exit       leave conversation",
+      "  /clear /reset      start fresh (clear conversation context)",
+      "  /model [name]      show or set model (a name from /config/gpt.json, m/h/f, or id)",
+      "  /models            list configured models",
+    ]
+    if gpt_obj.USE_EFFORT:
+      lines.append("  /effort [level]    show or set reasoning effort (low|medium|high)")
+    lines.append("  /role [name|text]  show/set role: presets 'assistant' or 'coder' (resets context)")
+    lines.append("  /tools             toggle function-calling tools (agent) on/off")
+    lines.append("  /mode [auto|plan]  show/set execution mode (no arg toggles); also /auto, /plan")
+    lines.append("  /file <path>       attach a file as reference for the next message")
+    lines.append("  /history           show recent input history")
+    if gpt_obj.CAN_COMPACT:
+      lines.append("  /compact           summarize & shrink the conversation context now")
+      lines.append("  /auto-compact [n]  auto-compact every n turns (no arg shows; 'off' disables)")
+    lines.append("  /skills            list available skills (user + system)")
+    lines.append("  /<skill-name>      run a skill by name (e.g. /morning_ritual)")
+    lines.append("  /improve           learn from this session & update long-term memory")
+    lines.append("  /auto-improve [n]  auto-run /improve every n turns (no arg shows; 'off' disables)")
+    lines.append("Plan mode confirms each command_with_return / write_file before it runs.")
+    lines.append("Japanese input: Alt+` or Alt+j toggles the kana IME (best with -j font).")
+    lines.append("Editing: arrows move, Up/Down history, Ctrl-A/E start/end, Ctrl-K/U kill, Ctrl-C cancel, Shift-Tab toggles mode.")
+    print("\n".join(lines), file=vs)
+
+  def show_models():
+    print("Configured models (%s = current):" % ctx['entry']['name'], file=vs)
+    for m in registry.get('models', []):
+      e = _normalize_entry(m)
+      mark = "* " if e['name'] == ctx['entry']['name'] else "  "
+      loc = "" if e['base_url'].rstrip('/') == OPENAI_BASE else "  @ " + e['base_url']
+      print("  %s%-16s %-9s %s%s" % (mark, e['name'], e['api'], e['model'], loc), file=vs)
 
   def handle_command(line):
-    """Return False to quit, True to keep chatting."""
+    """Return 'quit' to leave, 'ok' when handled, 'unknown' if unrecognized."""
     parts = line[1:].split()
     if not parts:
-      return True
+      return 'ok'
     cmd = parts[0].lower()
     arg = line[1 + len(parts[0]):].strip()
     if cmd in ('quit', 'exit', 'q'):
-      return False
+      return 'quit'
     elif cmd in ('help', 'h', '?'):
       show_help()
     elif cmd in ('clear', 'reset', 'new'):
-      gpt_obj.prev_response_id = None
+      gpt_obj.reset_context()
+      compact_state['since'] = 0
+      improve_state['since'] = 0
       print("New conversation (context cleared).", file=vs)
     elif cmd == 'model':
       if arg:
-        ctx['model'] = resolve_model(arg)
-      print("Model: %s" % ctx['model'], file=vs)
+        switch_model(arg)
+      else:
+        print("Model: %s (%s)" % (ctx['entry']['name'], ctx['entry']['api']), file=vs)
+    elif cmd in ('models', 'ls'):
+      show_models()
     elif cmd == 'effort':
-      if arg in ('low', 'medium', 'high'):
+      if not gpt_obj.USE_EFFORT:
+        print("Reasoning effort isn't used by this model.", file=vs)
+      elif arg in ('low', 'medium', 'high'):
         ctx['effort'] = arg
+        print("Effort: %s" % ctx['effort'], file=vs)
       elif arg:
         print("Effort must be low|medium|high.", file=vs)
-      print("Effort: %s" % ctx['effort'], file=vs)
+      else:
+        print("Effort: %s" % ctx['effort'], file=vs)
     elif cmd == 'role':
       if arg:
         rtext, rwants = resolve_role(arg)
@@ -1453,7 +1418,7 @@ def main(vs, args_in):
             ctx['app_list'] = load_app_list()
             gpt_obj.app_list = ctx['app_list']
         refresh()
-        gpt_obj.prev_response_id = None
+        gpt_obj.reset_context()
         print("Role set to '%s'%s (context reset)." %
               (arg, " (tools on)" if ctx['agent'] else ""), file=vs)
       else:
@@ -1494,12 +1459,67 @@ def main(vs, args_in):
     elif cmd in ('history', 'hist'):
       for h in history[-20:]:
         print("  " + h, file=vs)
+    elif cmd == 'compact':
+      do_compact()
+    elif cmd in ('auto-compact', 'autocompact'):
+      if not gpt_obj.CAN_COMPACT:
+        print("Auto-compact isn't available for this model.", file=vs)
+      elif arg.lower() in ('off', '0', 'none'):
+        compact_state['every'] = 0
+        print("Auto-compact off.", file=vs)
+      elif arg:
+        try:
+          n = int(arg)
+        except:
+          n = -1
+        if n < 1:
+          print("Usage: /auto-compact <num_iterations>  (or 'off')", file=vs)
+        else:
+          compact_state['every'] = n
+          compact_state['since'] = 0
+          print("Auto-compact every %d turn(s)." % n, file=vs)
+      elif compact_state['every']:
+        print("Auto-compact: every %d turn(s) (%d since last)." %
+              (compact_state['every'], compact_state['since']), file=vs)
+      else:
+        print("Auto-compact: off. Use /auto-compact <num_iterations>.", file=vs)
+    elif cmd == 'skills':
+      sk = list_skills()
+      if not sk:
+        print("No skills found in %s." % " or ".join(SKILL_DIRS), file=vs)
+      else:
+        print("Skills (type /<name> to run):", file=vs)
+        for token, path, source in sk:
+          print("  /%-22s (%s)" % (token, source), file=vs)
+    elif cmd in ('improve', 'learn'):
+      run_improve(arg or None)
+    elif cmd in ('auto-improve', 'autoimprove'):
+      if arg.lower() in ('off', '0', 'none'):
+        improve_state['every'] = 0
+        print("Auto-improve off.", file=vs)
+      elif arg:
+        try:
+          n = int(arg)
+        except:
+          n = -1
+        if n < 1:
+          print("Usage: /auto-improve <num_turns>  (or 'off')", file=vs)
+        else:
+          improve_state['every'] = n
+          improve_state['since'] = 0
+          print("Auto-improve every %d turn(s)." % n, file=vs)
+      elif improve_state['every']:
+        print("Auto-improve: every %d turn(s) (%d since last)." %
+              (improve_state['every'], improve_state['since']), file=vs)
+      else:
+        print("Auto-improve: off. Use /auto-improve <num_turns>.", file=vs)
     else:
-      print("Unknown command: /%s  (try /help)" % cmd, file=vs)
-    return True
+      return 'unknown'          # maybe a /<skill-name> — resolved by the caller
+    return 'ok'
 
   print("Conversation mode. /help for commands, /quit to exit.", file=vs)
-  print("Mode: %s (Shift-Tab or /mode to switch; Plan confirms commands & writes)." % gpt_obj.mode, file=vs)
+  print("Model: %s (%s). Mode: %s (Shift-Tab or /mode to switch)." %
+        (ctx['entry']['name'], ctx['entry']['api'], gpt_obj.mode), file=vs)
   if jp_input is not None:
     print("Japanese: Alt+` or Alt+j toggles kana input%s." %
           ("" if jp else " (use -j for the unicode font)"), file=vs)
@@ -1525,10 +1545,23 @@ def main(vs, args_in):
       history.append(line)
 
     if line[0] == '/':
-      if not handle_command(line):
+      status = handle_command(line)
+      if status == 'quit':
         print("Bye.", file=vs)
         break
-      continue
+      if status != 'unknown':
+        continue
+      # Not a built-in command — try to run it as a skill: /<skill-name> [args].
+      word = line[1:].split()[0]
+      arg = line[1 + len(word):].strip()
+      hit = find_skill(word)
+      if hit is None:
+        print("Unknown command: /%s  (try /help or /skills)" % word, file=vs)
+        continue
+      path, content = hit
+      print("Running skill: %s" % path, file=vs)
+      line = compose_skill_message(path, content, arg)
+      # fall through: run the skill as a normal user turn
 
     turn_refs = list(pending_refs)
     pending_refs[:] = []
@@ -1538,11 +1571,21 @@ def main(vs, args_in):
       turn_imgs = images
       sent_initial = True
     # A turn must never drop the user out of the conversation: contain any
-    # failure (network error, etc.) and keep prompting. (ask_agent only commits
-    # prev_response_id on a clean response, so a thrown turn leaves the prior
-    # context intact and the next prompt can continue.)
+    # failure (network error, etc.) and keep prompting. (Each client only commits
+    # its context on a clean response, so a thrown turn leaves the prior context
+    # intact and the next prompt can continue.)
     try:
       run_turn(line, turn_refs, turn_imgs)
+      # Count completed turns; auto-compact once the threshold is reached.
+      if gpt_obj.CAN_COMPACT and compact_state['every']:
+        compact_state['since'] += 1
+        if compact_state['since'] >= compact_state['every']:
+          do_compact(auto=True)
+      # Periodically distill the session into long-term memory (like gpt_rt).
+      if improve_state['every']:
+        improve_state['since'] += 1
+        if improve_state['since'] >= improve_state['every']:
+          run_improve(reason="periodic auto-improve", auto=True)
     except BaseException as e:
       print("\n[Turn failed; you can keep going] %r" % (e,), file=vs)
 

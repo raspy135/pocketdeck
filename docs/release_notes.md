@@ -1,3 +1,33 @@
+## Release Note, July 2, 2026
+
+### firmware
+
+- pipe('|') support for command line tools.
+
+### Application
+
+- System shortcut is added. Applications can register system shortcut by vscreen.register_shortcut(). The feature is used in gpt_rt.
+- rm : bug fix
+- echo : echo command
+- grep : more options
+- curl : more options
+- listup : A simple new application to add a file to shared filelist(Web and iOS)
+
+#### AI apps (gpt, gpt_rt)
+
+- gpt : Add multiple models and multiple endpoints support, and Chat Completion API support. Chat Completion API is standard API for most of LLMs, so you can use most of LLM models in the market or local LLMs. Models are configured in `/config/gpt.json` (an Ollama-style registry) and selected with `-m` / `/model`; the previous separate `gpt_c` app is now merged into `gpt` as an internal client.
+- AI apps (gpt and gpt_rt) can read PEM status in agent mode (-a), inspect content, and edit the currently open file. For example: "Check the line I'm editing in PEM and add a wrap-up to the end."
+- Added `/improve`. It generates a self-improvement memo at `/sd/Documents/ai_memory/ai_memory.md` and is auto-executed periodically in the `gpt` (conversation mode, every 8 turns by default; `/auto-improve` to tune) and `gpt_rt` apps.
+- AI apps now has skills. System skills are located under /sd/lib/skills, and user skills are located under /sd/Documents/skills.
+- gpt_rt : The microphone can be toggled with the system shortcut slider + A.
+
+
+## Release Note, June 26, 2026
+
+### firmware
+
+- pem : tab handling fix 
+
 ## Release Note June 22, 2026
 
 ### firmware

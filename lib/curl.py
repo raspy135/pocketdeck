@@ -2,8 +2,12 @@ import sys
 import argparse
 import socket
 import ssl
+try:
+  import ubinascii
+except ImportError:
+  import binascii as ubinascii
 
-_VERSION = "Pocket Deck curl 0.1"
+_VERSION = "Pocket Deck curl 0.2"
 
 def print_vs(vs, s=""):
   try:
@@ -59,6 +63,13 @@ def _parse_header_line(line):
   if not name:
     raise ValueError("Empty header name")
   return name, value
+
+def _sock_write(sock, data):
+  # MicroPython sockets have write(); CPython/emulator sockets use sendall().
+  try:
+    sock.write(data)
+  except AttributeError:
+    sock.sendall(data)
 
 def _read_chunk(sock, n):
   out = bytearray(n)
@@ -195,11 +206,49 @@ def _arg_get(args, names, default=None):
 
   return default
 
-def request(url, method="GET", data=None, header_lines=None,
-            user_agent="pdeck-curl/0.1"):
-  scheme, host, port, path = _split_url(url)
+def _status_code(status):
+  # "HTTP/1.1 301 Moved Permanently" -> 301 (0 if unparsable)
+  try:
+    return int(status.split(" ")[1])
+  except Exception:
+    return 0
 
+def _resolve_location(base_url, loc):
+  # Resolve a redirect Location against the URL that produced it.
+  if loc.startswith("http://") or loc.startswith("https://"):
+    return loc
+  scheme, host, port, path = _split_url(base_url)
+  default_port = 443 if scheme == "https" else 80
+  origin = scheme + "://" + host
+  if port != default_port:
+    origin += ":" + str(port)
+  if loc.startswith("/"):
+    return origin + loc
+  # Relative: resolve against the current path's directory.
+  slash = path.rfind("/")
+  base_dir = path[:slash + 1] if slash >= 0 else "/"
+  return origin + base_dir + loc
+
+def _remote_filename(url):
+  # Filename for -O: last path segment, query stripped; index.html fallback.
+  try:
+    _, _, _, path = _split_url(url)
+  except Exception:
+    path = "/"
+  q = path.find("?")
+  if q >= 0:
+    path = path[:q]
+  name = path.split("/")[-1]
+  return name if name else "index.html"
+
+def request(url, method="GET", data=None, header_lines=None,
+            user_agent="pdeck-curl/0.2", timeout=None, head=False,
+            follow=0, auth=None):
+  # follow > 0 enables redirect following (that many hops). auth is a
+  # "user:password" string for HTTP basic auth.
   method = method.upper()
+  if head:
+    method = "HEAD"
   if data is None:
     data_b = b""
   elif isinstance(data, bytes):
@@ -207,11 +256,36 @@ def request(url, method="GET", data=None, header_lines=None,
   else:
     data_b = str(data).encode("utf-8")
 
+  while True:
+    status, resp_headers, body = _request_once(
+      url, method, data_b, header_lines, user_agent, timeout, head, auth)
+    code = _status_code(status)
+    if follow > 0 and code in (301, 302, 303, 307, 308):
+      loc = resp_headers.get("location")
+      if loc:
+        url = _resolve_location(url, loc)
+        follow -= 1
+        # Classic curl behavior: 301/302/303 turn the next request into a
+        # bodyless GET; 307/308 preserve method and body.
+        if code in (301, 302, 303) and method != "HEAD":
+          method = "GET"
+          data_b = b""
+        continue
+    return status, resp_headers, body
+
+def _request_once(url, method, data_b, header_lines, user_agent,
+                  timeout, head, auth):
+  scheme, host, port, path = _split_url(url)
+
   headers = {}
   headers["Host"] = host
   headers["User-Agent"] = user_agent
   headers["Connection"] = "close"
   headers["Accept"] = "*/*"
+
+  if auth:
+    b64 = ubinascii.b2a_base64(auth.encode("utf-8")).decode().strip()
+    headers["Authorization"] = "Basic " + b64
 
   if header_lines:
     for h in header_lines:
@@ -235,6 +309,11 @@ def request(url, method="GET", data=None, header_lines=None,
 
   addr = socket.getaddrinfo(host, port)[0][-1]
   s = socket.socket()
+  if timeout:
+    try:
+      s.settimeout(timeout)
+    except AttributeError:
+      pass  # emulator stub sockets may lack settimeout
   try:
     s.connect(addr)
     if scheme == "https":
@@ -243,9 +322,9 @@ def request(url, method="GET", data=None, header_lines=None,
       except TypeError:
         s = ssl.wrap_socket(s)
 
-    s.write(req.encode("utf-8"))
+    _sock_write(s, req.encode("utf-8"))
     if len(data_b) > 0:
-      s.write(data_b)
+      _sock_write(s, data_b)
 
     header_b, leftover = _read_until_headers(s)
 
@@ -259,7 +338,10 @@ def request(url, method="GET", data=None, header_lines=None,
     te = resp_headers.get("transfer-encoding", "")
     cl = resp_headers.get("content-length", None)
 
-    if te.lower().find("chunked") >= 0:
+    if head:
+      # HEAD: servers send no body (Content-Length may still be present).
+      body = b""
+    elif te.lower().find("chunked") >= 0:
       raw_body = leftover + _read_all(s)
       body = _decode_chunked(raw_body)
     elif cl is not None:
@@ -298,9 +380,23 @@ def build_parser():
                       nargs='*',
                       help="Custom header, e.g. -H 'Accept: application/json'")
   parser.add_argument("-d", "--data",
-                      default=None, help="Request body data")
+                      default=None, help="Request body data, or @file to read the body from a file")
   parser.add_argument("-i", "--include", action="store_true",
                       help="Include response status and headers in output")
+  parser.add_argument("-L", "--location", action="store_true",
+                      help="Follow redirects (up to 5)")
+  parser.add_argument("-I", "--head", action="store_true",
+                      help="HEAD request: show status and headers only")
+  parser.add_argument("-m", "--max-time", type=int, default=None,
+                      dest="max_time", metavar="SECONDS",
+                      help="Timeout for the whole request in seconds")
+  parser.add_argument("-A", "--user-agent", default="pdeck-curl/0.2",
+                      dest="user_agent", help="User-Agent string to send")
+  parser.add_argument("-u", "--user", default=None,
+                      help="HTTP basic auth as user:password")
+  parser.add_argument("-O", "--remote-name", action="store_true",
+                      dest="remote_name",
+                      help="Save body to a file named from the URL")
   parser.add_argument("-s", "--silent", action="store_true",
                       help="Silent mode, suppress progress/status messages")
   parser.add_argument("-t", "--truncate", type=int, default=None, metavar="N",
@@ -325,27 +421,30 @@ def _write_body_to_vs(vs, body, truncate=None):
 def main(vs, args_in):
   parser = build_parser()
   try:
-    print(args_in)
-    url=None
-    if len(args_in) > 1:
+    # The URL is taken as the last argument (when it isn't an option), so that
+    # option values with spaces parse cleanly on the device's mini argparse.
+    url = None
+    if len(args_in) > 1 and not args_in[-1].startswith("-"):
       url = args_in[-1]
-    args_in=args_in[:-1]
+      args_in = args_in[:-1]
     args = parser.parse_args(args_in[1:])
   except SystemExit:
     return 2
 
   version = _arg_get(args, ("version", "V"), False)
-  #url = _arg_get(args, ("url",), None)
   output = _arg_get(args, ("output", "o"), None)
   request_method = _arg_get(args, ("request", "X"), "GET")
-  #headers = []
   headers = _arg_get(args, ("header", "H"), [])
-  #if header:
-  #  headers = [header]
   data = _arg_get(args, ("data", "d"), None)
   include_headers = _arg_get(args, ("include", "i"), False)
   silent = _arg_get(args, ("silent", "s"), False)
   truncate = _arg_get(args, ("truncate", "t"), None)
+  location = _arg_get(args, ("location", "L"), False)
+  head = _arg_get(args, ("head", "I"), False)
+  max_time = _arg_get(args, ("max_time", "m"), None)
+  user_agent = _arg_get(args, ("user_agent", "A"), "pdeck-curl/0.2")
+  user = _arg_get(args, ("user", "u"), None)
+  remote_name = _arg_get(args, ("remote_name", "O"), False)
 
   if version:
     print_vs(vs, _VERSION)
@@ -356,26 +455,44 @@ def main(vs, args_in):
     print_vs(vs, "Try: curl https://example.com")
     return 2
 
+  # -d @file: read the request body from a file.
+  if data is not None and data.startswith("@"):
+    try:
+      with open(data[1:], "rb") as f:
+        data = f.read()
+    except Exception as e:
+      print_vs(vs, "curl: cannot read data file: " + str(e))
+      return 1
+
   method = request_method
   if data is not None and method == "GET":
     method = "POST"
 
   try:
-    status, headers, body = request(
+    status, resp_headers, body = request(
       url,
       method=method,
       data=data,
-      header_lines=headers
+      header_lines=headers,
+      user_agent=user_agent,
+      timeout=max_time,
+      head=head,
+      follow=5 if location else 0,
+      auth=user
     )
   except Exception as e:
     print_vs(vs, "curl: error: " + str(e))
     return 1
 
-  #print_vs(vs, "[DBG] status: " + status)
-  #print_vs(vs, "[DBG] headers:")
-  for k in headers:
-    print_vs(vs, "  " + k + ": " + headers[k])
-  #print_vs(vs, "[DBG] body len: " + str(len(body)))
+  if head:
+    # Like real curl -I: status and headers are the output.
+    print_vs(vs, status)
+    for k in resp_headers:
+      print_vs(vs, k + ": " + resp_headers[k])
+    return 0
+
+  if remote_name and not output:
+    output = _remote_filename(url)
 
   if output:
     try:
@@ -389,8 +506,8 @@ def main(vs, args_in):
   else:
     if include_headers:
       print_vs(vs, status)
-      for k in headers:
-        print_vs(vs, k + ": " + headers[k])
+      for k in resp_headers:
+        print_vs(vs, k + ": " + resp_headers[k])
       print_vs(vs, "")
     _write_body_to_vs(vs, body, truncate)
 

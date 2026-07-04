@@ -153,6 +153,13 @@ Press the button two times (like double click) to shutdown the device.
 - S-C-c : Copy current line to system clipboard. This is useful with text applications.
 - S-C-v : Paste data from system clipboard
 
+### App-defined shortcuts (Slider + key)
+
+Apps can register their own global shortcut: **hold the touch slider** and then press a second key (A, B, a D-pad direction, or a bottom button). The slider acts as a modifier (like Fn). These shortcuts work **even when the app that registered them is in the background**.
+
+For example, gpt_rt registers **Slider + A** to mute/unmute the microphone from
+any screen. See `register_shortcut()` in app_development.md for how to add one.
+
 ## Locking the device
 
 Pocket deck can be locked with a numeric PIN. The lock is handled by the firmware, so while locked the screen cannot be switched and the system shortcuts (restart, quit, etc.) are disabled until the correct PIN is entered.
@@ -220,8 +227,8 @@ lock [pin] | Lock the device. `lock 0912` sets the PIN to `0912` and locks; `loc
 netserver | launch network server to serve services. It provide screencast and clipboard sharing. See [[netserver/GETTING_STARTED]] for detail.
 setuni | Change terminal font to CJK Unicode font,.
 setjpf | Change terminal font to Japanese. It's lighter than setuni.
-grep pattern [path] | Search text in files, Linux-like. The pattern is a **regex by default** (MicroPython's limited `re`; unsupported patterns fall back to literal match). `-F` literal/fixed-string match, `-v` invert match, `-r` recursive, `-n` line numbers, `-i` ignore case, `-l` filenames only, `--include .py,.md` filter by extension, `--max N` skip files larger than N bytes. (`-e`/`-E` accepted but redundant since regex is the default.)
-curl [options] url | HTTP client for simple web requests. Supports `http://` and `https://`, `-o FILE` to save body to file, `-X METHOD` to choose request method, `-d DATA` to send request body, `-i` to include response headers, `-s` for silent mode, and `-V` to show version. `-H` for header.
+grep pattern [path ...] | Search text in files, Linux-like. The pattern is a **regex by default** (MicroPython's limited `re`; unsupported patterns fall back to literal match). `-F` literal/fixed-string match, `-v` invert match, `-r` recursive, `-n` line numbers, `-i` ignore case, `-l` filenames only, `-A/-B/-C N` context lines, `-c` count only, `-m N` stop after N matches, `--no-filename` hide the filename prefix, `--include .py,.md` filter by extension, `--max N` skip files larger than N bytes. (`-e`/`-E` accepted but redundant since regex is the default.)
+curl [options] url | HTTP client for simple web requests. Supports `http://` and `https://`, `-L` to follow redirects (up to 5), `-m SECONDS` request timeout, `-I` HEAD request (status + headers only), `-o FILE` to save body to file, `-O` to save under the URL's filename, `-X METHOD` to choose request method, `-d DATA` to send request body (`-d @file` reads it from a file), `-A UA` to set the User-Agent, `-u user:password` for HTTP basic auth, `-i` to include response headers, `-s` for silent mode, and `-V` to show version. `-H` for header. The URL goes last.
 diff [options] left right | Compare two text files. Supports unified and side-by-side views, paging, output to file, and configurable context lines.
 qr [text...] | Generate and display a QR code centered on the screen. Supports `-c` to read from the clipboard.
 
@@ -260,10 +267,10 @@ In side-by-side view, `<` marks lines only on the left, `>` marks lines only on 
 `grep` searches files for lines matching a pattern, in a Linux-like way. The pattern is treated as a **regular expression by default**, using MicroPython's limited `re` module. If a pattern uses regex features that `re` does not support, grep prints a notice and falls back to a plain literal (substring) search instead of failing.
 
 ```
-grep [options] pattern [path]
+grep [options] pattern [path ...]
 ```
 
-If `path` is omitted the current working directory is searched. A directory is searched only at its top level unless `-r` is given. Matches are printed as `file: line`, with the filename highlighted.
+If `path` is omitted the current working directory is searched; several files or directories can be given. A directory is searched only at its top level unless `-r` is given. Matches are printed as `file: line`, with the filename highlighted.
 
 Options:
 
@@ -273,6 +280,10 @@ Options:
 - `-l` : List only the names of files that contain a match (no lines).
 - `-v` or `--invert-match` : Select lines that do **not** match.
 - `-F` or `--fixed-strings` : Treat the pattern as a literal string, not a regex.
+- `-A N` / `-B N` / `-C N` : Show N lines of context after / before / around each match. Context lines use `-` separators and `--` marks a gap between match groups.
+- `-c` or `--count` : Print only a count of matching lines per file.
+- `-m N` or `--max-count N` : Stop after N matching lines per file.
+- `--no-filename` : Suppress the filename prefix on output lines.
 - `-e` or `-E` or `--regex` : Treat the pattern as a regex. Accepted for compatibility but redundant, since regex is already the default.
 - `--include EXT` : Only search files whose name ends with the given extension. Pass several comma-separated extensions to match any of them, e.g. `--include .py,.md`. This matches by file extension, not a glob pattern.
 - `--max N` : Skip files larger than N bytes.
@@ -285,6 +296,8 @@ grep -rn "def .*main" /sd/py
 grep -ri --include .py,.md hello /sd/Documents
 grep -F "a+b" notes.txt
 grep -l error /sd/logs
+grep -n -C 2 "import anm" /sd/py/demo.py
+grep -c TODO notes.md tasks.md
 ```
 
 ## SSH/SCP setup guide
@@ -527,11 +540,11 @@ For Japanese text, Adding `-v -f uni` options is recommended.
 
 ### gpt
 
-gpt (`gpt`) is ChatGPT frontend. Refer [[gpt_readme.md]] for detail.
+gpt (`gpt`) is the AI assistant frontend. Refer [[gpt_readme]] for detail. Models and endpoints are configurable in `/config/gpt.json`: OpenAI's Responses API plus any Chat Completions endpoint (Ollama, local servers, other providers), selectable with `-m` or the `/model` command.
 
 ### gpt_rt
 
-`gpt_rt` is a real-time voice agent using the OpenAI Realtime API. It opens a full-duplex audio conversation over WebSocket — you speak and the AI responds in near real time, with server-side voice activity detection handling turn changes automatically. Requires OpenAI API key at `/config/openai_api_key`.
+`gpt_rt` is a real-time voice agent using the OpenAI Realtime API. It opens a full-duplex audio conversation over WebSocket — you speak and the AI responds in near real time, with server-side voice activity detection handling turn changes automatically. Requires OpenAI API key at `/config/openai_api_key`. Many options are shared with gpt app. See [[gpt_readme]] for details.
 
 ```
 gpt_rt [-m model] [-f file [file...]] [-a]
@@ -548,9 +561,14 @@ Option | Description
 Key | Action
 ----|-------
 Enter | Toggle microphone mute/unmute
+**Slider + A** | Toggle microphone mute/unmute — **works from any screen**, even when gpt_rt is in the background
 `q` or B button | Quit
 
 LED is lit while the microphone is active and turns off when muted.
+
+Because Enter and `q`/B only reach gpt_rt while its own screen is foreground, the
+**Slider + A** system shortcut is the way to mute/unmute while you are using
+another screen (e.g. in agent mode, or just multitasking).
 
 Barge-in is supported: speaking while the AI is talking interrupts the response and clears the audio queue.
 
@@ -661,6 +679,13 @@ Example:
 ```
 sync exec notes
 ```
+
+### listup
+
+`listup` command adds a file to filelist for netserver sharing (Web and iOS app).
+Usage:
+
+`listup filename` 
 
 ## Change boot sequence
 
