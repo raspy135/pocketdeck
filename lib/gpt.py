@@ -153,9 +153,10 @@ def build_agent_instructions(app_list, my_screen=None):
     "Use command_with_return to look up information too (e.g. list files with "
     "'ls /sd/Documents/word*', read a file with 'cat /path', search with grep).\n "
     "BE TOKEN-EFFICIENT WITH TOOL CALLS. "
-    "Pocket Deck is not Linux, you cannot use pipe '|'. Read README.md and use only the options "
-    "that is mentioned in the manual."
-    "cat, grep, ls, head, tail are great tools to reduce funciton calls. See README.md for full command list.\n"
+    "Pocket Deck is not Linux: no redirects ('>'), no '&&' or ';', no subshells. "
+    "Simple pipes '|' ARE supported, but only INTO grep/head/tail. Read README.md "
+    "and use only the options that are mentioned in the manual. "
+    "cat, grep, ls, head, tail are great tools to reduce function calls. See README.md for full command list.\n"
     "The device keeps an activity log under /sd/elog/, one markdown file per day "
     "named YYYY-MM-DD.md, each line an event: app launches, file opens/saves, and "
     "shell commands the user ran. Read the current day's file (its name is today's "
@@ -200,7 +201,9 @@ def build_agent_instructions(app_list, my_screen=None):
              % (my_screen, my_screen))
   if app_list:
     text += ("\nUse launch_app to open apps. Pass optional args (e.g. a file path) "
-             "to open a specific file. Available apps:\n")
+             "to open a specific file. Besides the registered apps listed below, "
+             "any installed module can be launched by its module name (e.g. 'myapp' "
+             "for /sd/lib/myapp.py). Available apps:\n")
     for item in app_list:
       if isinstance(item, list) and len(item) == 2:
         name = item[0]
@@ -779,16 +782,31 @@ def assemble_instructions(role, tts, agent, app_list, my_screen=None):
 
 
 def load_agent_references(vs, silent=False):
-  """Read the default Pocket Deck reference files (README.md) for agent mode."""
+  """Read the default Pocket Deck reference files (README.md) for agent mode.
+  On PC the /sd paths don't exist, so fall back to ~/.config/gpt/pd/ and the
+  repo's docs/ so the model still gets device context. A missing reference is
+  reported even in silent mode: the model silently knowing nothing about the
+  device is a misconfiguration worth one line."""
   refs = []
   for path in DEFAULT_AGENT_REFS:
-    try:
-      with open(path, "r") as f:
-        refs.append("---- " + path + " ----\n" + f.read())
-      if not silent:
-        print("Attached reference: %s" % path, file=vs)
-    except Exception:
-      pass
+    candidates = [path]
+    if _IS_PC:
+      base = path.rsplit("/", 1)[-1]
+      candidates.append(os.path.expanduser("~/.config/gpt/pd/") + base)
+      candidates.append(os.path.dirname(os.path.abspath(__file__)) +
+                        "/../docs/" + base)
+    for cand in candidates:
+      try:
+        with open(cand, "r") as f:
+          refs.append("---- " + path + " ----\n" + f.read())
+        if not silent:
+          print("Attached reference: %s" % cand, file=vs)
+        break
+      except Exception:
+        pass
+    else:
+      print("Warning: agent reference %s not found - device context will be "
+            "limited." % path, file=vs)
   return refs
 
 
@@ -1173,7 +1191,7 @@ def main(vs, args_in):
     print("Agent mode is unavailable on PC; continuing as plain chat.", file=vs)
     agent = False
 
-  # gptn's own screen, so we can tell the agent to switch the foreground back
+  # The assistant's own screen, so we can tell the agent to switch the foreground back
   # here when it wants the user to read its answer.
   try:
     my_screen = pdeck.get_screen_num()

@@ -1,6 +1,21 @@
 import argparse
 
 
+def _decode(data):
+  # Trim a trailing partial UTF-8 sequence left by a byte-count cut.
+  for trim in range(4):
+    try:
+      return (data[:-trim] if trim else data).decode('utf-8')
+    except UnicodeError:
+      pass
+  return ''.join(chr(b) for b in data)
+
+
+def _head_bytes(vs, data, n):
+  vs.write(_decode(data[:n]))
+  return 0
+
+
 def _head_lines(vs, lines, n):
   count = 0
   for line in lines:
@@ -11,8 +26,11 @@ def _head_lines(vs, lines, n):
   return 0
 
 
-def _head_file(vs, path, n):
+def _head_file(vs, path, n, nbytes):
   try:
+    if nbytes is not None:
+      with open(path, 'rb') as f:
+        return _head_bytes(vs, f.read(nbytes), nbytes)
     with open(path, 'r') as f:
       return _head_lines(vs, f, n)
   except OSError as e:
@@ -23,6 +41,7 @@ def _head_file(vs, path, n):
 def main(vs, args_in):
   parser = argparse.ArgumentParser(description='print first lines of files')
   parser.add_argument('-n', type=int, default=10, help='number of lines')
+  parser.add_argument('-c', type=int, default=None, help='number of bytes')
   parser.add_argument('files', nargs='*', help='file paths')
 
   try:
@@ -34,9 +53,12 @@ def main(vs, args_in):
   if not args.files or args.files == ['-']:
     import pstdin
     if pstdin.has():
-      _head_lines(vs, iter(pstdin.take().splitlines()), args.n)
+      if args.c is not None:
+        _head_bytes(vs, pstdin.take().encode('utf-8'), args.c)
+      else:
+        _head_lines(vs, iter(pstdin.take().splitlines()), args.n)
     else:
-      print('Usage: head [-n N] file [file...]', file=vs)
+      print('Usage: head [-n N | -c N] file [file...]', file=vs)
     return
 
   first = True
@@ -45,5 +67,5 @@ def main(vs, args_in):
       if not first:
         print('', file=vs)
       print('==> {} <=='.format(path), file=vs)
-    _head_file(vs, path, args.n)
+    _head_file(vs, path, args.n, args.c)
     first = False

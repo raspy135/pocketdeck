@@ -26,6 +26,30 @@ def _iter_dir(path):
       full = path + "/" + name
     yield full, name
 
+def _bre_compat(pattern):
+  # GNU grep's default dialect (BRE) writes alternation/groups as \| \( \).
+  # MicroPython's re treats those as literal characters, so such a pattern
+  # compiles fine but silently matches nothing. Translate the BRE spelling to
+  # the re one so both dialects work. Scans left-to-right in escape pairs, so
+  # '\\|' (escaped backslash, then alternation) survives untouched.
+  out = []
+  i = 0
+  n = len(pattern)
+  while i < n:
+    c = pattern[i]
+    if c == '\\' and i + 1 < n:
+      nxt = pattern[i + 1]
+      if nxt in '|()':
+        out.append(nxt)
+      else:
+        out.append(c)
+        out.append(nxt)
+      i += 2
+      continue
+    out.append(c)
+    i += 1
+  return ''.join(out)
+
 def _match_line(line, pat, ignore_case, regex):
   if ignore_case:
     line = line.lower()
@@ -59,9 +83,11 @@ def grep_path(pattern, path=".", recursive=False, show_line_numbers=False,
   use_regex = regex
   if use_regex:
     try:
-      pat = re.compile(pat_src)
+      pat = re.compile(_bre_compat(pat_src))
     except Exception:
-      out.write("grep: unsupported regex, falling back to literal match\n")
+      out.write("grep: unsupported regex, falling back to literal match "
+                "(supported: . [] ^ $ ? * + | () \\d \\s \\w; "
+                "not: {m,n}, \\b, lookarounds)\n")
       pat = pat_src
       use_regex = False
   else:

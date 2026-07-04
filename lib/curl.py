@@ -421,10 +421,17 @@ def _write_body_to_vs(vs, body, truncate=None):
 def main(vs, args_in):
   parser = build_parser()
   try:
-    # The URL is taken as the last argument (when it isn't an option), so that
-    # option values with spaces parse cleanly on the device's mini argparse.
+    # The URL can appear anywhere: prefer the last token with a '://' scheme
+    # (like real curl), falling back to a bare last argument. It is removed
+    # before parsing so option values with spaces parse cleanly on the
+    # device's mini argparse.
     url = None
-    if len(args_in) > 1 and not args_in[-1].startswith("-"):
+    for i in range(len(args_in) - 1, 0, -1):
+      if args_in[i].find("://") > 0:
+        url = args_in[i]
+        args_in = args_in[:i] + args_in[i + 1:]
+        break
+    if url is None and len(args_in) > 1 and not args_in[-1].startswith("-"):
       url = args_in[-1]
       args_in = args_in[:-1]
     args = parser.parse_args(args_in[1:])

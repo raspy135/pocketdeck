@@ -218,8 +218,8 @@ cp src dst | Copy file(s). Supports wildcards in src. `-r` for recursive copy. d
 mv src dst | Move file
 mkdir dir_name | Create a directory
 rmdir dir_name | Delete a directory
-head [-n N] file [file...] | Print first lines of file(s). Default N is 10.
-tail [-n N] file [file...] | Print last lines of file(s). Default N is 10.
+head [-n N \| -c N] file [file...] | Print first lines (-n, default 10) or bytes (-c) of file(s).
+tail [-n N \| -c N] file [file...] | Print last lines (-n, default 10) or bytes (-c) of file(s).
 cat file | Print a file content
 cd [dir] | Change working directory. Note this is global value, shared between shells and applications. The applicaitons (such as pem editor) do not know the change.
 pwd | Get current working directory

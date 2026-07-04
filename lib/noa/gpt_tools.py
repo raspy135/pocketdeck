@@ -43,6 +43,28 @@ import ai_improve
 CaptureStream = pu.CaptureStream
 
 
+def module_exists(modname):
+  """True if modname can be launched: already imported (incl. frozen), a
+  .py/.mpy on sys.path, or importable (covers frozen modules not yet loaded)."""
+  if modname in sys.modules:
+    return True
+  for d in sys.path:
+    base = (d if d.endswith('/') or not d else d + '/') + modname
+    for ext in ('.py', '.mpy'):
+      try:
+        os.stat(base + ext)
+        return True
+      except OSError:
+        pass
+  try:
+    __import__(modname)
+    return True
+  except ImportError:
+    return False
+  except Exception:
+    return True  # exists but crashed at import; launching will show why
+
+
 def build_tools(app_list, agent=False, web_search=True, realtime=False):
   """Tool schemas in the flat function format. Function tools are only included
   in agent mode; plain mode keeps just web_search (when requested). `realtime`
@@ -57,7 +79,8 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False):
   tools.append({
     "type": "function",
     "name": "command_with_return",
-    "description": "Run a device command (or any installed module) and return its captured output. This is your primary tool for TESTING AND VERIFYING CODE: after you write a script with write_file, run it here by name and read the output to confirm it works, see errors, and iterate. A runnable script/app is a module exposing main(vs, args); invoke it by its name plus arguments, e.g. 'temp_foo arg1' for /sd/py/temp_foo.py, or any existing app/command. IMPORTANT: if you EDIT a script and run it again, prefix the command with 'r ' to reload it (e.g. 'r temp_foo arg1') — without 'r' the previous, cached version runs instead of your new code. Built-in commands include: ls (glob patterns like 'word*'; 'ls -r path' lists recursively), cat (read file), head, tail, rm, mv, cp, mkdir, rmdir, grep (search in files), ping, curl (fetch web content — use -L to follow redirects when researching the web, -m 15 for a timeout, -I for headers only, -o file or -O to save; URL goes LAST), and 'analog_clock_set_timer <minutes>'. grep behaves like Linux grep: the PATTERN is a regex by default (no -e needed), with -i ignore-case, -n line numbers, -r recursive, -l filenames only, -v invert, -F literal/fixed-string match, -A/-B/-C N context lines around matches (prefer 'grep -n -C 2' when inspecting code instead of cat-ing the whole file), -c count only, -m N stop after N matches (keeps output small), --no-filename, multiple file arguments, and --include .py,.md to filter by extension; e.g. 'grep -rn \"def .*main\" /sd/py'. Simple pipes ('|') are supported: a stage's output is fed to the next command as stdin, and stdin-aware filters read it when given no file (grep, head, and tail, e.g. 'ls -r /sd/py | grep clock', 'curl -s URL | grep -i error | head -n 5', or 'cat log.txt | tail -n 20'). Other commands ignore piped stdin, so only pipe INTO grep/head/tail. This is not Linux otherwise: no redirects ('>'), backticks, '&&', or subshells; use one command per stage.",
+    "description": "Run a device command (or any installed module) and return its captured output. This is your primary tool for TESTING AND VERIFYING CODE: after you write a script with write_file, run it here by name and read the output to confirm it works, see errors, and iterate. A runnable script/app is a module exposing main(vs, args); invoke it by its name plus arguments, e.g. 'temp_foo arg1' for /sd/py/temp_foo.py, or any existing app/command. "
+    + "IMPORTANT: if you EDIT a script and run it again, prefix the command with 'r ' to reload it (e.g. 'r temp_foo arg1') — without 'r' the previous, cached version runs instead of your new code. Built-in commands include: ls (glob patterns like 'word*'; 'ls -r path' lists recursively), cat (read file), head, tail, rm, mv, cp, mkdir, rmdir, grep (search in files), ping, curl (fetch web content — use -L to follow redirects when researching the web, -m 15 for a timeout, -I for headers only, -o file or -O to save; URL goes LAST), and 'analog_clock_set_timer <minutes>'. grep behaves like Linux grep: the PATTERN is a regex by default (no -e needed), with -i ignore-case, -n line numbers, -r recursive, -l filenames only, -v invert, -F literal/fixed-string match, -A/-B/-C N context lines around matches (prefer 'grep -n -C 2' when inspecting code instead of cat-ing the whole file), -c count only, -m N stop after N matches (keeps output small), --no-filename, multiple file arguments, and --include .py,.md to filter by extension; e.g. 'grep -rn \"def .*main\" /sd/py'. Simple pipes ('|') are supported: a stage's output is fed to the next command as stdin, and stdin-aware filters read it when given no file (grep, head, and tail, e.g. 'ls -r /sd/py | grep clock', 'curl -s URL | grep -i error | head -n 5', or 'cat log.txt | tail -n 20'). This is NOT Linux otherwise, only use supported options, do not make assumptions from Linux knowledge, follow the instruction here and README.md. No redirects ('>'), backticks, '&&', or subshells; use one command per stage.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -94,7 +117,7 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False):
     tools.append({
       "type": "function",
       "name": "launch_app",
-      "description": "Launch a Pocket Deck application by its exact name, optionally passing arguments such as a file path to open",
+      "description": "Launch a Pocket Deck application by name: a registered app from the list, or any installed module/custom app by its module name (e.g. 'myapp' for /sd/lib/myapp.py). Optionally pass arguments such as a file path to open.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -148,7 +171,7 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False):
   tools.append({
     "type": "function",
     "name": "read_console_log",
-    "description": "Read the recent text output (scrollback) from a screen's terminal/console. Use this to see what a command-line app printed — e.g. to find an error message the user is asking about ('what's the error in the console?'). Returns the last N lines of console text. Defaults to the foreground screen.",
+    "description": "Read the recent text output (scrollback) from a screen's terminal/console. Use this to see what a command-line app printed — e.g. to find an error message the user is asking about ('what's the error in the console?'). Returns the last N lines of console text. Defaults to the foreground screen. Note: graphics application error or debug message could be printed on screen 0(REPL).",
     "parameters": {
       "type": "object",
       "properties": {
@@ -175,7 +198,7 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False):
   tools.append({
     "type": "function",
     "name": "send_keys",
-    "description": "Type text / keystrokes into the foreground app. Use escape sequences for special keys (arrows \\x1b[A/B/C/D, Esc \\x1b, Backspace \\x08, Ctrl-X \\x18).",
+    "description": "Type text / keystrokes into the foreground app. Use escape sequences for special keys (arrows \\x1b[A/B/C/D, Esc \\x1b, Backspace \\x08, Ctrl-X \\x18). Typical use of this function is sending command to command line shell.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -276,6 +299,14 @@ class ToolExecBase:
   # already-deep 8KB command stack and overflow.
   RECURSIVE_GUARD = ('gpt', 'gpt_l', 'gpt_rt', 'gpt_c', 'gptn', 'gpt_tools')
 
+  # Linux-only commands that don't exist here. Not pre-blocked (a user-installed
+  # /sd/py/find.py must still run): only used to append a teaching hint when one
+  # of these genuinely fails with ImportError, so a weak model can recover.
+  _LINUX_ONLY = ('bash', 'sh', 'zsh', 'python', 'python3', 'pip', 'pip3',
+                 'find', 'sed', 'awk', 'echo', 'touch', 'chmod', 'chown',
+                 'sudo', 'apt', 'apt-get', 'wget', 'which', 'xargs', 'export',
+                 'source', 'env', 'ps', 'kill', 'uname')
+
   # ---- hooks (overridden by some frontends) --------------------------------
   def _mute_audio(self, ms):
     # gpt_rt silences audio around screen/app actions; no-op elsewhere.
@@ -326,7 +357,8 @@ class ToolExecBase:
       return self.execute_wait_and_resume(arguments)
     if name == "update_memory":
       return self.execute_update_memory(arguments)
-    return "Unknown function: %s" % name
+    return ("Unknown function: %s. Only the listed tools exist; to run a "
+            "device command, call command_with_return." % name)
 
   # ---- timed-program pacing ------------------------------------------------
   def _parse_wait_seconds(self, arguments):
@@ -481,7 +513,7 @@ class ToolExecBase:
     try:
       args = ujson.loads(arguments) if arguments else {}
     except:
-      return "Error: invalid arguments"
+      return 'Error: invalid arguments. Send JSON like {"command": "ls /sd"}.'
     command = args.get("command", "").strip()
     if not command:
       return "Error: no command specified"
@@ -503,6 +535,16 @@ class ToolExecBase:
       return "(no output)"
     if cap._total >= CaptureStream._MAX:
       result += "\n...(truncated)"
+    # A Linux-only command that genuinely doesn't exist surfaces as an
+    # ImportError traceback; append a teaching hint so the model can recover.
+    if 'ImportError' in result and "Error running '" in result:
+      for name in self._LINUX_ONLY:
+        if "Error running '%s':" % name in result:
+          result += ("\nHint: '%s' does not exist - this is a MicroPython "
+                     "device, not Linux. Use ls/cat/grep/head/tail/curl, or "
+                     "write a MicroPython script with write_file and run it "
+                     "by name. For wget, use curl -O." % name)
+          break
     return result
 
   def execute_write_file(self, arguments):
@@ -713,4 +755,21 @@ class ToolExecBase:
         pu.launch(one, scnum)
       pdeck.show_screen_num()
       return "Launched %s" % app_name
-    return "App not found: %s" % app_name
+    # Not registered: launch it like a shell command, so any module on
+    # sys.path (lib/, /sd/lib, custom apps) can be started by name. A path
+    # or filename is accepted too: '/sd/lib/myapp.py' -> 'myapp'.
+    modname = app_name.split('/')[-1]
+    for ext in ('.py', '.mpy'):
+      if modname.endswith(ext):
+        modname = modname[:-len(ext)]
+    if not modname or not module_exists(modname):
+      return ("App not found: %s (not in the registered app list, and no "
+              "module named '%s' on sys.path)" % (app_name, modname))
+    self._mute_audio(3000)
+    scnum = self._search_free_screen([], 2)
+    if scnum == -1:
+      return "Error: no free screen to launch %s" % modname
+    pdeck.change_screen(scnum)
+    pu.launch([modname] + [str(a) for a in extra_args], scnum)
+    pdeck.show_screen_num()
+    return "Launched %s on screen %d" % (modname, scnum)
