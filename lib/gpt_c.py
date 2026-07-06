@@ -295,8 +295,9 @@ class chatgpt_chat(gpt.chatgpt_agent):
     got_assistant = False
     pdeck.led(2, 0)  # clear the "result ready" indicator at the start of a turn
 
+    ask_stop = False  # set when the model calls ask_user: next round is text-only
     for i in range(max_iters + 1):
-      force_final = (i == max_iters)
+      force_final = (i == max_iters) or ask_stop
       gc.collect()  # large JSON/base64 each round-trip fragments the small heap
       payload = {
         "model": model,
@@ -405,6 +406,12 @@ class chatgpt_chat(gpt.chatgpt_agent):
           }],
         })
         self.pending_image = None
+
+      # An ask_user call ends the turn: the next round is text-only so the
+      # model states its question and control returns to the user.
+      if self.user_question is not None:
+        ask_stop = True
+        self.user_question = None
 
     # A turn that produced nothing (hard failure) is rolled back so it doesn't
     # leave an orphan user message that would confuse the next turn.

@@ -43,6 +43,55 @@ import ai_improve
 CaptureStream = pu.CaptureStream
 
 
+class AgentCaptureStream(pu.CaptureStream):
+  """CaptureStream for command_with_return runs. A graphic/interactive app
+  immediately reaches for screen facilities (vs.v, register_module, read_nb,
+  ...) that a capture buffer cannot provide; fail fast with a marker message
+  so execute_command_with_return can relaunch the app on a real screen via
+  the launch_app path instead of surfacing a bare AttributeError."""
+  NEEDS_SCREEN = "needs a real screen"
+
+  def __getattr__(self, name):
+    raise AttributeError("CaptureStream has no '%s': this app %s"
+                         % (name, AgentCaptureStream.NEEDS_SCREEN))
+
+
+def indent_hint(path, content):
+  """Post-write teaching hint: Pocket Deck Python uses 2 spaces per indent
+  level. Models often emit 4 (training bias) and can't 'see' the difference,
+  so tell them right when it happens, with a mechanical fix. Only the first
+  statement under a top-level 'def main():'-style opener is measured — that
+  line is one level deep by definition, while deeper nesting, continuation
+  lines and string contents legitimately start with 4+ spaces even in
+  2-space style (so measuring any other line would false-alarm)."""
+  if not path.endswith('.py'):
+    return ''
+  opener_indent = None
+  for line in content.split('\n'):
+    stripped = line.lstrip(' \t')
+    if not stripped or stripped.startswith('#'):
+      continue
+    if opener_indent is not None:
+      if '\t' in line[:len(line) - len(stripped)]:
+        return ("\nNote: this file is indented with tabs but Pocket Deck "
+                "Python uses 2 spaces per indent level. Rewrite it using "
+                "spaces (first level = 2 spaces, second = 4).")
+      n = (len(line) - len(line.lstrip(' '))) - opener_indent
+      if n >= 3:
+        return ("\nNote: this file is indented with %d spaces per level but "
+                "Pocket Deck Python uses 2 spaces per indent level. Rewrite "
+                "the file, halving each line's leading spaces (first level = "
+                "2 spaces, second = 4)." % n)
+      return ''
+    # Arm on a block opener like 'def main(vs, args):'. A line containing
+    # '#' anywhere is never used as the opener: the '#' could sit inside a
+    # string, so stripping "the comment" off is not reliable. The next code
+    # line is one level deeper, so the indent it ADDS is the indent unit.
+    if '#' not in line and line.rstrip().endswith(':'):
+      opener_indent = len(line) - len(line.lstrip(' '))
+  return ''
+
+
 def module_exists(modname):
   """True if modname can be launched: already imported (incl. frozen), a
   .py/.mpy on sys.path, or importable (covers frozen modules not yet loaded)."""
@@ -79,8 +128,7 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False):
   tools.append({
     "type": "function",
     "name": "command_with_return",
-    "description": "Run a device command (or any installed module) and return its captured output. This is your primary tool for TESTING AND VERIFYING CODE: after you write a script with write_file, run it here by name and read the output to confirm it works, see errors, and iterate. A runnable script/app is a module exposing main(vs, args); invoke it by its name plus arguments, e.g. 'temp_foo arg1' for /sd/py/temp_foo.py, or any existing app/command. "
-    + "IMPORTANT: if you EDIT a script and run it again, prefix the command with 'r ' to reload it (e.g. 'r temp_foo arg1') — without 'r' the previous, cached version runs instead of your new code. Built-in commands include: ls (glob patterns like 'word*'; 'ls -r path' lists recursively), cat (read file), head, tail, rm, mv, cp, mkdir, rmdir, grep (search in files), ping, curl (fetch web content — use -L to follow redirects when researching the web, -m 15 for a timeout, -I for headers only, -o file or -O to save; URL goes LAST), and 'analog_clock_set_timer <minutes>'. grep behaves like Linux grep: the PATTERN is a regex by default (no -e needed), with -i ignore-case, -n line numbers, -r recursive, -l filenames only, -v invert, -F literal/fixed-string match, -A/-B/-C N context lines around matches (prefer 'grep -n -C 2' when inspecting code instead of cat-ing the whole file), -c count only, -m N stop after N matches (keeps output small), --no-filename, multiple file arguments, and --include .py,.md to filter by extension; e.g. 'grep -rn \"def .*main\" /sd/py'. Simple pipes ('|') are supported: a stage's output is fed to the next command as stdin, and stdin-aware filters read it when given no file (grep, head, and tail, e.g. 'ls -r /sd/py | grep clock', 'curl -s URL | grep -i error | head -n 5', or 'cat log.txt | tail -n 20'). This is NOT Linux otherwise, only use supported options, do not make assumptions from Linux knowledge, follow the instruction here and README.md. No redirects ('>'), backticks, '&&', or subshells; use one command per stage.",
+    "description": "Run a device command (or any installed module) and return its captured output for non-graphical apps. GRAPHIC/interactive apps cannot run here (there is no screen to draw on): launch them with launch_app instead, setting reload=true after editing their source — launch_app's reload replaces the 'r' prefix. If a graphic app is run here by mistake it is detected and relaunched via launch_app automatically. This is your primary tool for TESTING AND VERIFYING CODE: after you write a script with write_file, run it here by name and read the output to confirm it works, see errors, and iterate. A runnable script/app is a module exposing main(vs, args); invoke it by its name plus arguments, e.g. 'temp_foo arg1' for /sd/py/temp_foo.py, or any existing app/command. IMPORTANT: if you EDIT a script and run it again, prefix the command with 'r ' to reload it (e.g. 'r temp_foo arg1') — without 'r' the previous, cached version runs instead of your new code. Built-in commands include: ls (glob patterns like 'word*'; 'ls -r path' lists recursively), cat (read file), head, tail, rm, mv, cp, mkdir, rmdir, grep (search in files), ping, curl. This not Linux, available options are limited. See README.md for available options for the commands. Simple pipes ('|') are supported: a stage's output is fed to the next command as stdin, and stdin-aware filters read it when given no file (grep, head, and tail, e.g. 'ls -r /sd/py | grep clock', 'curl -s URL | grep -i error | head -n 5', or 'cat log.txt | tail -n 20'). Other commands ignore piped stdin, so only pipe INTO grep/head/tail. This is not Linux otherwise: no redirects ('>'), backticks, '&&', or subshells; use one command per stage.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -113,11 +161,31 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False):
     }
   })
 
+  if not realtime:
+    # Voice agent excluded: there the model just asks out loud. For the text
+    # agents this is the explicit escape hatch, so the model stops grinding on
+    # a failing approach instead of burning tool rounds.
+    tools.append({
+      "type": "function",
+      "name": "ask_user",
+      "description": "Stop working and hand control back to the user. Call this when you are stuck: an approach failed twice, you need a decision, permission, or information only the user has, or continuing would just repeat the same failing attempts. Retrying in circles is worse than asking. After this call, do not call more tools: your next reply should be a short text message stating what you tried, what went wrong, and what you need from the user.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "What you need from the user: the question or decision, with one line of context on what you tried and why you are stuck."
+          }
+        },
+        "required": ["question"]
+      }
+    })
+
   if app_list:
     tools.append({
       "type": "function",
       "name": "launch_app",
-      "description": "Launch a Pocket Deck application by name: a registered app from the list, or any installed module/custom app by its module name (e.g. 'myapp' for /sd/lib/myapp.py). Optionally pass arguments such as a file path to open.",
+      "description": "Launch a Pocket Deck application by its exact name, or any installed module/custom app by its module name (e.g. 'myapp' for /sd/lib/myapp.py), optionally passing arguments such as a file path to open.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -129,6 +197,10 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False):
             "type": "array",
             "items": {"type": "string"},
             "description": "Optional extra arguments for the app, e.g. a file path like '/sd/test.txt'"
+          },
+          "reload": {
+            "type": "boolean",
+            "description": "Set true after editing the app's source so the NEW code runs (clears the cached module before launching, like the shell's 'r' prefix). Without it a previously launched app runs its old cached code."
           }
         },
         "required": ["app_name"]
@@ -138,7 +210,7 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False):
   tools.append({
     "type": "function",
     "name": "list_running_apps",
-    "description": "List the apps currently running and which screen number each is on. Use this before switching, capturing, or driving an app.",
+    "description": "List the apps currently running and which screen number each is on. Use this before switching, capturing, or driving an app. Note screen number starts from 0, but user's perspective screen number starts from 1.",
     "parameters": {"type": "object", "properties": {}, "required": []}
   })
 
@@ -171,7 +243,7 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False):
   tools.append({
     "type": "function",
     "name": "read_console_log",
-    "description": "Read the recent text output (scrollback) from a screen's terminal/console. Use this to see what a command-line app printed — e.g. to find an error message the user is asking about ('what's the error in the console?'). Returns the last N lines of console text. Defaults to the foreground screen. Note: graphics application error or debug message could be printed on screen 0(REPL).",
+    "description": "Read the recent text output (scrollback) from a screen's terminal/console. Use this to see what a command-line app printed — e.g. to find an error message the user is asking about ('what's the error in the console?'). Returns the last N lines of console text. Defaults to the foreground screen. Note: to debug graphic apps, read that screen's log first; debug prints without file=vs still go to screen 0 (REPL).",
     "parameters": {
       "type": "object",
       "properties": {
@@ -184,8 +256,8 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False):
 
   tools.append({
     "type": "function",
-    "name": "launch_command_shell",
-    "description": "Launch a new command-line shell on a given screen so you can drive it with switch_screen / send_keys / capture_screen (e.g. to run interactive commands that command_with_return cannot). This is useful to debug graphical applications. The screen number is 0-based and matches list_running_apps (screen 0 is the Python REPL). Valid screens are 2-9; the screen must be free (nothing already running there). Returns whether the shell was started.",
+    "name": "launch_command_line_shell",
+    "description": "Launch a new command-line shell on a given screen so you can drive it with switch_screen / send_keys / capture_screen (e.g. to run interactive commands that command_with_return cannot). You must use this call to launch command line shell. 'cmd' is not working with command_with_return or launch_app function call. This is useful to debug graphical applications. The screen number is 0-based and matches list_running_apps (screen 0 is the Python REPL). Valid screens are 2-9; the screen must be free (nothing already running there). Returns whether the shell was started.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -299,6 +371,10 @@ class ToolExecBase:
   # already-deep 8KB command stack and overflow.
   RECURSIVE_GUARD = ('gpt', 'gpt_l', 'gpt_rt', 'gpt_c', 'gptn', 'gpt_tools')
 
+  # Set by execute_ask_user; the frontend loop reads and clears it, then
+  # forces the next round to be text-only so the turn ends with the question.
+  user_question = None
+
   # Linux-only commands that don't exist here. Not pre-blocked (a user-installed
   # /sd/py/find.py must still run): only used to append a teaching hint when one
   # of these genuinely fails with ImportError, so a weak model can recover.
@@ -341,10 +417,12 @@ class ToolExecBase:
       return self.execute_read_console_log(arguments)
     if name == "send_keys":
       return self.execute_send_keys(arguments)
-    if name == "launch_command_shell":
+    if name == "launch_command_line_shell":
       return self.execute_launch_command_shell(arguments)
     if name == "launch_app":
       return self.execute_launch_app(arguments)
+    if name == "ask_user":
+      return self.execute_ask_user(arguments)
     if name == "pem_get_status":
       return self.execute_pem_get_status(arguments)
     if name == "pem_edit_block":
@@ -528,9 +606,23 @@ class ToolExecBase:
     # Pipeline splitting/execution lives in pdeck_utils.run_pipeline: stages are
     # split on top-level '|', each stage's captured output feeds the next as
     # stdin via the pstdin bridge, and bare '2>&1' redirects are dropped.
-    cap, result = pu.run_pipeline(command, CaptureStream)
+    cap, result = pu.run_pipeline(command, AgentCaptureStream)
     if cap is None:
       return "Error: " + result
+    # A graphic/interactive app crashed on the capture buffer (see
+    # AgentCaptureStream): relaunch it properly on a real screen. reload=True
+    # because the failed run has already cached the module. Pipes are not
+    # auto-relaunched — a graphic app makes no sense as a pipe stage.
+    if result and AgentCaptureStream.NEEDS_SCREEN in result and parts and '|' not in command:
+      la = self.execute_launch_app(ujson.dumps(
+        {"app_name": parts[0], "args": parts[1:], "reload": True}))
+      return ("'%s' is a graphic/interactive app; it cannot run under "
+              "command_with_return (no screen to draw on). Launched it via "
+              "launch_app instead, with the module reloaded: %s\n"
+              "Use capture_screen to see it; if it errors, the traceback "
+              "appears on the app's own screen — read_console_log on that "
+              "screen returns it. Next time call launch_app directly "
+              "(reload=true after editing its source)." % (parts[0], la))
     if not result:
       return "(no output)"
     if cap._total >= CaptureStream._MAX:
@@ -579,7 +671,8 @@ class ToolExecBase:
         f.write(content)
       # Show the user what changed (frontends that have a screen override the hook).
       self._show_write(path, backup_path, content)
-      return "Written %d bytes to %s%s" % (len(content), path, backup_msg)
+      return "Written %d bytes to %s%s%s" % (len(content), path, backup_msg,
+                                             indent_hint(path, content))
     except Exception as e:
       return "Error: %s" % str(e)
 
@@ -724,6 +817,17 @@ class ToolExecBase:
       if scnum == 10:
         return -1
 
+  def execute_ask_user(self, arguments):
+    try:
+      args = ujson.loads(arguments) if arguments else {}
+    except:
+      args = {}
+    q = args.get("question", "") if isinstance(args, dict) else ""
+    self.user_question = q or "(the assistant is stuck and needs your input)"
+    return ("Question delivered. STOP now: no more tool calls. Reply with a "
+            "short text message for the user — what you tried, what went "
+            "wrong, and the question — then wait for their answer.")
+
   def execute_launch_app(self, arguments):
     try:
       args = ujson.loads(arguments) if arguments else {}
@@ -731,6 +835,7 @@ class ToolExecBase:
       return "Error: invalid arguments"
     app_name = args.get("app_name", "")
     extra_args = args.get("args", [])
+    do_reload = args.get("reload", False)
     for item in self.app_list:
       if not (isinstance(item, list) and len(item) == 2 and item[0] == app_name):
         continue
@@ -740,6 +845,10 @@ class ToolExecBase:
       command = [list(c) for c in info.get('command', [])]
       if extra_args and command:
         command[0] = [command[0][0]] + extra_args
+      if do_reload:
+        for one in command:
+          if one and one[0] in sys.modules:
+            del sys.modules[one[0]]
       pref_scnum = info.get('screen_number', None)
       self._mute_audio(3000)
       launched = []
@@ -754,7 +863,10 @@ class ToolExecBase:
           first = False
         pu.launch(one, scnum)
       pdeck.show_screen_num()
-      return "Launched %s" % app_name
+      if launched:
+        return ("Launched %s on screen %s" %
+                (app_name, ", ".join(str(s) for s in launched)))
+      return "Error: no free screen to launch %s" % app_name
     # Not registered: launch it like a shell command, so any module on
     # sys.path (lib/, /sd/lib, custom apps) can be started by name. A path
     # or filename is accepted too: '/sd/lib/myapp.py' -> 'myapp'.
@@ -765,6 +877,10 @@ class ToolExecBase:
     if not modname or not module_exists(modname):
       return ("App not found: %s (not in the registered app list, and no "
               "module named '%s' on sys.path)" % (app_name, modname))
+    # After the existence check: module_exists may itself have imported (and
+    # therefore cached) the module.
+    if do_reload and modname in sys.modules:
+      del sys.modules[modname]
     self._mute_audio(3000)
     scnum = self._search_free_screen([], 2)
     if scnum == -1:

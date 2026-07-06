@@ -152,16 +152,11 @@ def build_agent_instructions(app_list, my_screen=None):
     "output to you (plain print() goes to the REPL and is NOT captured).\n"
     "Use command_with_return to look up information too (e.g. list files with "
     "'ls /sd/Documents/word*', read a file with 'cat /path', search with grep).\n "
-    "BE TOKEN-EFFICIENT WITH TOOL CALLS. "
-    "Pocket Deck is not Linux: no redirects ('>'), no '&&' or ';', no subshells. "
-    "Simple pipes '|' ARE supported, but only INTO grep/head/tail. Read README.md "
-    "and use only the options that are mentioned in the manual. "
-    "cat, grep, ls, head, tail are great tools to reduce function calls. See README.md for full command list.\n"
+    "**Pocket Deck is not Linux**: no redirects ('>'), no '&&' or ';', no subshells."
+    "See README.md for full command list.\n"
     "The device keeps an activity log under /sd/elog/, one markdown file per day "
     "named YYYY-MM-DD.md, each line an event: app launches, file opens/saves, and "
-    "shell commands the user ran. Read the current day's file (its name is today's "
-    "date; 'ls /sd/elog' if unsure, then cat it) to see what the user has recently "
-    "been doing, resume their work, or answer questions about recent activity.\n"
+    "shell commands the user ran. Read the current day's file as needed.\n"
     "The user keeps SKILLS at /sd/Documents/skills/ — one markdown file per "
     "skill: a named, reusable procedure you can perform (a routine with steps "
     "and timings, a recurring workflow like a morning writing setup, a document "
@@ -182,8 +177,8 @@ def build_agent_instructions(app_list, my_screen=None):
     "GUI shows them 1-based, so the screen the user calls '2' is screen 1 here — "
     "always pass the 0-based number from list_running_apps, not the GUI number. "
     "Use capture_screen to take a screenshot of a screen and look "
-    "at it (it is returned to you as an image); it takes some time, so do not "
-    "request screenshots at a high rate. Use send_keys to type into the app in the "
+    "at it (it is returned to you as an image); it takes some time."
+    "Use send_keys to type into the app in the "
     "foreground; set enter=true to press Enter, and use escape sequences for "
     "special keys (Up=\\x1b[A, Down=\\x1b[B, Right=\\x1b[C, Left=\\x1b[D, Esc=\\x1b, "
     "Backspace=\\x08, Ctrl-X=\\x18). After acting, capture_screen again to confirm "
@@ -191,6 +186,11 @@ def build_agent_instructions(app_list, my_screen=None):
     "To read TEXT a command-line app printed (e.g. to diagnose an error the user "
     "asks about), prefer read_console_log over a screenshot — it returns the "
     "recent console text directly and cheaply.\n"
+    "You do not have to solve everything alone. If the same approach has failed "
+    "twice, or you need a decision, permission, or information only the user has, "
+    "call ask_user with a short question instead of retrying in circles — then "
+    "stop and wait for the answer. Asking early beats a long stretch of failing "
+    "tool calls.\n"
   )
   if my_screen is not None:
     text += ("\nIMPORTANT: your own screen — where your typed answers are shown — "
@@ -472,8 +472,9 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
     # function_call_outputs, so self.prev_response_id never ends up pointing at a
     # response with an unanswered function call — which would otherwise make the
     # *next* turn fail with "no tool output found for function call ...".
+    ask_stop = False  # set when the model calls ask_user: next round is text-only
     for i in range(max_iters + 1):
-      force_final = (i == max_iters)
+      force_final = (i == max_iters) or ask_stop
       gc.collect()  # large JSON/base64 each round-trip fragments the small heap
       payload = {
         "model": model,
@@ -591,6 +592,12 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
           }]
         })
         self.pending_image = None
+
+      # An ask_user call ends the turn: the next round is text-only so the
+      # model states its question and control returns to the user.
+      if self.user_question is not None:
+        ask_stop = True
+        self.user_question = None
 
       input_list = next_input
       in_flight = True  # these outputs are delivered on the next successful POST
@@ -715,9 +722,21 @@ DEFAULT_ROLE = "You are a helpful assistant. Keep answers clear and concise."
 CODER_ROLE = (
   "You are an expert MicroPython coding assistant for the Pocket Deck handheld "
   "device. You write, run, and debug code directly on the device. Favor small, "
-  "correct, idiomatic MicroPython (2-space indentation). Before you tell the user "
+  "correct, idiomatic MicroPython.\n"
+  "INDENTATION RULE: exactly 2 spaces per indent level, never 4, never tabs. "
+  "'2-space' means each nesting level ADDS 2 spaces: a line one level deep "
+  "starts with 2 spaces, two levels deep with 4, three deep with 6. Correct:\n"
+  "def main(vs, args):\n"
+  "  for i in range(3):\n"
+  "    if i > 1:\n"
+  "      print(i, file=vs)\n"
+  "To convert 4-space code to this style, halve the leading spaces of every "
+  "line (8->4, 4->2). Do not judge a file by one nested line: check the FIRST "
+  "indented line under a 'def' — it must start with exactly 2 spaces.\n"
+  " Before you tell the user "
   "a task is done, run the code with your tools and confirm it works; if it "
-  "errors, read the output, fix it, and re-run. Briefly explain what you changed.")
+  "errors, read the output, fix it, and re-run. Briefly explain what you changed."
+  "Refer and follow /sd/Documents/pd/app_development.md as needed, the document has all available APIs in Pocket Deck")
 
 TTS_NOTE = ("Your reply will be fed to a TTS engine; optimize for text-to-speech: "
             "keep it short and speakable.")

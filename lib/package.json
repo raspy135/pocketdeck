@@ -197,6 +197,10 @@
             "docs.py"
         ],
         [
+            "esclib.py",
+            "esclib.py"
+        ],
+        [
             "examples/animation_example.py",
             "examples/animation_example.py"
         ],
@@ -748,7 +752,7 @@
         },
         {
             "path": "pc_compat.py",
-            "md5": "c94f52077cfb5274cc8a1b0cbadcf335"
+            "md5": "642e9d0ae191a581c9056e05373660a6"
         },
         {
             "path": "rmdir.py",
@@ -823,6 +827,10 @@
             "md5": "3fa69315bdabe7a00d2dc38a468334fe"
         },
         {
+            "path": "esclib.py",
+            "md5": "932b3a1e5255e4ad809a409c7b7f63a2"
+        },
+        {
             "path": "gpt_rt.py",
             "md5": "85250e711eaa6d432f1bb7f594814fe9"
         },
@@ -836,7 +844,7 @@
         },
         {
             "path": "gpt.py",
-            "md5": "5450384ade74ec227ef0d52d4e2f718f"
+            "md5": "a3752bd5678d47bb04f179128869de1e"
         },
         {
             "path": "diff.py",
@@ -896,7 +904,7 @@
         },
         {
             "path": "gpt_c.py",
-            "md5": "1680c33ad44358e5617e5da497139268"
+            "md5": "aee4047b78b60bc5487b7f3f2da6e68e"
         },
         {
             "path": "update_updater.py",
@@ -1012,7 +1020,7 @@
         },
         {
             "path": "noa/pc_compat.py",
-            "md5": "c94f52077cfb5274cc8a1b0cbadcf335"
+            "md5": "642e9d0ae191a581c9056e05373660a6"
         },
         {
             "path": "noa/benchmark.py",
@@ -1052,7 +1060,7 @@
         },
         {
             "path": "noa/gpt_tools.py",
-            "md5": "ec7259aa440f5317bf9d0b7ff11a81dd"
+            "md5": "778d005d07d070f34aea1f2f8e621591"
         },
         {
             "path": "noa/pdeck_complete.py",

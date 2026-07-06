@@ -214,11 +214,38 @@ def install():
           command_shell=lambda n: False,
           vscreen=lambda: _StubModule('vscreen'))
 
-  # pdeck_utils: timezone (quarter-hours), empty app list, no-op launch
+  # pdeck_utils: timezone (quarter-hours), empty app list, no-op launch.
+  # CaptureStream must be a real class (gpt_tools subclasses it at import),
+  # matching the device interface: bounded write + getvalue.
+  class _CaptureStream:
+    _MAX = 50000
+
+    def __init__(self):
+      self._parts = []
+      self._total = 0
+
+    def write(self, data):
+      if isinstance(data, (bytes, bytearray)):
+        data = data.decode('utf-8', 'replace')
+      remaining = self._MAX - self._total
+      if remaining <= 0:
+        return
+      if len(data) > remaining:
+        data = data[:remaining]
+      self._parts.append(data)
+      self._total += len(data)
+
+    def read(self, n=1):
+      return ''
+
+    def getvalue(self):
+      return ''.join(self._parts)
+
   _ensure('pdeck_utils',
           timezone=_local_tz_quarter_hours(),
           app_list={},
-          launch=_noop)
+          launch=_noop,
+          CaptureStream=_CaptureStream)
 
   reg('pngwriter', _module('pngwriter', encode_mono_xbm=_noop))
   reg('esclib', _module('esclib', esclib=_esclib))
