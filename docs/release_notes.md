@@ -1,4 +1,4 @@
-## Release Note, July 2, 2026
+## Release Note, July 5, 2026
 
 ### firmware
 
@@ -6,6 +6,7 @@
 
 ### Application
 
+- BLE keyboard manager fix. It has an issue with some BLE keyboards.
 - System shortcut is added. Applications can register system shortcut by vscreen.register_shortcut(). The feature is used in gpt_rt.
 - rm : bug fix
 - echo : echo command
@@ -19,8 +20,9 @@
 - AI apps (gpt and gpt_rt) can read PEM status in agent mode (-a), inspect content, and edit the currently open file. For example: "Check the line I'm editing in PEM and add a wrap-up to the end."
 - Added `/improve`. It generates a self-improvement memo at `/sd/Documents/ai_memory/ai_memory.md` and is auto-executed periodically in the `gpt` (conversation mode, every 8 turns by default; `/auto-improve` to tune) and `gpt_rt` apps.
 - AI apps now has skills. System skills are located under /sd/lib/skills, and user skills are located under /sd/Documents/skills.
+- AI apps has personal memory, it will be stored in /sd/Documents/ai_memory/ai_memory.md
 - gpt_rt : The microphone can be toggled with the system shortcut slider + A.
-
+- A lot of tweeks to gpt and gpt_rt for more efficient tool calls, better agent performance.
 
 ## Release Note, June 26, 2026
 

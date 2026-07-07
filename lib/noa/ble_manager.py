@@ -18,7 +18,9 @@ class BLEManager:
     self.ble.active(True)
     # Common config for Pocket Deck
     try:
-      self.ble.config(gap_name='PocketDeck', bond=True, mitm=False, le_secure=False, io=4)
+      # le_secure=True: ZMK/modern BLE keyboards use LE Secure Connections and
+      # will refuse to deliver HID reports over a link that isn't encrypted.
+      self.ble.config(gap_name='PocketDeck', bond=True, mitm=False, le_secure=True, io=4)
     except:
       pass
     self.subscribers = {}

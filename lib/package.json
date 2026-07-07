@@ -768,7 +768,7 @@
         },
         {
             "path": "ble_kb.py",
-            "md5": "74bf34ab5b26c14e94bcad862c592097"
+            "md5": "b279a9fe418fbf20bd1b15c08b5a9a4b"
         },
         {
             "path": "curl.py",
@@ -1012,7 +1012,7 @@
         },
         {
             "path": "noa/ble_manager.py",
-            "md5": "7745e1b76361d5dec3421a85e7cb00e7"
+            "md5": "5b5e171f549bcee825b6f8032e152c35"
         },
         {
             "path": "noa/wav_play.py",

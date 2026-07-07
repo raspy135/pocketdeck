@@ -26,6 +26,11 @@ _PASSKEY = 31
 _CFG = "/config/ble_kb.json"
 _SEC = "/config/ble_secrets.json"
 
+# Set DEBUG = True to trace the BLE connect/pair/discover/notify flow.
+# Detailed traces go to the serial REPL via print(); milestones also show
+# on the device screen. Watch the serial console while pairing a new KB.
+DEBUG = False
+
 
 class _Secrets:
   """Persist BLE bonding keys to JSON."""
@@ -76,9 +81,11 @@ class _Conn:
     self.ready = False
     self.pair_q = is_new      # Only pair for NEW devices, not reconnections
     self.disc_q = not is_new  # Reconnections: wait for enc, fallback to disc
+    self.pair_tried = is_new  # new devices pair via pair_q; known ones may re-pair
     self.disc_at = 0
     self.prev_keys = set()
     self.prev_mod = 0
+    self.conn_at = time.time()  # for measuring how long a link survives
 
 
 class BLEKeyboardHost:
@@ -98,6 +105,15 @@ class BLEKeyboardHost:
   def _msg(self, s):
     try: self.v.print(f"{s}\n")
     except: pass
+
+  def _dbg(self, s, scr=False):
+    # Verbose trace: always to serial REPL, optionally echoed on screen.
+    if not DEBUG: return
+    try: print("[ble_kb]", s)
+    except: pass
+    if scr:
+      try: self.v.print(f". {s}\n")
+      except: pass
 
   def _load_cfg(self):
     try:
@@ -126,9 +142,12 @@ class BLEKeyboardHost:
 
   def _irq(self, event, data):
     if event == _SET_SECRET:
+      self._dbg(f"SET_SECRET type={data[0]} key={bytes(data[1]).hex() if data[1] else None}")
       return self._sec.set(data[0], data[1], data[2])
     if event == _GET_SECRET:
-      return self._sec.get(data[0], data[1], data[2])
+      r = self._sec.get(data[0], data[1], data[2])
+      self._dbg(f"GET_SECRET type={data[0]} idx={data[1]} -> {'HIT' if r else 'MISS'}")
+      return r
 
     if event == _SCAN_RESULT:
       addr_type, addr, _, _, adv = data
@@ -139,6 +158,7 @@ class BLEKeyboardHost:
         self._known.add(ah)
         self.connecting += 1
         self._msg("Found KB")
+        self._dbg(f"SCAN match addr={ah} type={addr_type} -> gap_connect")
         self.ble.gap_connect(addr_type, addr)
 
     elif event == _SCAN_DONE:
@@ -162,6 +182,8 @@ class BLEKeyboardHost:
       self._add_device(at, addr)
       n = len(self._conns)
       self._msg(f"Connected ({n})")
+      self._dbg(f"CONNECT ch={ch} addr={ah} is_new={is_new} "
+                f"(new->will pair, known->wait for enc)")
 
     elif event == _DISCONNECT:
       ch = data[0]
@@ -169,6 +191,16 @@ class BLEKeyboardHost:
       if c:
         self._known.discard(c.addr)
         was_ready = c.ready
+        # reason code, if this MicroPython build exposes it
+        reason = data[3] if len(data) > 3 else None
+        self._dbg(f"DISCONNECT ch={ch} addr={c.addr} after={time.time()-c.conn_at:.1f}s "
+                  f"encrypted={c.encrypted} ready={c.ready} discovering={c.discovering} "
+                  f"reason={reason}", scr=True)
+        if not c.encrypted:
+          self._dbg("  -> dropped BEFORE encryption: pairing/bonding failed. "
+                    "Try clearing the bond on both sides (see notes).", scr=True)
+      else:
+        self._dbg(f"DISCONNECT ch={ch} (untracked)")
       n = len(self._conns)
       if n == 0:
         try: pdeck.led(3, 0)
@@ -179,7 +211,14 @@ class BLEKeyboardHost:
     elif event == _ENC_UPDATE:
       ch = data[0]
       c = self._conns.get(ch)
-      if c and data[1]:
+      # data = (conn_handle, encrypted, authenticated, bonded, key_size)
+      enc = data[1] if len(data) > 1 else None
+      auth = data[2] if len(data) > 2 else None
+      bonded = data[3] if len(data) > 3 else None
+      ksz = data[4] if len(data) > 4 else None
+      self._dbg(f"ENC_UPDATE ch={ch} encrypted={enc} authenticated={auth} "
+                f"bonded={bonded} key_size={ksz}", scr=True)
+      if c and enc:
         c.encrypted = True
         if not c.disc_q and not c.discovering:
           c.disc_q = True
@@ -187,6 +226,8 @@ class BLEKeyboardHost:
 
     elif event == _PASSKEY:
       ch, act = data[0], data[1]
+      self._dbg(f"PASSKEY ch={ch} action={act} "
+                f"(4=numcmp confirm, 2=passkey entry)", scr=True)
       if act == 4: self.ble.gap_passkey(ch, act, 1)
       elif act == 2: self.ble.gap_passkey(ch, act, 0)
 
@@ -195,14 +236,18 @@ class BLEKeyboardHost:
       c = self._conns.get(ch)
       if c and "1812" in str(data[3]).lower():
         c.hid = (data[1], data[2])
+        self._dbg(f"SVC found HID(0x1812) ch={ch} range={data[1]}-{data[2]}")
 
     elif event == _SVC_DONE:
       ch = data[0]
       c = self._conns.get(ch)
       if not c: return
       if c.hid:
+        self._dbg(f"SVC_DONE ch={ch} -> discover HID characteristics")
         self.ble.gattc_discover_characteristics(ch, *c.hid)
       else:
+        self._dbg(f"SVC_DONE ch={ch} NO HID service found "
+                  f"(encrypted={c.encrypted}); will retry", scr=True)
         c.discovering = False
         if not c.encrypted:
           c.disc_q = True
@@ -215,14 +260,18 @@ class BLEKeyboardHost:
       vh, props, uuid = data[2], data[3], data[4]
       if "2a4d" in str(uuid).lower() and (props & 0x10):
         c.reports.append(vh)
+        self._dbg(f"CHR report(0x2A4D,notify) ch={ch} value_handle={vh}")
 
     elif event == _CHR_DONE:
       ch = data[0]
       c = self._conns.get(ch)
       if not c: return
+      self._dbg(f"CHR_DONE ch={ch} report_chars={len(c.reports)}")
       if c.reports:
         c.desc_i = 0
         self._disc_desc(c)
+      else:
+        self._dbg("  -> no notifiable input-report chars found", scr=True)
 
     elif event == _DSC_RESULT:
       ch = data[0]
@@ -240,19 +289,27 @@ class BLEKeyboardHost:
       if c.desc_i < len(c.reports):
         self._disc_desc(c)
       elif c.cccds:
-        for _, cccd_h in c.cccds:
+        for rh, cccd_h in c.cccds:
+          self._dbg(f"CCCD write ch={ch} report_vh={rh} cccd_handle={cccd_h} <- 0100")
           self.ble.gattc_write(ch, cccd_h, b'\x01\x00')
         c.ready = True
         try: pdeck.led(3, 5)
         except: pass
         self._msg("KB ready")
+        self._dbg(f"KB ready ch={ch} notify-handles={[r for r,_ in c.cccds]} "
+                  f"encrypted={c.encrypted} (press keys now)", scr=True)
+      else:
+        self._dbg(f"DSC_DONE ch={ch} no CCCD(0x2902) descriptors found -> "
+                  f"cannot enable notifications", scr=True)
 
     elif event == _NOTIFY:
       ch = data[0]
       c = self._conns.get(ch)
       if not c: return
       vh, nd = data[1], data[2]
-      if any(vh == r for r, _ in c.cccds) or vh in c.reports:
+      matched = any(vh == r for r, _ in c.cccds) or vh in c.reports
+      self._dbg(f"NOTIFY ch={ch} vh={vh} matched={matched} data={bytes(nd).hex()}")
+      if matched:
         self._on_report(c, nd)
 
   def _disc_desc(self, c):
@@ -286,10 +343,13 @@ class BLEKeyboardHost:
     return False
 
   def _on_report(self, c, rpt):
-    if len(rpt) < 8: return
+    if len(rpt) < 8:
+      self._dbg(f"report ignored: len={len(rpt)} < 8 data={bytes(rpt).hex()}")
+      return
     d = rpt[1:9] if len(rpt) >= 9 and rpt[0] != 0 else rpt[:8]
     mod = d[0]
     keys = set(k for k in d[2:] if k)
+    self._dbg(f"report mod={mod:#04x} keys={sorted(keys)}")
     for k in c.prev_keys - keys:
       self.v.send_key_event(k, mod, 0)
     for k in keys - c.prev_keys:
@@ -363,14 +423,30 @@ def main(vs, args):
       for c in list(kb._conns.values()):
         if c.pair_q:
           c.pair_q = False
+          kb._dbg(f"gap_pair ch={c.ch} (new device -> initiate bonding)")
           try: kb.ble.gap_pair(c.ch)
-          except:
+          except Exception as e:
+            kb._dbg(f"gap_pair FAILED ch={c.ch}: {e} -> fall back to discovery", scr=True)
             if not c.disc_q:
               c.disc_q = True
               c.disc_at = now + 3
 
         if c.disc_q and now >= c.disc_at:
-          kb._discover(c)
+          # HID-over-GATT gates keypress notifications behind link encryption.
+          # If we're not encrypted yet, (re)initiate bonding before discovery
+          # instead of falsely reporting "KB ready" on a link that won't deliver
+          # reports. ENC_UPDATE re-queues discovery once encryption succeeds.
+          if not c.encrypted and not c.pair_tried:
+            c.pair_tried = True
+            kb._dbg(f"not encrypted at discover -> gap_pair ch={c.ch}", scr=True)
+            try:
+              kb.ble.gap_pair(c.ch)
+              c.disc_at = now + 5   # give bonding time; fall back after if silent
+            except Exception as e:
+              kb._dbg(f"gap_pair failed ch={c.ch}: {e} -> discover unencrypted", scr=True)
+              kb._discover(c)
+          else:
+            kb._discover(c)
 
         if c.discovering and not c.ready and now > c.disc_at + 10:
           c.discovering = False
