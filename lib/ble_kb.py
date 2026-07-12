@@ -26,6 +26,13 @@ _PASSKEY = 31
 _CFG = "/config/ble_kb.json"
 _SEC = "/config/ble_secrets.json"
 
+# Loop gap (seconds) above which we assume the device resumed from lightsleep
+# and must reset the BLE stack. Kept well above the few-second stall a large
+# .py compile causes: a compile freezes this loop but leaves the radio powered,
+# so resetting there would needlessly cycle the SHARED radio (BLEManager) and
+# drop other services' links too. Real lightsleep-away gaps are much longer.
+_RESUME_GAP_S = 10
+
 # Set DEBUG = True to trace the BLE connect/pair/discover/notify flow.
 # Detailed traces go to the serial REPL via print(); milestones also show
 # on the device screen. Watch the serial console while pairing a new KB.
@@ -176,8 +183,11 @@ class BLEKeyboardHost:
       is_new = not any(d.get('addr') == ah for d in self._saved)
       c = _Conn(ch, ah, is_new)
       if not is_new:
-        # Reconnection: give encryption 3s to restore, then fallback
-        c.disc_at = time.time() + 3
+        # Reconnection: give encryption time to restore, then fall back to
+        # discovery. The happy path is faster — ENC_UPDATE re-queues discovery
+        # at +0.5s the moment encryption restores; this only bounds the wait
+        # when re-encryption is slow or silent.
+        c.disc_at = time.time() + 2
       self._conns[ch] = c
       self._add_device(at, addr)
       n = len(self._conns)
@@ -312,6 +322,18 @@ class BLEKeyboardHost:
       if matched:
         self._on_report(c, nd)
 
+  def _setup_active(self):
+    # True while any link is still scanning/connecting/pairing/discovering.
+    # The main loop uses this to tick fast during setup so each stage of the
+    # connect state machine advances quickly; keypresses are IRQ-driven, so
+    # this affects connection speed only, not key latency.
+    if self.scanning or self.connecting:
+      return True
+    for c in self._conns.values():
+      if not c.ready:
+        return True
+    return False
+
   def _disc_desc(self, c):
     vh = c.reports[c.desc_i]
     self.ble.gattc_discover_descriptors(c.ch, vh, vh + 3)
@@ -389,6 +411,22 @@ class BLEKeyboardHost:
         self._known.discard(ah)
         self.connecting = max(0, self.connecting - 1)
 
+  def _reset_ble(self):
+    # Called on resume from lightsleep. The old links are dead (controller was
+    # powered down), so drop all per-connection state and reinit the stack, then
+    # start reconnecting/scanning from a clean slate — same as a fresh boot.
+    self._conns.clear()
+    self._known.clear()
+    self.connecting = 0
+    self.scanning = False
+    try: pdeck.led(3, 0)
+    except: pass
+    self.mgr.reset()
+    if self._saved:
+      self.reconnect_all()
+    else:
+      self.scan(1500)
+
   def stop(self):
     self._stop_scan()
     for ch in list(self._conns):
@@ -399,6 +437,18 @@ class BLEKeyboardHost:
 
 
 def main(vs, args):
+  # -r : reset — delete saved device + bond keys before starting, so the next
+  # connection pairs from scratch. Must run before the host loads the config.
+  if len(args) > 1 and "-r" in args[1:]:
+    n = 0
+    for path in (_CFG, _SEC):
+      try:
+        os.remove(path)
+        n += 1
+      except: pass
+    try: vs.v.print(f"Reset: cleared {n} config file(s)\n")
+    except: pass
+
   kb = BLEKeyboardHost(vs.v)
   fails = 0
   conn_t = time.time()
@@ -410,9 +460,22 @@ def main(vs, args):
     kb.scan(1500)
   kb._recon_t = time.time() + 3
   req_scan = False
+  last_tick = time.time()
   try:
     while True:
       now = time.time()
+      # Resume-from-lightsleep detection: the loop is normally paced by the
+      # ~0.5s sleep below, so a gap of several seconds means the device slept.
+      # lightsleep powers down the BLE controller, leaving any bonded link dead
+      # and un-re-encryptable ("dropped before encryption"). Reset the stack to
+      # a fresh-boot state and reconnect instead of limping on stale handles.
+      if now - last_tick > _RESUME_GAP_S:
+        kb._dbg(f"resume after {now - last_tick:.0f}s idle -> reset BLE + reconnect",
+                scr=True)
+        kb._reset_ble()
+        conn_t = now
+        kb._recon_t = now + 1
+      last_tick = now
       key = vs.v.read_nb(1)
       if key and key[0] > 0 and key[1].encode('ascii') == b'\x0d':
         req_scan = True
@@ -482,7 +545,11 @@ def main(vs, args):
       if any(c.ready for c in kb._conns.values()):
         fails = 0
 
-      time.sleep(0.5)
+      # Tick fast (~0.1s) while a link is still being set up so each stage
+      # advances quickly; idle slowly (0.5s) once every keyboard is ready.
+      # The >_RESUME_GAP_S sleep-detection above stays valid: at idle the loop
+      # still ticks every 0.5s, far below the gap threshold.
+      time.sleep(0.1 if kb._setup_active() else 0.5)
   except KeyboardInterrupt:
     pass
   finally:

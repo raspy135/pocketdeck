@@ -429,6 +429,10 @@
             "noa/ble_manager.py"
         ],
         [
+            "noa/capture_stream.py",
+            "noa/capture_stream.py"
+        ],
+        [
             "noa/codec_config.py",
             "noa/codec_config.py"
         ],
@@ -760,7 +764,7 @@
         },
         {
             "path": "nudoc.py",
-            "md5": "6826bde01418dadea70c089040665f25"
+            "md5": "6f1e569b7d7e95c7e2e4491ace758557"
         },
         {
             "path": "gdrive.py",
@@ -768,7 +772,7 @@
         },
         {
             "path": "ble_kb.py",
-            "md5": "b279a9fe418fbf20bd1b15c08b5a9a4b"
+            "md5": "c3a75899cef3873827c66b1722682e79"
         },
         {
             "path": "curl.py",
@@ -824,7 +828,7 @@
         },
         {
             "path": "gpt_l.py",
-            "md5": "3fa69315bdabe7a00d2dc38a468334fe"
+            "md5": "ddc0ebbcdf840303596c152340cb0fc1"
         },
         {
             "path": "esclib.py",
@@ -832,7 +836,7 @@
         },
         {
             "path": "gpt_rt.py",
-            "md5": "85250e711eaa6d432f1bb7f594814fe9"
+            "md5": "9ce726fed06596ac3a824d1c389badd0"
         },
         {
             "path": "clip.py",
@@ -844,7 +848,7 @@
         },
         {
             "path": "gpt.py",
-            "md5": "a3752bd5678d47bb04f179128869de1e"
+            "md5": "3a15245f12ac419085ad38fefd2ecfa7"
         },
         {
             "path": "diff.py",
@@ -856,7 +860,7 @@
         },
         {
             "path": "cd.py",
-            "md5": "badfff2af2b5fe59e251b4bfea38db2d"
+            "md5": "adc9b0e5a13e149c458c67c31a972719"
         },
         {
             "path": "tail.py",
@@ -904,7 +908,7 @@
         },
         {
             "path": "gpt_c.py",
-            "md5": "aee4047b78b60bc5487b7f3f2da6e68e"
+            "md5": "8bea859a544341acaf1c9191e590160d"
         },
         {
             "path": "update_updater.py",
@@ -1012,7 +1016,7 @@
         },
         {
             "path": "noa/ble_manager.py",
-            "md5": "5b5e171f549bcee825b6f8032e152c35"
+            "md5": "fca81a158c0fc8fdde9593d7c3a2639a"
         },
         {
             "path": "noa/wav_play.py",
@@ -1060,7 +1064,7 @@
         },
         {
             "path": "noa/gpt_tools.py",
-            "md5": "778d005d07d070f34aea1f2f8e621591"
+            "md5": "a4518c5763d3ff3390e4e0c5de0dc95f"
         },
         {
             "path": "noa/pdeck_complete.py",
@@ -1121,6 +1125,10 @@
         {
             "path": "noa/pem_keymap_default.py",
             "md5": "a2bf6ab5bbb16b0718fc679966de43a5"
+        },
+        {
+            "path": "noa/capture_stream.py",
+            "md5": "66824a642da3dee850bc2188df4fd06f"
         },
         {
             "path": "noa/pem_keymap.py",

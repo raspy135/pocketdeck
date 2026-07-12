@@ -46,3 +46,21 @@ class BLEManager:
       
   def get_ble(self):
     return self.ble
+
+  def reset(self):
+    """Fully reinitialize the BLE stack.
+
+    lightsleep powers down the controller while the host's link/security state
+    stays in RAM, so after a resume the two are out of sync and re-encryption of
+    a bonded link fails ("dropped before encryption"). Cycling active() + re-
+    applying config reproduces a fresh-boot clean state. Subscribers are kept on
+    the singleton, so the irq dispatcher just needs re-registering."""
+    try: self.ble.active(False)
+    except: pass
+    try: self.ble.active(True)
+    except: pass
+    try:
+      self.ble.config(gap_name='PocketDeck', bond=True, mitm=False, le_secure=True, io=4)
+    except:
+      pass
+    self.ble.irq(self._irq)

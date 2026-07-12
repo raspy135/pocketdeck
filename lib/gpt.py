@@ -57,6 +57,19 @@ el = gpt.el
 # Helpers ported from gpt_rt.py
 # ----------------------------------------------------------------------------
 
+def print_exc(e, vs):
+  """Print a traceback (with line numbers) for `e` to `vs`, so a failed turn
+  points at the offending line instead of just its repr. Works on both the
+  device (sys.print_exception) and a PC (traceback)."""
+  try:
+    sys.print_exception(e, vs)
+  except AttributeError:
+    import traceback
+    traceback.print_exception(type(e), e, e.__traceback__, file=vs)
+  except Exception:
+    pass
+
+
 def load_app_list():
   result = []
   for path in ('/config/apps.json', '/config/agent_apps.json'):
@@ -225,8 +238,9 @@ build_tools = gpt_tools.build_tools
 # ('responses' -> this module's Responses client, 'chat' -> gpt_c's Chat
 # Completions client) plus its base_url and model id. -m and the /model command
 # pick an entry by name. The file is created with OpenAI defaults on first run.
-# The API key stays separate in /config/openai_api_key; local endpoints need no
-# key.
+# An entry may carry its own "key" (bearer token) for providers that need one
+# (e.g. xAI); with no "key", OpenAI endpoints fall back to /config/openai_api_key
+# for backward compatibility and every other endpoint is called without auth.
 
 OPENAI_BASE = "https://api.openai.com/v1"
 
@@ -278,11 +292,15 @@ def load_registry(vs=None):
       data = ujson.load(f)
     if isinstance(data, dict) and isinstance(data.get("models"), list) and data["models"]:
       return data
+    if vs is not None:
+      print("Warning: %s has no usable 'models' list; using defaults." % path, file=vs)
     return default_reg
   except OSError:
     pass  # missing -> create below with defaults
-  except Exception:
-    return default_reg  # malformed -> use defaults without clobbering the file
+  except Exception as e:
+    if vs is not None:
+      print("Warning: could not parse %s (%s); using defaults." % (path, e), file=vs)
+    return default_reg
   try:
     with open(path, "w") as f:
       f.write(_format_registry(DEFAULT_REGISTRY_MODELS, DEFAULT_REGISTRY_DEFAULT))
@@ -302,7 +320,8 @@ def _normalize_entry(entry):
   return {"name": name, "api": api,
           "base_url": entry.get("base_url") or OPENAI_BASE,
           "model": entry.get("model") or name,
-          "effort": entry.get("effort")}
+          "effort": entry.get("effort"),
+          "key": entry.get("key")}
 
 
 def resolve_entry(registry, name):
@@ -334,15 +353,19 @@ def make_client(entry, vs):
 
 def init_client(entry, vs, plan_mode):
   """Build a client for `entry`, load the API key and set the execution mode.
-  OpenAI endpoints require a key (returns None if missing); other endpoints
-  (Ollama, local servers) proceed keyless."""
+  An explicit "key" on the entry is used verbatim as the bearer token (for
+  non-OpenAI providers like xAI that need their own key). With no "key", an
+  OpenAI endpoint falls back to /config/openai_api_key (required, returns None
+  if missing) for backward compatibility; any other endpoint proceeds keyless."""
   obj = make_client(entry, vs)
-  is_openai = entry["base_url"].rstrip("/") == OPENAI_BASE
-  if is_openai:
+  key = entry.get("key")
+  if key:
+    obj.api_key = key.strip()
+  elif entry["base_url"].rstrip("/") == OPENAI_BASE:
     if not obj.read_api_key():
       return None
   else:
-    obj.api_key = gpt.read_api_key() or ""  # optional for local endpoints
+    obj.api_key = ""  # no key field -> no authorization
   obj.mode = 'plan' if plan_mode else 'auto'
   return obj
 
@@ -409,7 +432,11 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
     self.prev_response_id = None
 
   def build_tools_for(self, app_list, agent):
-    return build_tools(app_list, agent=agent, web_search=True)
+    # Genuine OpenAI endpoints get OpenAI's hosted web_search; any other
+    # Responses-compatible provider (e.g. xAI) has no hosted search, so it falls
+    # back to the device-side web_search function instead of scraping with curl.
+    hosted = getattr(self, 'base_url', '').rstrip('/') == OPENAI_BASE
+    return build_tools(app_list, agent=agent, web_search=True, hosted_search=hosted)
 
   def resume_from(self, rid, vs=None, silent=False):
     """Seed server-side context from a saved session id ('last' = most recent).
@@ -511,7 +538,11 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
       pdeck.led(1, 0)  # got the response
 
       if data.get("error"):
-        print("API Error: %s" % data["error"].get("message", "Unknown error"), file=self.vs)
+        err = data["error"]
+        # OpenAI returns {"error": {"message": ...}}; some compatible providers
+        # (e.g. xAI) return {"error": "message string"}.
+        msg = err.get("message", "Unknown error") if isinstance(err, dict) else err
+        print("API Error: %s" % msg, file=self.vs)
         if in_flight:
           self.prev_response_id = None  # outputs never delivered; chain is broken
         return final_text
@@ -523,13 +554,21 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
       fn_calls = []
       text_out = None
       for item in data.get("output", []):
+        if not isinstance(item, dict):
+          continue
         t = item.get("type")
         if t == "function_call":
           fn_calls.append(item)
         elif t == "message":
-          for c in item.get("content", []):
-            if c.get("type") == "output_text" or c.get("type") == "text":
-              text_out = (text_out or "") + c.get("text", "")
+          content = item.get("content", [])
+          # OpenAI returns content as a list of parts; some compatible providers
+          # (e.g. xAI) may return it as a plain string.
+          if isinstance(content, str):
+            text_out = (text_out or "") + content
+          else:
+            for c in content:
+              if isinstance(c, dict) and c.get("type") in ("output_text", "text"):
+                text_out = (text_out or "") + c.get("text", "")
       if text_out:
         final_text = text_out
 
@@ -1625,6 +1664,7 @@ def main(vs, args_in):
           run_improve(reason="periodic auto-improve", auto=True)
     except BaseException as e:
       print("\n[Turn failed; you can keep going] %r" % (e,), file=vs)
+      print_exc(e, vs)
 
   pdeck.led(1, 0)  # leaving conversation: clear status LEDs
   gpt_obj.led2_gen += 1  # invalidate any pending auto-off timer

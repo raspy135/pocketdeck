@@ -150,6 +150,7 @@ When the model invokes a tool you'll see a `[Call]` line and a `[Result]` line.
 AI can do the following things in agent mode.
 
 - Command execution
+- **Web search** — a `web_search` tool returns ranked results (title, URL, snippet) so the model gets current information without scraping search pages with `curl`. On genuine OpenAI models this uses OpenAI's hosted web search; on every other endpoint (local/Chat-Completions models, non-OpenAI providers, the voice agent) it runs on-device against DuckDuckGo, keyless. Drop a [Tavily](https://www.tavily.com) key at `/config/tavily_api_key` to upgrade the device-side search to Tavily's LLM-native results (free tier available).
 - PEM file editing. AI can read the editor status and edit the currently open file.
 - Read / write files. The old files are copied to /sd/backup.
 - Launch application
@@ -246,13 +247,21 @@ Per-entry fields (only `name` is required):
 Field | Meaning
 ------|--------
 `name` | The label you pass to `-m` and `/model` (e.g. `-m llama3`).
-`api` | `responses` — OpenAI's Responses API (server-side context, reasoning `effort`, built-in web search). `chat` — the portable Chat Completions API used by Ollama, local servers, and other providers.
+`api` | `responses` — OpenAI's Responses API (server-side context, reasoning `effort`, and OpenAI's hosted web search on genuine OpenAI endpoints). `chat` — the portable Chat Completions API used by Ollama, local servers, and other providers. Both get web search: non-OpenAI endpoints fall back to the on-device `web_search` tool.
 `base_url` | Endpoint base. Default: `https://api.openai.com/v1`.
 `model` | The actual model id sent to the API. Default: same as `name`.
 `effort` | Optional default reasoning effort for a `responses` entry.
+`key` | Optional API key (bearer token) for this entry, for a provider that needs its own — e.g. xAI. With no `key`, an OpenAI endpoint uses `/config/openai_api_key` and any other endpoint is called without authorization.
 
-`default` names the entry used when `-m` is omitted. An OpenAI endpoint needs a
-key in `/config/openai_api_key`; local endpoints (Ollama, etc.) need none.
+`default` names the entry used when `-m` is omitted. An OpenAI endpoint with no
+`key` falls back to `/config/openai_api_key`; a third-party provider (e.g. xAI)
+carries its own `key`; local endpoints (Ollama, etc.) need none.
+
+```json
+{ "name": "grok", "api": "responses",
+  "base_url": "https://api.x.ai/v1", "model": "grok-4",
+  "key": "xai-..." }
+```
 
 **Selecting a model:** `gpt -m llama3 ...`, or in conversation mode `/model llama3`
 (with `/models` to list them). You can even switch between an OpenAI model and a

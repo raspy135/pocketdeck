@@ -687,6 +687,14 @@ Usage:
 
 `listup filename` 
 
+### ble_kb
+
+`ble_kb` is a background-running program (daemon) to manage BLE keyboad connection. 
+
+The application is launched automatically when user sets to run it by `setup` script, or you can launch it from home app.
+
+-r : Reset config file. It's useful to resolve connection issue.
+
 ## Change boot sequence
 
 You can customermize boot sequence.

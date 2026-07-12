@@ -189,6 +189,40 @@ def main(vs, args):
 
 ---
 
+## Capturing output — `capture_stream`
+
+Sometimes you want to call another command's `main(vs, args)` and collect its
+text output instead of drawing it on a screen — to return it, feed it to another
+command, or post-process it. Pass a **`capture_stream`** as the `vs` argument: it
+is a stream that implements `write()`/`read()` like `vscreen_stream`, but keeps
+everything written to it in memory. Read the captured text back with
+`getvalue()`.
+
+```python
+import capture_stream
+import mycmd
+
+cap = capture_stream.capture_stream()
+mycmd.main(cap, ['mycmd', 'arg'])   # mycmd's print(..., file=vs) is captured
+text = cap.getvalue()               # the collected output as a str
+```
+
+Capture is bounded (`capture_stream._MAX`, 50000 bytes) so a runaway command
+can't exhaust RAM; once the cap is reached, further writes are dropped. `read()`
+always returns `''` — a capture stream has no keyboard input.
+
+Methods:
+
+- `write(data)` — append `data` (str or bytes; bytes are UTF-8 decoded) to the buffer, up to the byte cap.
+- `getvalue()` — return everything captured so far as a `str`.
+- `read(n=1)` — always returns `''` (no input side).
+
+> This is the same bounded-capture class the shell pipeline and the `gpt` agent
+> tools use internally (exposed as `CaptureStream` in `pdeck_utils`);
+> `capture_stream` is its documented, standard-named form for app code.
+
+---
+
 ## vscreen module reference
 
 vscreen represents a virtual screen (0–10). All graphics APIs are on this object.

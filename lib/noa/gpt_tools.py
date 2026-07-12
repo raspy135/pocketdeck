@@ -43,6 +43,166 @@ import ai_improve
 CaptureStream = pu.CaptureStream
 
 
+# web_search backends (see ToolExecBase.execute_web_search):
+#   - Default, keyless: DuckDuckGo's HTML endpoint. It returns a plain server-
+#     rendered result page that _ddg_parse turns into (title, url, snippet)
+#     tuples on-device, so the model never sees raw HTML.
+#   - Optional upgrade: drop a Tavily key at TAVILY_KEY_PATH and web_search
+#     switches to Tavily's LLM-native JSON search (api.tavily.com), which has a
+#     free tier for real use. Both paths feed the same result formatter.
+DDG_SEARCH_URL = "https://html.duckduckgo.com/html/"
+TAVILY_SEARCH_URL = "https://api.tavily.com/search"
+TAVILY_KEY_PATH = "/config/tavily_api_key"
+# A browser-like UA: DuckDuckGo's HTML endpoint 403s a bare tool user-agent.
+WEB_UA = "Mozilla/5.0 (X11; Linux x86_64) pdeck/0.2"
+
+
+def url_quote(s):
+  """Percent-encode a query string for a URL. Keeps the RFC3986 unreserved set
+  (alnum and -_.~) verbatim and encodes everything else, including spaces, as
+  %XX. Small standalone helper because MicroPython has no urllib.parse.quote."""
+  safe = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~"
+  out = []
+  for b in s.encode("utf-8"):
+    c = chr(b)
+    if c in safe:
+      out.append(c)
+    else:
+      out.append("%%%02X" % b)
+  return "".join(out)
+
+
+# Minimal HTML entity table for the few entities DuckDuckGo emits in titles and
+# snippets; numeric (&#39; / &#x27;) forms are handled generically below.
+_HTML_ENTITIES = {"amp": "&", "lt": "<", "gt": ">", "quot": '"', "apos": "'",
+                  "nbsp": " ", "#39": "'", "#47": "/"}
+
+
+def html_unescape(s):
+  """Decode the HTML entities that appear in DDG result text. Handles the named
+  set above plus numeric &#NN; / &#xHH; references; leaves anything else as-is."""
+  if "&" not in s:
+    return s
+  out = []
+  i = 0
+  n = len(s)
+  while i < n:
+    c = s[i]
+    if c == "&":
+      j = s.find(";", i + 1)
+      if 0 < j <= i + 8:
+        ent = s[i + 1:j]
+        if ent in _HTML_ENTITIES:
+          out.append(_HTML_ENTITIES[ent])
+          i = j + 1
+          continue
+        if ent[:1] == "#":
+          try:
+            code = int(ent[2:], 16) if ent[1:2] in ("x", "X") else int(ent[1:])
+            out.append(chr(code))
+            i = j + 1
+            continue
+          except:
+            pass
+      out.append(c)
+      i += 1
+    else:
+      out.append(c)
+      i += 1
+  return "".join(out)
+
+
+def strip_tags(s):
+  """Remove HTML tags from a fragment and unescape entities, returning trimmed
+  plain text. A simple depth counter drops everything between '<' and '>'."""
+  out = []
+  depth = 0
+  for c in s:
+    if c == "<":
+      depth += 1
+    elif c == ">":
+      if depth > 0:
+        depth -= 1
+    elif depth == 0:
+      out.append(c)
+  return html_unescape("".join(out)).strip()
+
+
+def url_unquote(s):
+  """Percent-decode a URL-encoded string (inverse of url_quote). Used to recover
+  the real destination from DuckDuckGo's '/l/?uddg=<encoded>' redirect links."""
+  if "%" not in s:
+    return s
+  res = bytearray()
+  i = 0
+  n = len(s)
+  while i < n:
+    c = s[i]
+    if c == "%" and i + 2 < n:
+      try:
+        res.append(int(s[i + 1:i + 3], 16))
+        i += 3
+        continue
+      except:
+        pass
+    res.append(ord(c) & 0xFF)
+    i += 1
+  try:
+    return bytes(res).decode("utf-8")
+  except:
+    return bytes(res).decode("utf-8", "replace")
+
+
+def _decode_ddg_href(href):
+  # DDG wraps outbound links as '//duckduckgo.com/l/?uddg=<percent-encoded url>';
+  # unwrap that to the real URL. Bare '//host' links get an https: scheme.
+  href = html_unescape(href)
+  p = href.find("uddg=")
+  if p >= 0:
+    v = href[p + 5:]
+    amp = v.find("&")
+    if amp >= 0:
+      v = v[:amp]
+    return url_unquote(v)
+  if href.startswith("//"):
+    return "https:" + href
+  return href
+
+
+def _ddg_parse(body, num):
+  """Extract up to `num` (title, url, snippet) tuples from a DuckDuckGo HTML
+  results page using plain string scanning (MicroPython's `re` has no findall
+  and no DOTALL, so regex is avoided). Each result is an <a class="result__a">
+  anchor for the title/link, followed by an <a class="result__snippet">."""
+  items = []
+  pos = 0
+  while len(items) < num:
+    i = body.find('class="result__a"', pos)
+    if i < 0:
+      break
+    h = body.find('href="', i)
+    if h < 0:
+      break
+    h += 6
+    he = body.find('"', h)
+    href = body[h:he]
+    gt = body.find(">", he)
+    te = body.find("</a>", gt)
+    if gt < 0 or te < 0:
+      break
+    title = strip_tags(body[gt + 1:te])
+    snippet = ""
+    s = body.find('class="result__snippet"', te)
+    if s >= 0:
+      sg = body.find(">", s)
+      se = body.find("</a>", sg)
+      if sg >= 0 and se >= 0:
+        snippet = strip_tags(body[sg + 1:se])
+    items.append((title, _decode_ddg_href(href), snippet))
+    pos = te + 4
+  return items
+
+
 class AgentCaptureStream(pu.CaptureStream):
   """CaptureStream for command_with_return runs. A graphic/interactive app
   immediately reaches for screen facilities (vs.v, register_module, read_nb,
@@ -114,21 +274,54 @@ def module_exists(modname):
     return True  # exists but crashed at import; launching will show why
 
 
-def build_tools(app_list, agent=False, web_search=True, realtime=False):
+def build_tools(app_list, agent=False, web_search=True, realtime=False,
+                hosted_search=False):
   """Tool schemas in the flat function format. Function tools are only included
   in agent mode; plain mode keeps just web_search (when requested). `realtime`
   adds tools that only make sense in the always-on voice agent (gpt_rt), where a
-  non-blocking wait can run in the background with the mic still live."""
+  non-blocking wait can run in the background with the mic still live.
+
+  Web search comes in two flavours, selected by `hosted_search`:
+    - hosted_search=True: OpenAI's server-side hosted web_search tool
+      ({"type": "web_search"}). Used for genuine OpenAI Responses endpoints,
+      where it is the best available search.
+    - hosted_search=False (default): a DEVICE-side web_search FUNCTION tool
+      (see ToolExecBase.execute_web_search) that queries DuckDuckGo (or Jina
+      with a key). This is what non-OpenAI endpoints, the local/Chat-Completions
+      models in gpt_c, and the voice agent use — those have no hosted search, so
+      without it the model resorts to scraping search pages with curl. Only one
+      of the two is ever emitted, so their shared name never collides."""
   tools = []
   if web_search:
-    tools.append({"type": "web_search"})
+    if hosted_search:
+      tools.append({"type": "web_search"})
+    else:
+      tools.append({
+        "type": "function",
+        "name": "web_search",
+        "description": "Search the web and get back ranked, up-to-date results (title, URL, and a short snippet for each) from an AI-friendly search engine. Use this for ANY general web search or whenever you need current information the model may not know: news, documentation, product/prices, facts, people, etc. IMPORTANT: prefer this over running curl on a search-engine URL — scraping search result pages with curl is unreliable and frequently blocked, which is why searches fail. Workflow: call web_search to find relevant pages, then, if you need the full text of a specific result, fetch just that page with command_with_return using 'curl -s <url>'.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "The search query, in natural language or keywords, e.g. 'micropython ssd1306 i2c wiring' or 'latest esp32-s3 price'."
+            },
+            "num_results": {
+              "type": "integer",
+              "description": "How many results to return (default 5, max 10)."
+            }
+          },
+          "required": ["query"]
+        }
+      })
   if not agent:
     return tools
 
   tools.append({
     "type": "function",
     "name": "command_with_return",
-    "description": "Run a device command (or any installed module) and return its captured output for non-graphical apps. GRAPHIC/interactive apps cannot run here (there is no screen to draw on): launch them with launch_app instead, setting reload=true after editing their source — launch_app's reload replaces the 'r' prefix. If a graphic app is run here by mistake it is detected and relaunched via launch_app automatically. This is your primary tool for TESTING AND VERIFYING CODE: after you write a script with write_file, run it here by name and read the output to confirm it works, see errors, and iterate. A runnable script/app is a module exposing main(vs, args); invoke it by its name plus arguments, e.g. 'temp_foo arg1' for /sd/py/temp_foo.py, or any existing app/command. IMPORTANT: if you EDIT a script and run it again, prefix the command with 'r ' to reload it (e.g. 'r temp_foo arg1') — without 'r' the previous, cached version runs instead of your new code. Built-in commands include: ls (glob patterns like 'word*'; 'ls -r path' lists recursively), cat (read file), head, tail, rm, mv, cp, mkdir, rmdir, grep (search in files), ping, curl. This not Linux, available options are limited. See README.md for available options for the commands. Simple pipes ('|') are supported: a stage's output is fed to the next command as stdin, and stdin-aware filters read it when given no file (grep, head, and tail, e.g. 'ls -r /sd/py | grep clock', 'curl -s URL | grep -i error | head -n 5', or 'cat log.txt | tail -n 20'). Other commands ignore piped stdin, so only pipe INTO grep/head/tail. This is not Linux otherwise: no redirects ('>'), backticks, '&&', or subshells; use one command per stage.",
+    "description": "Run a device command (or any installed module) and return its captured output for non-graphical apps. GRAPHIC/interactive apps cannot run here (there is no screen to draw on): launch them with launch_app instead, setting reload=true after editing their source — launch_app's reload replaces the 'r' prefix. If a graphic app is run here by mistake it is detected and relaunched via launch_app automatically. This is your primary tool for TESTING AND VERIFYING CODE: after you write a script with write_file, run it here by name and read the output to confirm it works, see errors, and iterate. A runnable script/app is a module exposing main(vs, args); invoke it by its name plus arguments, e.g. 'temp_foo arg1' for /sd/py/temp_foo.py, or any existing app/command. IMPORTANT: if you EDIT a script and run it again, prefix the command with 'r ' to reload it (e.g. 'r temp_foo arg1') — without 'r' the previous, cached version runs instead of your new code. Built-in commands include: ls (glob patterns like 'word*'; 'ls -r path' lists recursively), cat (read file), head, tail, rm, mv, cp, mkdir, rmdir, grep (search in files), ping, curl. This not Linux, available options are limited. See README.md for available options for the commands. Simple pipes ('|') are supported: a stage's output is fed to the next command as stdin, and stdin-aware filters read it when given no file (grep, head, and tail, e.g. 'ls -r /sd/py | grep clock', 'curl -s URL | grep -i error | head -n 5', or 'cat log.txt | tail -n 20'). Other commands ignore piped stdin, so only pipe INTO grep/head/tail. Output redirect to a file is supported on the final stage: '> file' truncates, '>> file' appends (e.g. 'ls -r /sd/py > files.txt' or 'curl -s URL | grep -i error >> log.txt'); the written text is plain (color codes stripped) and capped at ~50KB. This is not Linux otherwise: no input redirect ('<'), backticks, '&&', or subshells; use one command per stage.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -144,7 +337,7 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False):
   tools.append({
     "type": "function",
     "name": "write_file",
-    "description": "Write text content to a file on the device filesystem. Creates or overwrites the file. For long file, making a patch Micropython code is preferred. The original file will be backed up under /sd/backup, so you don't need to take a backup file",
+    "description": "Write text content to a file on the device filesystem. Creates or overwrites the WHOLE file. To change only part of an existing (especially large) file, use edit_file instead — it sends just the changed snippet rather than the entire file. The original file will be backed up under /sd/backup, so you don't need to take a backup file",
     "parameters": {
       "type": "object",
       "properties": {
@@ -158,6 +351,30 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False):
         }
       },
       "required": ["path", "content"]
+    }
+  })
+
+  tools.append({
+    "type": "function",
+    "name": "edit_file",
+    "description": "Edit part of an existing file by exact text replacement — PREFERRED over write_file for changing a large file, since you send only the snippet that changes, not the whole file. `old_string` must match the current file content EXACTLY, including whitespace and indentation (Pocket Deck Python uses 2 spaces per indent level), and must appear exactly ONCE — include enough surrounding lines to make it unique. It is replaced with `new_string`. To delete text, pass an empty new_string. Read the file first (e.g. 'cat path') so you quote it exactly. The original file is backed up under /sd/backup. If old_string is not found or is not unique, nothing is changed and an error is returned — fix the snippet and retry.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute file path to edit, e.g. '/sd/py/myapp.py'"
+        },
+        "old_string": {
+          "type": "string",
+          "description": "Exact existing text to replace (must occur exactly once)."
+        },
+        "new_string": {
+          "type": "string",
+          "description": "Replacement text. Empty string deletes old_string."
+        }
+      },
+      "required": ["path", "old_string", "new_string"]
     }
   })
 
@@ -403,10 +620,14 @@ class ToolExecBase:
 
   # ---- dispatch ------------------------------------------------------------
   def execute_function_call(self, call_id, name, arguments):
+    if name == "web_search":
+      return self.execute_web_search(arguments)
     if name == "command_with_return":
       return self.execute_command_with_return(arguments)
     if name == "write_file":
       return self.execute_write_file(arguments)
+    if name == "edit_file":
+      return self.execute_edit_file(arguments)
     if name == "list_running_apps":
       return self.execute_list_running_apps(arguments)
     if name == "switch_screen":
@@ -586,6 +807,109 @@ class ToolExecBase:
       return "Error updating memory: %s" % str(e)
     return ("OK: " + msg) if ok else ("Error: " + msg)
 
+  # ---- web search ----------------------------------------------------------
+  def _read_tavily_key(self):
+    # Optional bearer key for the Tavily search endpoint. When present, web_search
+    # upgrades from keyless DuckDuckGo to Tavily's JSON search. Missing = keyless.
+    try:
+      with open(TAVILY_KEY_PATH) as f:
+        return f.read().strip()
+    except OSError:
+      return ""
+
+  def _format_web_results(self, query, items):
+    # items: list of (title, url, snippet). Render a compact numbered list.
+    if not items:
+      return "No web results found for '%s'." % query
+    lines = ["Web search results for '%s':" % query]
+    for i, (title, link, snippet) in enumerate(items):
+      title = (title or "").strip() or "(no title)"
+      snippet = (snippet or "").strip()
+      if len(snippet) > 500:
+        snippet = snippet[:500] + "..."
+      lines.append("\n%d. %s\n   %s" % (i + 1, title, (link or "").strip()))
+      if snippet:
+        lines.append("   %s" % snippet)
+    return "\n".join(lines)
+
+  def execute_web_search(self, arguments):
+    try:
+      args = ujson.loads(arguments) if arguments else {}
+    except:
+      return "Error: invalid arguments"
+    query = (args.get("query") or "").strip()
+    if not query:
+      return "Error: no query specified"
+    try:
+      num = int(args.get("num_results", 5))
+    except:
+      num = 5
+    if num < 1:
+      num = 1
+    if num > 10:
+      num = 10
+    key = self._read_tavily_key()
+    if key:
+      return self._tavily_search(query, num, key)
+    return self._ddg_search(query, num)
+
+  def _ddg_search(self, query, num):
+    # Keyless DuckDuckGo HTML endpoint, POSTing the query as a form field.
+    try:
+      import curl
+      status, _rh, body = curl.request(
+        DDG_SEARCH_URL, method="POST", data="q=" + url_quote(query),
+        user_agent=WEB_UA, timeout=30, follow=3)
+    except Exception as e:
+      return ("Error: web search request failed: %s. Check the network "
+              "connection (try 'ping duckduckgo.com' via command_with_return)." % e)
+    try:
+      code = int(status.split(" ")[1])
+    except:
+      code = 0
+    if code != 200:
+      return ("Error: web search returned HTTP %d from DuckDuckGo. Retry in a "
+              "moment; if it persists the endpoint may be rate-limiting." % code)
+    html = body.decode("utf-8", "replace") if body else ""
+    return self._format_web_results(query, _ddg_parse(html, num))
+
+  def _jina_search(self, query, num, key):
+    # Jina AI JSON search (used when a key is configured). X-Respond-With:
+    # no-content asks for just the SERP metadata, keeping the reply small.
+    url = JINA_SEARCH_URL + "?q=" + url_quote(query)
+    headers = ["Accept: application/json", "X-Respond-With: no-content",
+               "Authorization: Bearer " + key]
+    try:
+      import curl
+      status, _rh, body = curl.request(
+        url, header_lines=headers, timeout=30, follow=3)
+    except Exception as e:
+      return "Error: web search request failed: %s." % e
+    try:
+      code = int(status.split(" ")[1])
+    except:
+      code = 0
+    if code == 401:
+      return ("Error: Jina rejected the API key (HTTP 401). Check the key in "
+              "%s, or remove that file to fall back to keyless search." % JINA_KEY_PATH)
+    if code == 429:
+      return "Error: Jina search is rate-limited (HTTP 429). Retry shortly."
+    if code != 200:
+      snippet = body[:200].decode("utf-8", "replace") if body else ""
+      return "Error: Jina search returned HTTP %d. %s" % (code, snippet)
+    try:
+      data = ujson.loads(body)
+    except Exception:
+      return "Error: could not parse Jina search response."
+    results = data.get("data") if isinstance(data, dict) else None
+    if not results:
+      return "No web results found for '%s'." % query
+    items = []
+    for r in results[:num]:
+      if isinstance(r, dict):
+        items.append((r.get("title"), r.get("url"), r.get("description")))
+    return self._format_web_results(query, items)
+
   # ---- implementations -----------------------------------------------------
   def execute_command_with_return(self, arguments):
     try:
@@ -605,7 +929,8 @@ class ToolExecBase:
       return "Error: refusing to run '%s' recursively from inside the assistant." % parts[0]
     # Pipeline splitting/execution lives in pdeck_utils.run_pipeline: stages are
     # split on top-level '|', each stage's captured output feeds the next as
-    # stdin via the pstdin bridge, and bare '2>&1' redirects are dropped.
+    # stdin via the pstdin bridge, a trailing '> file'/'>> file' on the final
+    # stage writes output to a file, and bare '2>&1' redirects are dropped.
     cap, result = pu.run_pipeline(command, AgentCaptureStream)
     if cap is None:
       return "Error: " + result
@@ -675,6 +1000,59 @@ class ToolExecBase:
                                              indent_hint(path, content))
     except Exception as e:
       return "Error: %s" % str(e)
+
+  def execute_edit_file(self, arguments):
+    try:
+      args = ujson.loads(arguments) if arguments else {}
+    except:
+      return "Error: invalid arguments"
+    path = args.get("path", "").strip()
+    old = args.get("old_string", "")
+    new = args.get("new_string", "")
+    if not path:
+      return "Error: no path specified"
+    if not isinstance(old, str) or not isinstance(new, str):
+      return "Error: old_string and new_string must be strings"
+    if old == "":
+      return "Error: old_string is empty; use write_file to create a file."
+    try:
+      with open(path, "r") as f:
+        existing = f.read()
+    except OSError:
+      return "Error: %s not found. Use write_file to create it." % path
+    count = existing.count(old)
+    if count == 0:
+      return ("Error: old_string not found in %s. Read the file (cat %s) and "
+              "quote it exactly, including 2-space indentation." % (path, path))
+    if count > 1:
+      return ("Error: old_string appears %d times in %s; it must be unique. "
+              "Add more surrounding lines to disambiguate." % (count, path))
+    # Back up the original, mirroring execute_write_file.
+    backup_path = None
+    try:
+      t = time.gmtime(time.time() + pu.timezone * 60 * 15)
+      filename = path.split("/")[-1]
+      backup_name = "%s_%02d%02d_%02d%02d" % (filename, t[1], t[2], t[3], t[4])
+      try:
+        os.mkdir("/sd/backup")
+      except:
+        pass
+      backup_path = "/sd/backup/" + backup_name
+      with open(backup_path, "w") as f:
+        f.write(existing)
+    except Exception:
+      backup_path = None
+    content = existing.replace(old, new)
+    try:
+      with open(path, "w") as f:
+        f.write(content)
+    except Exception as e:
+      return "Error: %s" % str(e)
+    # Show the user what changed (frontends that have a screen override the hook).
+    self._show_write(path, backup_path, content)
+    return "Edited %s%s%s" % (path,
+                              (" (backup: %s)" % backup_path) if backup_path else "",
+                              indent_hint(path, content))
 
   def execute_list_running_apps(self, arguments):
     lines = ["screen 0: Python REPL"]

@@ -7,7 +7,8 @@ def main(vs,args):
     q = '.'
   else:
     q = args[1]
-    
+  if q[-1] == '/':
+    q = q[:-1]    
   try:
     os.chdir(q)
   except Exception as e:

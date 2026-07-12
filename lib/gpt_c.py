@@ -2,8 +2,8 @@
 # OpenAI-proprietary Responses API used by gpt.py.
 #
 # Why a separate frontend: the Responses API keeps conversation state on the
-# server (previous_response_id), uses a flat tool schema and a built-in
-# web_search tool, and ships input/output item shapes unique to OpenAI. The Chat
+# server (previous_response_id), uses a flat tool schema, and ships input/output
+# item shapes unique to OpenAI. The Chat
 # Completions API (/v1/chat/completions) is the portable lingua franca that every
 # provider and local server speaks: client-side `messages` history, a nested tool
 # schema, and `tool`-role results. Talking Chat Completions means you can swap
@@ -22,8 +22,9 @@
 #     Completions has no server-side state to resume).
 #
 # Differences from gpt.py (by design):
-#   - No built-in web_search. The agent can still fetch pages with `curl` via
-#     command_with_return.
+#   - No OpenAI hosted tools. web_search is a device-side function (implemented
+#     in gpt_tools, works on any provider), so search is available here too; the
+#     agent can still fetch a specific page with `curl` via command_with_return.
 #   - Full history is sent each round (Chat Completions is stateless), so long
 #     agent turns cost more tokens; _prune_old_images() bounds memory by dropping
 #     stale screenshots from history.
@@ -112,11 +113,14 @@ def load_conversation(cid):
 
 # ----------------------------------------------------------------------------
 # Tool schema: reuse gpt.build_tools (flat function format) and wrap each into
-# the nested Chat Completions shape. web_search is intentionally not included.
+# the nested Chat Completions shape. web_search is a device-side function tool
+# (not OpenAI's hosted search), so it works here too and every function entry is
+# wrapped uniformly — local models finally get real search instead of scraping
+# with curl.
 # ----------------------------------------------------------------------------
 
 def build_tools_c(app_list, agent=False):
-  flat = gpt.build_tools(app_list, agent=agent, web_search=False)
+  flat = gpt.build_tools(app_list, agent=agent, web_search=True)
   tools = []
   for t in flat:
     if t.get("type") != "function":
@@ -139,10 +143,11 @@ def build_tools_c(app_list, agent=False):
 class chatgpt_chat(gpt.chatgpt_agent):
   # Capability flags the shared driver in gpt.main() reads (override the
   # Responses defaults on gpt.chatgpt_agent): no server-side reasoning effort,
-  # no built-in web_search, and this client can compact its local history.
+  # and this client can compact its local history. web_search is a device-side
+  # function tool now, so it is available here just like on the Responses agent.
   API = "chat"
   USE_EFFORT = False
-  USE_WEB_SEARCH = False
+  USE_WEB_SEARCH = True
   CAN_COMPACT = True
 
   def __init__(self, vs, base_url=None):

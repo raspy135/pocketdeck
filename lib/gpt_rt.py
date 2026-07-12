@@ -565,8 +565,9 @@ class RealtimeAgent(gpt_tools.ToolExecBase):
       session["tool_choice"] = "auto"
       # Realtime consumes the flat function format directly (same shape as the
       # Responses API), so build_tools drops in with no wrapping. web_search is
-      # not a Realtime tool, hence web_search=False.
-      session["tools"] = gpt_tools.build_tools(self.app_list, agent=True, web_search=False, realtime=True)
+      # now a device-side function tool (not a hosted Realtime tool), so the
+      # voice agent can search the web too.
+      session["tools"] = gpt_tools.build_tools(self.app_list, agent=True, web_search=True, realtime=True)
     cfg = {"type": "session.update", "session": session}
     self.ws.send(ujson.dumps(cfg))
 

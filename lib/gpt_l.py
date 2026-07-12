@@ -587,10 +587,10 @@ class ThinkingAnimation:
       return
 
     self.tick += 1
-    if self.tick % 15:
+    if self.tick % 32:
       self.v.finished()
       return
-    t = self.tick // 15
+    t = self.tick // 32
     el = self._el
     nc = len(self._CHARS)
 

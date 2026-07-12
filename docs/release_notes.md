@@ -1,3 +1,20 @@
+## Release Note, July 11, 2026
+
+### Firmware
+
+- BLE keyboard support: bug fix, more stable connection.
+
+### Applications
+
+- gpt: Tavily(www.tabily.com) search support for better AI web research. Puy jina.ai API key to /config/tavily_api_key to make more robust web search by AI.
+- gpt: New tools for beter agentic tasks.
+
+## Release Note, July 9, 2026
+
+### Applications
+
+- cd : bug fix
+
 ## Release Note, July 5, 2026
 
 ### firmware

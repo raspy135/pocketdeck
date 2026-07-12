@@ -12,6 +12,7 @@ import fontloader
 import ujson
 import menu_ui
 from anm import anm_sequencer, anm_object
+import argparse
 
 KEY_UP = b'\x1b[A'
 KEY_DOWN = b'\x1b[B'
@@ -140,6 +141,169 @@ def parse_board_csv(filename):
   if len(board) != 9:
     raise ValueError("board must have 9 rows")
   return board
+
+
+def box_index(r, c):
+  return (r // 3) * 3 + (c // 3)
+
+def init_masks_from_board(board):
+  rows = [0] * 9
+  cols = [0] * 9
+  boxes = [0] * 9
+  for r in range(9):
+    for c in range(9):
+      n = board[r][c]
+      if n:
+        bit = 1 << (n - 1)
+        box_id = box_index(r, c)
+        if (rows[r] & bit) or (cols[c] & bit) or (boxes[box_id] & bit):
+          return None, None, None
+        rows[r] |= bit
+        cols[c] |= bit
+        boxes[box_id] |= bit
+  return rows, cols, boxes
+
+def find_best_cell_masks(board, rows, cols, boxes):
+  min_count = 10
+  best_r = -1
+  best_c = -1
+  best_mask = 0
+
+  for r in range(9):
+    for c in range(9):
+      if board[r][c] == 0:
+        used = rows[r] | cols[c] | boxes[box_index(r, c)]
+        avail = (~used) & FULL_MASK
+        cnt = bit_count(avail)
+        if cnt < min_count:
+          min_count = cnt
+          best_r = r
+          best_c = c
+          best_mask = avail
+          if cnt == 1:
+            return best_r, best_c, best_mask
+  return best_r, best_c, best_mask
+
+def randomize_bits(mask):
+  arr = []
+  while mask:
+    b = lowest_bit(mask)
+    arr.append(b)
+    mask ^= b
+
+  for i in range(len(arr) - 1, 0, -1):
+    j = random.getrandbits(16) % (i + 1)
+    arr[i], arr[j] = arr[j], arr[i]
+
+  return arr
+
+def ordered_bits(mask):
+  arr = []
+  while mask:
+    b = lowest_bit(mask)
+    arr.append(b)
+    mask ^= b
+  return arr
+
+def bit_to_num(bit):
+  n = 1
+  while bit > 1:
+    bit >>= 1
+    n += 1
+  return n
+
+def place_bit(board, rows, cols, boxes, r, c, bit):
+  board[r][c] = bit_to_num(bit)
+  rows[r] |= bit
+  cols[c] |= bit
+  boxes[box_index(r, c)] |= bit
+
+def remove_bit(board, rows, cols, boxes, r, c, bit):
+  board[r][c] = 0
+  rows[r] ^= bit
+  cols[c] ^= bit
+  boxes[box_index(r, c)] ^= bit
+
+def make_candidate_bits(mask, randomize):
+  if randomize:
+    return randomize_bits(mask)
+  return ordered_bits(mask)
+
+def backtrack_next(board, rows, cols, boxes, stack):
+  while stack:
+    pr, pc, cand, idx = stack[-1]
+    last_bit = cand[idx - 1]
+    remove_bit(board, rows, cols, boxes, pr, pc, last_bit)
+
+    if idx >= len(cand):
+      stack.pop()
+      continue
+
+    bit = cand[idx]
+    stack[-1][3] += 1
+    place_bit(board, rows, cols, boxes, pr, pc, bit)
+    return True
+  return False
+
+def solve_board_mdv(board, randomize=True, limit=1):
+  rows, cols, boxes = init_masks_from_board(board)
+  if rows is None:
+    return 0
+  stack = []
+  total = 0
+
+  while True:
+    r, c, mask = find_best_cell_masks(board, rows, cols, boxes)
+
+    if r == -1:
+      total += 1
+      if total >= limit:
+        return total
+      if not backtrack_next(board, rows, cols, boxes, stack):
+        return total
+      continue
+
+    if mask == 0:
+      if not backtrack_next(board, rows, cols, boxes, stack):
+        return total
+      continue
+
+    cand = make_candidate_bits(mask, randomize)
+    bit = cand[0]
+    place_bit(board, rows, cols, boxes, r, c, bit)
+    stack.append([r, c, cand, 1])
+
+def board_copy(src):
+  out = []
+  for y in range(9):
+    row = []
+    for x in range(9):
+      row.append(src[y][x])
+    out.append(row)
+  return out
+
+def count_sudoku_solutions(board_file):
+  """Count the number of solutions for a Sudoku board file."""
+  try:
+    board = parse_board_csv(board_file)
+  except Exception as e:
+    return f"Error parsing board: {e}"
+  
+  # Check if board has valid initial state
+  rows, cols, boxes = init_masks_from_board(board)
+  if rows is None:
+    return "Error: invalid board - duplicate number exists in row, column, or box"
+  
+  # Count solutions
+  temp_board = board_copy(board)
+  solutions = solve_board_mdv(temp_board, False, 2)
+  
+  if solutions == 0:
+    return "Error: no solution found"
+  elif solutions == 1:
+    return "Number of solutions: 1"
+  else:
+    return f"Number of solutions: {solutions} (multiple solutions found)"
 
 
 class NudocGame:
@@ -348,15 +512,6 @@ class NudocGame:
       self.sound.volume(0, 0.25)
       self.sound.note_on(0)
       self.sound.note_off(0, "+0.45s")
-
-  def board_copy(self, src):
-    out = []
-    for y in range(9):
-      row = []
-      for x in range(9):
-        row.append(src[y][x])
-      out.append(row)
-    return out
 
   def box_index(self, r, c):
     return (r // 3) * 3 + (c // 3)
@@ -1267,11 +1422,25 @@ class NudocGame:
 
 
 def main(vs, args):
+  parser = argparse.ArgumentParser(description='Nudoc Sudoku game and resolver')
+  parser.add_argument('-r', '--resolver', action='store_true', help='Resolver mode: count solutions without launching GUI')
+  parser.add_argument('board_file', nargs='?', help='Board file or difficulty (easy/medium/hard)')
+
+  parsed_args = parser.parse_args(args[1:])
+
+  if parsed_args.resolver:
+    if not parsed_args.board_file:
+      print("Error: resolver mode (-r) requires a board file.", file=vs)
+      return
+    result = count_sudoku_solutions(parsed_args.board_file)
+    print(result, file=vs)
+    return
+
   diff = 'Medium'
   board_file = None
 
-  if len(args) >= 2:
-    a = args[1]
+  if parsed_args.board_file:
+    a = parsed_args.board_file
     al = a.lower()
     if al == 'easy':
       diff = 'Easy'
