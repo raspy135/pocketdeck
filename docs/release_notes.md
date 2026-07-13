@@ -1,8 +1,11 @@
+
 ## Release Note, July 13, 2026
 
 ### Firmware
 
 - BLE keyboard support: bug fix, more stable connection.
+
+- USB keyboard support: bug fix, some keyboard was not recognized properly.
 
 ### Applications
 
