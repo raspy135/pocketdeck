@@ -82,6 +82,90 @@ def load_app_list():
 
 
 # ----------------------------------------------------------------------------
+# Training-data capture (-T / --training). Each completed turn is appended to
+# /sd/training_data/<file>.jsonl as one OpenAI-style {"messages": [...]} record
+# holding the full agent trajectory: system prompt, user message, each
+# assistant tool-call round, the tool results, and the final answer. Input
+# attachments (reference files, images) are NOT dumped — only a small count —
+# so the dataset doesn't balloon with the auto-attached README etc.; long tool
+# results are capped at TRAIN_MAX_FIELD chars. Capture is implemented for the
+# Chat Completions client (gpt_c) only; the Responses client leaves it unset.
+# ----------------------------------------------------------------------------
+
+TRAIN_MAX_FIELD = 8000
+
+
+def make_training_filename():
+  # Just the path; the directory is created lazily on the first write (see
+  # append_training_example) so enabling -T never leaves an empty directory
+  # behind when nothing ends up being captured.
+  ctime = time.gmtime(time.time() + pu.timezone * 60 * 15)
+  name = "train%02d%02d_%02d%02d.jsonl" % (ctime[1], ctime[2], ctime[3], ctime[4])
+  d = "/sd/training_data"
+  if _IS_PC:
+    d = os.path.expanduser("~/.config/gpt/training_data")
+  return d + "/" + name
+
+
+def _ensure_parent_dir(path):
+  d = path.rsplit("/", 1)[0]
+  try:
+    os.makedirs(d, exist_ok=True)
+  except (AttributeError, TypeError):
+    try:
+      os.mkdir(d)            # MicroPython: no makedirs; single level under /sd
+    except OSError:
+      pass
+  except OSError:
+    pass
+
+
+def append_training_example(path, record, vs=None):
+  """Append one JSONL example, creating the parent dir on first write. Returns
+  True on success; on failure reports the error to `vs` (if given) instead of
+  swallowing it, so a bad write/serialize is visible rather than silently
+  producing an empty dataset."""
+  try:
+    line = ujson.dumps(record)
+  except Exception as e:
+    if vs is not None:
+      print("[training] could not serialize example: %r" % (e,), file=vs)
+    return False
+  try:
+    _ensure_parent_dir(path)
+    with open(path, "a") as f:
+      f.write(line)
+      f.write("\n")
+    return True
+  except Exception as e:
+    if vs is not None:
+      print("[training] could not write %s: %r" % (path, e), file=vs)
+    return False
+
+
+def _tools_for_training(tools):
+  """Convert the tool list into the Chat fine-tuning shape so it matches the
+  emitted messages. Responses-API function tools are flat
+  ({"type":"function","name":..,"parameters":..}); the fine-tune format nests
+  them under "function". Non-function entries (e.g. hosted web_search) pass
+  through unchanged."""
+  out = []
+  for t in tools or []:
+    if not isinstance(t, dict):
+      continue
+    if t.get("type") == "function" and "function" not in t:
+      fn = {"name": t.get("name", "")}
+      if t.get("description"):
+        fn["description"] = t["description"]
+      if "parameters" in t:
+        fn["parameters"] = t["parameters"]
+      out.append({"type": "function", "function": fn})
+    else:
+      out.append(t)
+  return out
+
+
+# ----------------------------------------------------------------------------
 # Skills — one markdown file per named procedure. Users invoke a skill from the
 # prompt with a slash, Claude-CLI style: /<skill-name>. User skills live in
 # /sd/Documents/skills (they win on a name clash); read-only system skills that
@@ -402,6 +486,9 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
     # Generation token for the deferred "result ready" LED (2) auto-off, so a
     # stale timer can't clear an LED that a newer result has just relit.
     self.led2_gen = 0
+    # Training-data capture: when set to a path, each completed turn's full
+    # trajectory is appended there as a JSONL example (-T / --training).
+    self.training_file = None
 
   def schedule_led2_off(self, secs=2):
     """Turn LED 2 off `secs` seconds from now in a tiny background thread, so
@@ -1110,6 +1197,7 @@ def main(vs, args_in):
   parser.add_argument('--log-file', action='store', default=None, help='Internal: reuse the same log filename across iterations')
   parser.add_argument('--resume', action='store_true', help='Save this turn\'s response id to the session list so a later call can continue the conversation')
   parser.add_argument('--resume-id', '--resume_id', dest='resume_id', action='store', default=None, help="Continue a prior conversation: a response id, or 'last' for the most recent saved session")
+  parser.add_argument('-T', '--training', action='store_true', help='Dump each turn (system/user/tool-calls/results/answer + tool schema) as JSONL to /sd/training_data for fine-tuning. Attachments are excluded. Chat Completions models only.')
   parser.add_argument('content', nargs='*', help='Content to ask')
   parser.add_argument('-q', nargs='+', help='Content to ask, use this when you want to specify content explicitly.')
 
@@ -1128,6 +1216,17 @@ def main(vs, args_in):
   gpt_obj = init_client(entry, vs, args.plan)
   if gpt_obj is None:
     return
+
+  # Training-data capture: one JSONL file per run, carried on the client so it
+  # survives model/endpoint switches within a conversation.
+  training_file = make_training_filename() if args.training else None
+  gpt_obj.training_file = training_file
+  if training_file and not args.silent:
+    print("Training capture ON -> %s" % training_file, file=vs)
+    if gpt_obj.API != 'chat':
+      print("  note: capture is Chat Completions only; the current model uses "
+            "the %s API, so nothing will be written. Switch to a chat model "
+            "(/model or -m)." % gpt_obj.API, file=vs)
 
   message = ""
   tts_response = False
@@ -1217,6 +1316,7 @@ def main(vs, args_in):
       if rebuilt is None:
         return
       rebuilt.jp_font_loaded = gpt_obj.jp_font_loaded
+      rebuilt.training_file = training_file
       gpt_obj = rebuilt
     entry = new_entry
   model = entry['model']
@@ -1282,6 +1382,7 @@ def main(vs, args_in):
   }
 
   def run_turn(turn_message, refs, imgs):
+    gpt_obj.model = ctx['model']  # so update_memory / self-improve can reach the active model/endpoint
     ctime = time.gmtime(time.time() + pu.timezone * 60 * 15)
     time_str = "[User current time: %04d-%02d-%02d %02d:%02d]\n" % (ctime[0], ctime[1], ctime[2], ctime[3], ctime[4])
     full = time_str + turn_message + jp_suffix
@@ -1337,6 +1438,7 @@ def main(vs, args_in):
       return
     new_obj.jp_ime = gpt_obj.jp_ime
     new_obj.jp_font_loaded = gpt_obj.jp_font_loaded
+    new_obj.training_file = training_file
     new_obj.app_list = ctx['app_list']
     gpt_obj.led2_gen += 1        # cancel any pending LED timer on the old client
     gpt_obj = new_obj
@@ -1374,6 +1476,7 @@ def main(vs, args_in):
     On success the instructions are refreshed so the freshened memory applies on
     the next turn (memory is injected in agent mode)."""
     improve_state['since'] = 0
+    gpt_obj.model = ctx['model']  # route self-improve to the active model/endpoint
     if not auto:
       print("[ Improving — distilling lessons into long-term memory... ]", file=vs)
     try:

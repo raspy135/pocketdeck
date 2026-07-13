@@ -27,10 +27,10 @@ _CFG = "/config/ble_kb.json"
 _SEC = "/config/ble_secrets.json"
 
 # Loop gap (seconds) above which we assume the device resumed from lightsleep
-# and must reset the BLE stack. Kept well above the few-second stall a large
-# .py compile causes: a compile freezes this loop but leaves the radio powered,
-# so resetting there would needlessly cycle the SHARED radio (BLEManager) and
-# drop other services' links too. Real lightsleep-away gaps are much longer.
+# and must drop the stale links and reconnect. Kept well above the few-second
+# stall a large .py compile causes: a compile freezes this loop but leaves the
+# links up, so reconnecting there would needlessly disconnect a live keyboard.
+# Real lightsleep-away gaps are much longer.
 _RESUME_GAP_S = 10
 
 # Set DEBUG = True to trace the BLE connect/pair/discover/notify flow.
@@ -215,7 +215,12 @@ class BLEKeyboardHost:
       if n == 0:
         try: pdeck.led(3, 0)
         except: pass
-      self._msg(f"Disconnected ({n})")
+      # Show enough on-screen (even with DEBUG=False) to tell a clean drop from
+      # the "connected then dropped before encryption" failure and see reconnect.
+      if c:
+        self._msg(f"Disconnected ({n}) enc={c.encrypted} up={time.time()-c.conn_at:.0f}s")
+      else:
+        self._msg(f"Disconnected ({n})")
       self._recon_t = time.time() + 2
 
     elif event == _ENC_UPDATE:
@@ -412,16 +417,28 @@ class BLEKeyboardHost:
         self.connecting = max(0, self.connecting - 1)
 
   def _reset_ble(self):
-    # Called on resume from lightsleep. The old links are dead (controller was
-    # powered down), so drop all per-connection state and reinit the stack, then
-    # start reconnecting/scanning from a clean slate — same as a fresh boot.
+    # Called on resume from lightsleep. lightsleep powers down the radio, so the
+    # links are dead — but the controller itself comes back fine (restarting the
+    # app reconnects without ever re-initializing it). So we replicate exactly
+    # what the app-restart path does: cleanly disconnect the stale handles (as
+    # stop() does), drop per-connection state, then reconnect.
+    #
+    # We deliberately do NOT cycle the shared radio (mgr.reset() ->
+    # active(False)/active(True)): that re-inits the NimBLE host and wipes its
+    # in-RAM security state, which left the fresh link connecting and then
+    # immediately dropping during re-encryption ("connected then disconnected").
+    # It would also tear down other services' links on the SHARED radio.
+    self._msg("Resume: reconnecting KB...")
+    self._stop_scan()
+    for ch in list(self._conns):
+      try: self.ble.gap_disconnect(ch)
+      except: pass
     self._conns.clear()
     self._known.clear()
     self.connecting = 0
     self.scanning = False
     try: pdeck.led(3, 0)
     except: pass
-    self.mgr.reset()
     if self._saved:
       self.reconnect_all()
     else:
@@ -466,11 +483,11 @@ def main(vs, args):
       now = time.time()
       # Resume-from-lightsleep detection: the loop is normally paced by the
       # ~0.5s sleep below, so a gap of several seconds means the device slept.
-      # lightsleep powers down the BLE controller, leaving any bonded link dead
-      # and un-re-encryptable ("dropped before encryption"). Reset the stack to
-      # a fresh-boot state and reconnect instead of limping on stale handles.
+      # lightsleep powers down the radio, leaving any bonded link dead. Drop the
+      # stale handles and reconnect from a clean slate instead of limping on
+      # links the controller no longer has.
       if now - last_tick > _RESUME_GAP_S:
-        kb._dbg(f"resume after {now - last_tick:.0f}s idle -> reset BLE + reconnect",
+        kb._dbg(f"resume after {now - last_tick:.0f}s idle -> drop stale links + reconnect",
                 scr=True)
         kb._reset_ble()
         conn_t = now

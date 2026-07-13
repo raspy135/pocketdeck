@@ -422,6 +422,39 @@ class chatgpt_chat(gpt.chatgpt_agent):
     # leave an orphan user message that would confuse the next turn.
     if final_text is None and not got_assistant:
       del self.messages[pre_len:]
+
+    # Training capture (-T): dump this turn as one JSONL example, mirroring the
+    # Responses client and reusing gpt's helpers. Attachments/images are
+    # excluded — we record the clean `message` (not the reference-augmented
+    # content that was sent) and replace image-feedback turns with a placeholder.
+    if self.training_file and final_text:
+      msgs = []
+      if self.messages and self.messages[0].get("role") == "system":
+        msgs.append({"role": "system", "content": self.messages[0].get("content", "")})
+      msgs.append({"role": "user", "content": message})
+      for m in self.messages[pre_len + 1:]:
+        role = m.get("role")
+        if role == "assistant":
+          a = {"role": "assistant", "content": m.get("content") or ""}
+          if m.get("tool_calls"):
+            a["tool_calls"] = m["tool_calls"]
+          msgs.append(a)
+        elif role == "tool":
+          c = m.get("content", "")
+          if isinstance(c, str) and len(c) > gpt.TRAIN_MAX_FIELD:
+            c = c[:gpt.TRAIN_MAX_FIELD] + "...[truncated]"
+          msgs.append({"role": "tool", "tool_call_id": m.get("tool_call_id", ""), "content": c})
+        elif role == "user":
+          msgs.append({"role": "user", "content": "[screen capture image omitted]"})
+      nimg = len(images) if images else 0
+      if gpt.append_training_example(self.training_file, {
+        "messages": msgs,
+        "tools": gpt._tools_for_training(tools),
+        "attachments": {"files": len(references), "images": nimg},
+        "model": model,
+      }, self.vs) and not silent:
+        print("[training] saved example -> %s" % self.training_file, file=self.vs)
+
     return final_text
 
   # --- context compaction ----------------------------------------------------

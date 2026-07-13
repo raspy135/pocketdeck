@@ -189,7 +189,10 @@ def improve(api_key, conversation='', stats=None, model=None, base_url=None,
   elog = read_recent_elog()
   if not (elog.strip() or (conversation or '').strip() or existing.strip()):
     return (False, 'nothing to learn from yet')
-  if not api_key:
+  # A key is only required for OpenAI's hosted endpoint; local / self-hosted
+  # OpenAI-compatible servers (Ollama, LM Studio, ...) run keyless.
+  is_openai = (not base_url) or base_url.rstrip('/') == 'https://api.openai.com/v1'
+  if is_openai and not api_key:
     return (False, 'no API key configured')
   messages = build_messages(existing, elog, conversation or '', stats)
   call = requester or _request

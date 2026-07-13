@@ -1,4 +1,4 @@
-## Release Note, July 11, 2026
+## Release Note, July 13, 2026
 
 ### Firmware
 
@@ -7,7 +7,8 @@
 ### Applications
 
 - gpt: Tavily(www.tabily.com) search support for better AI web research. Puy jina.ai API key to /config/tavily_api_key to make more robust web search by AI.
-- gpt: New tools for beter agentic tasks.
+- gpt: New tools for beter agentic tasks, bug fixes.
+
 
 ## Release Note, July 9, 2026
 

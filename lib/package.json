@@ -772,7 +772,7 @@
         },
         {
             "path": "ble_kb.py",
-            "md5": "c3a75899cef3873827c66b1722682e79"
+            "md5": "0a3864139326de6c38a61b05cec76d65"
         },
         {
             "path": "curl.py",
@@ -848,7 +848,7 @@
         },
         {
             "path": "gpt.py",
-            "md5": "3a15245f12ac419085ad38fefd2ecfa7"
+            "md5": "15aeb2d15bb31771c3ad0c03d9991af9"
         },
         {
             "path": "diff.py",
@@ -908,7 +908,7 @@
         },
         {
             "path": "gpt_c.py",
-            "md5": "8bea859a544341acaf1c9191e590160d"
+            "md5": "22f41b475596fa4816f26a35543ad1b4"
         },
         {
             "path": "update_updater.py",
@@ -1064,7 +1064,7 @@
         },
         {
             "path": "noa/gpt_tools.py",
-            "md5": "a4518c5763d3ff3390e4e0c5de0dc95f"
+            "md5": "3b6cf9481a653649c58a7e2a3b42613d"
         },
         {
             "path": "noa/pdeck_complete.py",
@@ -1088,7 +1088,7 @@
         },
         {
             "path": "noa/ai_improve.py",
-            "md5": "8a072e33d346ca04dc2bc277bcda7c13"
+            "md5": "0a6d11b287acda8b4cbce834db4e8994"
         },
         {
             "path": "noa/font2d.py",
@@ -1212,7 +1212,7 @@
         },
         {
             "path": "data/apps_db.json",
-            "md5": "12d14e1f2d7210fbf4ca565e2c539a34"
+            "md5": "a929db66fc87de7ed4a30e823473a4c8"
         },
         {
             "path": "data/cat3.xbmr",

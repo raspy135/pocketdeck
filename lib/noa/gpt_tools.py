@@ -790,10 +790,17 @@ class ToolExecBase:
     # periodic auto-run. Analyzes the recent event log + conversation and
     # rewrites the compact memory file. Returns (ok, message).
     api_key = getattr(self, 'api_key', '') or ''
+    base_url = getattr(self, 'base_url', '') or ''
+    is_openai = (not base_url) or base_url.rstrip('/') == 'https://api.openai.com/v1'
+    # For OpenAI keep the cheap dedicated summary model (ai_improve's default);
+    # for a local / other endpoint that model won't exist there, so summarize
+    # with the model currently in use (set by the frontend as self.model).
+    model = None if is_openai else getattr(self, 'model', None)
     stats = self._improve_stats()
     if reason:
       stats = (stats + "\n" if stats else "") + "Trigger: " + str(reason)
-    return ai_improve.improve(api_key, self._improve_conversation(), stats or None)
+    return ai_improve.improve(api_key, self._improve_conversation(), stats or None,
+                              model=model, base_url=(None if is_openai else base_url))
 
   def execute_update_memory(self, arguments):
     try:
