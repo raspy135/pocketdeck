@@ -5,13 +5,13 @@
 
 - BLE keyboard support: bug fix, more stable connection.
 
-- USB keyboard support: bug fix, some keyboard was not recognized properly.
+- USB keyboard support: bug fix, some keyboards were not recognized properly.
 
 ### Applications
 
 - gpt: Tavily(www.tabily.com) search support for better AI web research. Puy jina.ai API key to /config/tavily_api_key to make more robust web search by AI.
 - gpt: New tools for beter agentic tasks, bug fixes.
-
+- gpt: Tab completion for skills.
 
 ## Release Note, July 9, 2026
 

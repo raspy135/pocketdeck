@@ -164,6 +164,33 @@ class chatgpt_chat(gpt.chatgpt_agent):
 
   # --- uniform client interface (shared driver in gpt.main() calls these) ----
 
+  def complete(self, prompt, model=None, instructions=None):
+    """One-shot Chat Completions call (no history, no tools). Returns the reply
+    text or None. Mirrors chatgpt_util.complete so callers stay endpoint-agnostic."""
+    msgs = []
+    if instructions:
+      msgs.append({"role": "system", "content": instructions})
+    msgs.append({"role": "user", "content": prompt})
+    payload = {"model": model or "gpt-4o-mini", "messages": msgs}
+    response = self.post(self.url, ujson.dumps(payload).encode('utf-8'))
+    try:
+      data = response.json()
+    except Exception:
+      print("Error: Non-JSON response (%s)" % response.status_code, file=self.vs)
+      print(response.text[:200], file=self.vs)
+      response.close()
+      return None
+    response.close()
+    if data.get("error"):
+      err = data["error"]
+      msg = err.get("message", "Unknown error") if isinstance(err, dict) else str(err)
+      print("API Error: %s" % msg, file=self.vs)
+      return None
+    choices = data.get("choices") or []
+    if not choices:
+      return None
+    return (choices[0].get("message", {}) or {}).get("content")
+
   def reset_context(self):
     self.messages = []
 

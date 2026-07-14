@@ -203,6 +203,94 @@ def read_api_key():
       return key.strip()
   return False
 
+# ----------------------------------------------------------------------------
+# Audio (STT/TTS) backend resolution. Lives here (the shared lib) so both the
+# gpt frontend and standalone tools like tts.py can select an api:"audio" entry
+# from /config/gpt.json without importing the heavy gpt module.
+# ----------------------------------------------------------------------------
+OPENAI_BASE = "https://api.openai.com/v1"
+REGISTRY_FILENAME = "/config/gpt.json"
+PC_REGISTRY_FILENAME = "~/.config/gpt/gpt.json"
+
+DEFAULT_AUDIO = {
+  "base_url": OPENAI_BASE,
+  "key": None,                          # None + OpenAI base -> shared openai_api_key
+  "tts_model": "tts-1-hd",
+  "stt_model": "gpt-4o-mini-transcribe",
+  "voice": "coral",
+  "format": "wav",
+}
+
+
+def load_registry_ro():
+  """Read /config/gpt.json without creating or rewriting it (unlike the gpt
+  frontend's load_registry). Returns the parsed dict, or {} if missing/bad."""
+  path = os.path.expanduser(PC_REGISTRY_FILENAME) if _IS_PC else REGISTRY_FILENAME
+  try:
+    with open(path, "r") as f:
+      data = ujson.load(f)
+    return data if isinstance(data, dict) else {}
+  except Exception:
+    return {}
+
+
+def _normalize_audio(entry):
+  """Fill an audio entry with defaults so every field is present."""
+  e = entry or {}
+  return {"base_url": e.get("base_url") or OPENAI_BASE,
+          "key": e.get("key"),          # None distinguishes 'unset' from '' (keyless)
+          "tts_model": e.get("tts_model") or DEFAULT_AUDIO["tts_model"],
+          "stt_model": e.get("stt_model") or DEFAULT_AUDIO["stt_model"],
+          "voice": e.get("voice") or DEFAULT_AUDIO["voice"],
+          "format": e.get("format") or DEFAULT_AUDIO["format"]}
+
+
+def resolve_audio(registry, name=None):
+  """Resolve an STT/TTS backend from a registry dict. `name` may be an api:"audio"
+  entry (used directly), or a model entry whose "audio" link is followed; None
+  uses the registry's top-level "audio" default. Falls back to the OpenAI backend
+  when nothing matches. Returns a normalized audio dict."""
+  registry = registry or {}
+  models = registry.get("models") or []
+
+  def find_audio(n):
+    if not n:
+      return None
+    for m in models:
+      if (isinstance(m, dict) and m.get("name") == n
+          and (m.get("api") or "").lower() == "audio"):
+        return m
+    return None
+
+  a = find_audio(name)                          # 1) name is a direct audio entry
+  if a is None and name:                        # 2) name is a model -> follow its link
+    for m in models:
+      if isinstance(m, dict) and m.get("name") == name:
+        a = find_audio(m.get("audio"))
+        break
+  if a is None:                                 # 3) registry-wide default
+    a = find_audio(registry.get("audio"))
+  return _normalize_audio(a)
+
+
+def apply_audio_config(obj, audio):
+  """Point a client's STT/TTS at the resolved audio backend."""
+  base = audio["base_url"].rstrip("/")
+  obj.stt_url = base + "/audio/transcriptions"
+  obj.tts_url = base + "/audio/speech"
+  obj.tts_model = audio["tts_model"]
+  obj.stt_model = audio["stt_model"]
+  obj.voice = audio["voice"]
+  obj.audio_format = audio["format"]
+  key = audio["key"]
+  if key is None and base == OPENAI_BASE:
+    # OpenAI audio with no explicit key: reuse the shared OpenAI key file, even
+    # when the LLM endpoint is a keyless local server.
+    k = read_api_key()
+    key = k if k else ""
+  obj.audio_key = key if key is not None else ""
+
+
 def make_log_filename():
   ctime = time.gmtime(time.time()+pu.timezone*60*15)
   name = f"gptlog{ctime[1]:02}{ctime[2]:02}_{ctime[3]:02}{ctime[4]:02}.md"
@@ -320,6 +408,124 @@ def save_log(message, raw_response, log_filename=None):
 
   return log_filename
 
+def split_url(url):
+  """Split a URL into (host, port, path, use_tls). Accepts http:// (plain) and
+  https:// (TLS); a bare host defaults to https. Used by the raw-socket STT
+  upload so it can target a local server, not just api.openai.com."""
+  if url.startswith("https://"):
+    use_tls = True; rest = url[8:]; default_port = 443
+  elif url.startswith("http://"):
+    use_tls = False; rest = url[7:]; default_port = 80
+  else:
+    use_tls = True; rest = url; default_port = 443
+  slash = rest.find("/")
+  if slash == -1:
+    hostport, path = rest, "/"
+  else:
+    hostport, path = rest[:slash], rest[slash:]
+  if ":" in hostport:
+    host, p = hostport.split(":", 1); port = int(p)
+  else:
+    host, port = hostport, default_port
+  return host, port, path, use_tls
+
+
+class ChunkedReader:
+  """De-chunks an HTTP/1.1 `Transfer-Encoding: chunked` body, presenting the raw
+  payload through read()/readinto() so wav_play sees only audio bytes. Chunked is
+  the natural transport for streaming TTS (length unknown up front), so we consume
+  it rather than avoid it."""
+  def __init__(self, sock):
+    self.s = sock
+    self.rem = 0          # bytes left in the current chunk
+    self.done = False
+
+  def _discard(self, n):
+    while n > 0:
+      d = self.s.read(n)
+      if not d:
+        break
+      n -= len(d)
+
+  def _next_chunk(self):
+    line = self.s.readline()
+    if not line:
+      self.done = True
+      return
+    size = line.split(b';', 1)[0].strip()   # ignore any chunk extensions
+    try:
+      self.rem = int(size, 16)
+    except ValueError:
+      self.done = True
+      return
+    if self.rem == 0:                        # terminating 0-length chunk
+      self.done = True
+
+  def read(self, n=-1):
+    if self.rem == 0 and not self.done:
+      self._next_chunk()
+    if self.rem == 0:
+      return b''
+    want = self.rem if (n is None or n < 0 or n > self.rem) else n
+    data = self.s.read(want)
+    if not data:
+      self.done = True
+      return b''
+    self.rem -= len(data)
+    if self.rem == 0:
+      self._discard(2)                       # trailing CRLF after chunk data
+    return data
+
+  def readinto(self, buf):
+    # Fill the whole buffer (looping across chunk boundaries) so callers that
+    # treat a short read as end-of-stream (wav_play) don't stop early.
+    mv = memoryview(buf)
+    total = 0
+    while total < len(buf):
+      data = self.read(len(buf) - total)
+      if not data:
+        break
+      mv[total:total + len(data)] = data
+      total += len(data)
+    return total
+
+  def close(self):
+    try:
+      self.s.close()
+    except Exception:
+      pass
+
+
+class AudioResponse:
+  """Minimal response for the raw-socket audio POST, matching the parts callers
+  use: .status_code, .raw (a readable stream), .content, .close()."""
+  def __init__(self, status_code, sock, stream):
+    self.status_code = status_code
+    self.s = sock
+    self.raw = stream
+
+  @property
+  def content(self):
+    chunks = []
+    while True:
+      d = self.raw.read(1024)
+      if not d:
+        break
+      chunks.append(d)
+    return b''.join(chunks)
+
+  def close(self):
+    try:
+      if self.raw is not self.s:
+        self.raw.close()
+    except Exception:
+      pass
+    try:
+      self.s.close()
+    except Exception:
+      pass
+
+
 class chatgpt_util:
   def __init__(self,vs):
     self.vs = vs
@@ -327,6 +533,19 @@ class chatgpt_util:
     self.stt_url = "https://api.openai.com/v1/audio/transcriptions"
     self.tts_url = "https://api.openai.com/v1/audio/speech"
     self.api_key = ""
+    # Audio (STT/TTS) backend, configurable independently of the LLM endpoint.
+    # audio_key is None until set: the methods then fall back to api_key, so a
+    # plain OpenAI setup keeps working unchanged.
+    self.audio_key = None
+    self.tts_model = "tts-1-hd"
+    self.stt_model = "gpt-4o-mini-transcribe"
+    self.voice = "coral"
+    self.audio_format = "wav"
+
+  def _audio_auth(self):
+    """Bearer token for audio calls: the audio_key if configured, else the LLM
+    key (backward-compatible OpenAI behavior)."""
+    return self.audio_key if self.audio_key is not None else self.api_key
 
   def post(self, url, json=None):
     headers = {
@@ -394,6 +613,13 @@ class chatgpt_util:
     #print(payload)
     return payload
     
+  def complete(self, prompt, model=None, instructions=None):
+    """One-shot text completion: send `prompt`, return the reply text (or None).
+    No tool loop, no history, no printing — for lightweight callers like
+    flashcards. gpt_c.chatgpt_chat overrides this for the Chat Completions API,
+    so a caller can stay agnostic to which endpoint the model uses."""
+    return self.ask(self.make_json(prompt, [], None, model or "gpt-5.4-mini", instructions))
+
   def ask(self,json):
     response = self.post(self.url,json.encode('utf-8'))
     #print(f"res{response.text}")
@@ -445,7 +671,7 @@ class chatgpt_util:
     # such as "en", "ja", "fr".  When provided, it improves accuracy and latency.
     footer = (
         '\r\n--' + boundary + '\r\n' +
-        'Content-Disposition: form-data; name="model"\r\n\r\ngpt-4o-mini-transcribe\r\n'
+        'Content-Disposition: form-data; name="model"\r\n\r\n' + self.stt_model + '\r\n'
     )
 
     if language:
@@ -467,22 +693,27 @@ class chatgpt_util:
     except ImportError:
       import ssl
 
-    addr = usocket.getaddrinfo("api.openai.com", 443)[0][-1]
+    host, port, path, use_tls = split_url(self.stt_url)
+    addr = usocket.getaddrinfo(host, port)[0][-1]
     s = usocket.socket()
     try:
       s.connect(addr)
-      try:
-        s = ssl.wrap_socket(s, server_hostname="api.openai.com")
-      except TypeError:
-        s = ssl.wrap_socket(s)
-        
+      if use_tls:
+        try:
+          s = ssl.wrap_socket(s, server_hostname=host)
+        except TypeError:
+          s = ssl.wrap_socket(s)
+
+      auth = self._audio_auth()
+      auth_line = ("Authorization: Bearer %s\r\n" % auth) if auth else ""
       req_head = (
-          "POST /v1/audio/transcriptions HTTP/1.0\r\n"
-          "Host: api.openai.com\r\n"
+          "POST %s HTTP/1.0\r\n"
+          "Host: %s\r\n"
           "Connection: close\r\n"
-          f"Content-Type: multipart/form-data; boundary={boundary}\r\n"
-          f"Content-Length: {content_length}\r\n"
-          f"Authorization: Bearer {self.api_key}\r\n\r\n"
+          "Content-Type: multipart/form-data; boundary=%s\r\n"
+          "Content-Length: %d\r\n"
+          "%s\r\n"
+          % (path, host, boundary, content_length, auth_line)
       ).encode('utf-8')
 
       s.write(req_head)
@@ -540,24 +771,76 @@ class chatgpt_util:
       return True
     return False
 
-  def tts_stream(self, text, voice='alloy'):
-    """Converts text to speech and returns a response object with a raw stream"""
+  def tts_stream(self, text, voice=None):
+    """Converts text to speech and returns a response object with a raw stream.
+    Model / voice / format come from the configured audio backend; `voice` (when
+    given) overrides the backend default for this call."""
     payload = ujson.dumps({
-        "model": "tts-1-hd",
-        #"model": "gpt-4o-mini-tts",
+        "model": self.tts_model,
         "input": text,
-        "voice": voice,
+        "voice": voice or self.voice,
         #"speed" : 1.1,
-        "response_format": "wav"
+        "response_format": self.audio_format
     }).encode('utf-8')
-    
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + self.api_key
-    }
-    
-    # In MicroPython urequests, the response object itself can sometimes be treated as a stream
-    return requests.post(self.tts_url, headers=headers, data=payload)
+
+    if _IS_PC:
+      # The PC shim buffers the whole (already de-chunked) body; keep using it.
+      headers = {'Content-Type': 'application/json'}
+      auth = self._audio_auth()
+      if auth:
+        headers['Authorization'] = 'Bearer ' + auth
+      return requests.post(self.tts_url, headers=headers, data=payload)
+    return self._audio_post(self.tts_url, payload)
+
+  def _audio_post(self, url, payload):
+    """Raw-socket POST for the audio endpoints (like stt()), returning an
+    AudioResponse whose .raw streams the body. urequests doesn't de-chunk when
+    you read .raw, and streaming TTS servers (uvicorn/Qwen etc.) reply with
+    Transfer-Encoding: chunked — so we parse the response ourselves and unwrap
+    the chunking, letting the WAV player see clean audio bytes."""
+    host, port, path, use_tls = split_url(url)
+    import usocket
+    try:
+      import ussl as ssl
+    except ImportError:
+      import ssl
+    addr = usocket.getaddrinfo(host, port)[0][-1]
+    s = usocket.socket()
+    s.connect(addr)
+    if use_tls:
+      try:
+        s = ssl.wrap_socket(s, server_hostname=host)
+      except TypeError:
+        s = ssl.wrap_socket(s)
+
+    auth = self._audio_auth()
+    req = ("POST %s HTTP/1.1\r\n"
+           "Host: %s\r\n"
+           "Connection: close\r\n"
+           "Content-Type: application/json\r\n"
+           "Accept: audio/wav\r\n"
+           "Content-Length: %d\r\n" % (path, host, len(payload)))
+    if auth:
+      req += "Authorization: Bearer %s\r\n" % auth
+    req += "\r\n"
+    s.write(req.encode('utf-8'))
+    s.write(payload)
+
+    line = s.readline()
+    try:
+      status = int(line.split(None, 2)[1])
+    except Exception:
+      status = 0
+    chunked = False
+    while True:                                  # consume + inspect headers
+      h = s.readline()
+      if not h or h == b'\r\n':
+        break
+      hl = h.lower()
+      if hl.startswith(b'transfer-encoding:') and b'chunked' in hl:
+        chunked = True
+    raw = ChunkedReader(s) if chunked else s
+    return AudioResponse(status, s, raw)
 
 el = elib.esclib()
 

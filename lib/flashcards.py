@@ -155,9 +155,10 @@ def wrap_text_lines(v, text, max_width, max_lines, font):
 
 
 class FlashcardsApp:
-  def __init__(self, vs, filename, reverse_mode=False, novoice = False):
+  def __init__(self, vs, filename, reverse_mode=False, novoice = False, model_name = None):
     self.vs = vs
     self.novoice = novoice
+    self.model_name = model_name    # -m: LLM registry entry for example sentences
     self.v = vs.v
     self.filename = filename
     self.el = elib.esclib()
@@ -244,13 +245,33 @@ class FlashcardsApp:
       self.sound_enabled = False
 
   def ai_init(self):
+    # Defer building the LLM client until the first example/TTS request: it
+    # imports the heavier gpt frontend and reads /config/gpt.json, so keeping it
+    # off the launch path keeps flashcards quick to open.
+    self.gpt = None
+    self.gpt_ready = False
+    self.model = None
+    self._ai_tried = False
+
+  def ensure_ai(self):
+    """Build the LLM client on first use from /config/gpt.json (-m picks the
+    entry; default is the registry default). Handles OpenAI Responses and local /
+    third-party Chat endpoints alike. Returns True when ready."""
+    if self._ai_tried:
+      return self.gpt_ready
+    self._ai_tried = True
     try:
-      self.gpt = gpt.chatgpt_util(self.vs)
-      self.gpt_ready = self.gpt.read_api_key()
+      import gpt as gpt_front   # lazy: model registry + Responses/Chat client builder
+      registry = gpt_front.load_registry(None)
+      entry = gpt_front.resolve_entry(registry, self.model_name)
+      self.gpt = gpt_front.init_client(entry, self.vs, False, registry)
+      self.model = entry['model']
+      self.gpt_ready = self.gpt is not None
     except Exception as e:
       print("flashcards gpt init failed:", e)
       self.gpt = None
       self.gpt_ready = False
+    return self.gpt_ready
 
   def load_example_cache(self):
     self.example_cache = {}
@@ -507,8 +528,8 @@ class FlashcardsApp:
 
   def speak_tts(self, word):
 
-    if not self.gpt_ready or not self.gpt:
-      self.open_message_dialog("OpenAI API key is not set.", False)
+    if not self.ensure_ai():
+      self.open_message_dialog("AI unavailable. Check /config/gpt.json or API key.", False)
       return
     try:
       # We don't want gc run for a while
@@ -542,13 +563,12 @@ class FlashcardsApp:
         self.speak_tts(cached)
       return
 
-    if not self.gpt_ready or not self.gpt:
-      self.open_message_dialog("OpenAI API key is not set.", False)
+    if not self.ensure_ai():
+      self.open_message_dialog("AI unavailable. Check /config/gpt.json or API key.", False)
       return
     try:
       prompt = 'Make one short and natural example sentence using this word or idiom: "{}". Return only the sentence.'.format(word)
-      payload = self.gpt.make_json(prompt, [], None, "gpt-5.4-mini")
-      message = self.gpt.ask(payload)
+      message = self.gpt.complete(prompt, self.model)
       if not message:
         self.open_message_dialog("Failed to get example.", False)
         return
@@ -992,6 +1012,7 @@ def main(vs, args):
             description='flashcards')
   parser.add_argument('-r', '--reverse', action='store_true', help='start in reverse mode')
   parser.add_argument('-v', '--novoice', action='store_true', help='Turn off reading aloud the example sentence')
+  parser.add_argument('-m', '--model', default=None, help='LLM for example sentences: a name from /config/gpt.json (default: registry default)')
   parser.add_argument('filename', nargs='?', help='flashcard file')
   pargs = parser.parse_args(args[1:])
 
@@ -1000,7 +1021,7 @@ def main(vs, args):
     v.print(el.display_mode(True))
     return
 
-  app = FlashcardsApp(vs, pargs.filename, pargs.reverse, pargs.novoice)
+  app = FlashcardsApp(vs, pargs.filename, pargs.reverse, pargs.novoice, pargs.model)
   app.loop()
 
   v.print(el.display_mode(True))

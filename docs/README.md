@@ -477,11 +477,12 @@ Custom board file syntax is simple text file:
 ### flashcards
 
 `flashcards` is a flash card app to learn words.
-This app requires OpenAI API setup to support read aloud and example sentence generation.
+Example-sentence generation uses an LLM (OpenAI by default, or any model in `/config/gpt.json`); read-aloud uses OpenAI TTS and needs `/config/openai_api_key`.
 
 Options:
 - `-r` : Reverse the answer and the question.
 - `-v` : No voice
+- `-m name` : LLM for example sentences — a `name` from `/config/gpt.json` (e.g. a local/third-party Chat model). Default: the registry default. See the gpt doc's [Model configuration](gpt_readme.md).
 
 - Up : Reverse mode
 - Down : Open menu
@@ -604,7 +605,18 @@ stt [options] [wav_file] [-o output_file]
 
 ### tts
 
-TTS (Text-to-Speech) app. Requires OpenAI API key.
+TTS (Text-to-Speech) app. Reads a text file aloud (or saves it to a WAV with `-o`).
+
+```
+tts notes.txt
+tts notes.txt -o out.wav
+tts notes.txt -m kokoro          # use a local/third-party voice backend
+tts notes.txt -vm nova           # override the voice
+```
+
+- `-m name` : Audio backend — an `api:"audio"` entry from `/config/gpt.json` (e.g. `kokoro`), or a model entry whose `audio` link to follow. Default: the registry `audio` default, else OpenAI (needs `/config/openai_api_key`). See the gpt doc's [Audio backend](gpt_readme.md) section.
+- `-vm type` : Voice type, overriding the backend's configured voice.
+- `-o file` : Save to a WAV file instead of streaming playback.
 
 ### qr
 

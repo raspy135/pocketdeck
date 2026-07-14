@@ -131,8 +131,12 @@ def main(vs, args_in):
             description='Text to Speech')
   parser.add_argument('input', nargs='?', action='store', default=None,
                       help='Text file to read')
-  parser.add_argument('-vm', '--voicemodel', action='store', default='alloy',
-                      help='Voice model/type for TTS')
+  parser.add_argument('-m', '--model', action='store', default=None,
+                      help='Audio backend: an api:"audio" entry name from /config/gpt.json '
+                           '(e.g. -m kokoro), or a model entry whose "audio" link to follow. '
+                           'Default: the registry "audio" default, else OpenAI.')
+  parser.add_argument('-vm', '--voicemodel', action='store', default=None,
+                      help='Voice type for TTS. Overrides the backend voice; default: its configured voice.')
   parser.add_argument('-o', '--output', action='store', default=None,
                       help='Output WAV filename. Default is streaming playback only')
 
@@ -152,9 +156,15 @@ def main(vs, args_in):
   text = strip_urls(text)
 
   gpt = gptlib.chatgpt_util(vs)
-  if not gpt.read_api_key():
-    print('Set OpenAI key in /config/openai_api_key', file=vs)
+  # Select the STT/TTS backend from /config/gpt.json (-m names an api:"audio"
+  # entry, e.g. kokoro). With no match it defaults to OpenAI.
+  audio = gptlib.resolve_audio(gptlib.load_registry_ro(), args.model)
+  gptlib.apply_audio_config(gpt, audio)
+  is_openai = audio['base_url'].rstrip('/') == gptlib.OPENAI_BASE
+  if is_openai and not gpt.audio_key:
+    print('Set OpenAI key in %s' % gptlib.api_key_location(), file=vs)
     return
+  print('TTS: %s @ %s' % (gpt.tts_model, audio['base_url']), file=vs)
 
   # The TTS API caps input at ~4096 chars, so split long text and send one
   # request per chunk.

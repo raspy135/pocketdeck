@@ -16,9 +16,25 @@ class wav_play:
     
 
   def u4(self, data):
+    if len(data) < 4:
+      raise ValueError("unexpected end of WAV stream")
     return array.array('I', data)[0]
   def u2(self, data):
+    if len(data) < 2:
+      raise ValueError("unexpected end of WAV stream")
     return array.array('H', data)[0]
+
+  def read_exact(self, f, n):
+    """Read exactly n bytes, looping until they arrive or the stream ends. A raw
+    socket read can return fewer bytes than asked (or None), so header fields
+    must not assume a single read yields all of them."""
+    data = b''
+    while len(data) < n:
+      chunk = f.read(n - len(data))
+      if not chunk:
+        break
+      data += chunk
+    return data
 
   def skip_bytes(self, f, n):
     while n > 0:
@@ -28,38 +44,51 @@ class wav_play:
       n -= len(chunk)
 
   def skipChunk(self, f, chunk):
-    chunkID = f.read(4)
+    chunkID = self.read_exact(f, 4)
     while chunkID != chunk:
-      chunkSize = self.u4(f.read(4))
+      if len(chunkID) < 4:
+        return None
+      chunkSize = self.u4(self.read_exact(f, 4))
       print(f"SKIP header = {str(chunkID)}, {chunkSize}")
       self.skip_bytes(f, chunkSize)
-      chunkID = f.read(4)
-      if not chunkID: return None
+      chunkID = self.read_exact(f, 4)
     return chunk
-    
+
   def read_header(self, f):
-    self.h_chunkIDRIFF = f.read(4)
+    self.h_chunkIDRIFF = self.read_exact(f, 4)
+    if self.h_chunkIDRIFF != b'RIFF':
+      # Not a WAV: surface the actual bytes so the cause is obvious (mp3 starts
+      # b'ID3'/b'\xff\xfb', Ogg b'OggS', a JSON/HTML error b'{'/b'<', and HTTP
+      # chunked framing shows a hex length + b'\r\n' before RIFF).
+      preview = self.h_chunkIDRIFF + (f.read(12) or b'')
+      raise ValueError(
+        "audio stream is not WAV; first bytes = %r. The TTS server must return "
+        "16-bit PCM WAV (response_format=wav), unchunked." % preview)
     print(f"headerRIFF = {str(self.h_chunkIDRIFF)}")
-    self.h_riff_chunkSize = self.u4(f.read(4))
-    self.h_riff_format = f.read(4)
-    
+    self.h_riff_chunkSize = self.u4(self.read_exact(f, 4))
+    self.h_riff_format = self.read_exact(f, 4)
+
 
     chunkID = self.skipChunk(f, b'fmt ')
+    if chunkID is None:
+      raise ValueError("WAV stream has no 'fmt ' chunk")
     self.h_chunkIDfmt = chunkID
-    
-    self.h_fmt_chunkSize = self.u4(f.read(4))
+
+    self.h_fmt_chunkSize = self.u4(self.read_exact(f, 4))
     print(f"headerfmt = {str(self.h_chunkIDfmt)}, size={self.h_fmt_chunkSize}")
-    self.h_fmt_audioFormat = self.u2(f.read(2))
-    self.h_fmt_numOfChannels = self.u2(f.read(2))
-    self.h_fmt_sampleRate = self.u4(f.read(4))
-    self.h_fmt_byteRate = f.read(4)
-    self.h_fmt_blockAligh = f.read(2)
-    self.h_fmt_bitsPerSample = self.u2(f.read(2))
+    self.h_fmt_audioFormat = self.u2(self.read_exact(f, 2))
+    self.h_fmt_numOfChannels = self.u2(self.read_exact(f, 2))
+    self.h_fmt_sampleRate = self.u4(self.read_exact(f, 4))
+    self.h_fmt_byteRate = self.read_exact(f, 4)
+    self.h_fmt_blockAligh = self.read_exact(f, 2)
+    self.h_fmt_bitsPerSample = self.u2(self.read_exact(f, 2))
     self.skip_bytes(f, self.h_fmt_chunkSize - 16)
-    
+
     chunkID = self.skipChunk(f, b'data')
+    if chunkID is None:
+      raise ValueError("WAV stream has no 'data' chunk")
     self.h_chunkIDdata = chunkID
-    self.h_data_chunkSize = self.u4(f.read(4))
+    self.h_data_chunkSize = self.u4(self.read_exact(f, 4))
     print(f"headerdata = {str(self.h_chunkIDdata)}, size={self.h_data_chunkSize}")
 
 

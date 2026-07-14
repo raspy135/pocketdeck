@@ -68,8 +68,15 @@ gpt -v
 gpt -v -vt nova
 ```
 
-Voice mode uses the `tts-1-hd` model with WAV output, streamed directly to the
-audio engine.
+By default STT/TTS use OpenAI (`gpt-4o-mini-transcribe` and `tts-1-hd`, WAV
+output streamed straight to the audio engine). The speech backend is separate
+from the LLM, so you can run a local LLM and still use OpenAI — or a local
+OpenAI-compatible speech server — for voice. See [Audio backend](#audio-backend-sttts).
+
+> Note: voice mode with a **local LLM** used to error because STT/TTS still went
+> to OpenAI using the (empty) local key. STT/TTS now follow the configured audio
+> backend; if you don't configure one, they use OpenAI and need a valid
+> `/config/openai_api_key` even when the LLM is local.
 
 ## Inline Directives
 
@@ -164,7 +171,7 @@ In the voice agent (`gpt_rt -a`), press **`u`** for a quick "what's up?" — it 
 
 **Timed programs (voice agent).** Ask the voice agent to walk you through anything with a timeline — e.g. *"instruct me through the stretch routine in stretch.md, following the timing."* It speaks the current step, then waits the right number of seconds and speaks the next one, and so on. The wait runs **in the background with the mic still live**, so you can interrupt hands-free at any time ("hold on", "my back hurts", "how many left?"); doing so pauses the program, and the agent picks the routine back up when you're ready.
 
-**Skills.** Put reusable procedures in `/sd/Documents/skills/`, one markdown file per skill — a routine with steps and timings, a recurring workflow (a morning writing setup), or a document format to follow. The agent knows the folder: ask by name (*"do my morning ritual"*, *"coach me through the surf warm-up"*) or ask *"what skills do I have?"* and it reads the file and follows it. You can also invoke a skill explicitly, Claude-CLI style, by typing a slash and its name — `/morning_ritual` — with `/skills` to list them. Built-in system skills ship in `/sd/lib/skills/` (e.g. `dashboard_design` for building graphical apps); your own skills in `/sd/Documents/skills/` take precedence on a name clash. When you teach it a procedure worth repeating, it can save the procedure there as a new skill.
+**Skills.** Put reusable procedures in `/sd/Documents/skills/`, one markdown file per skill — a routine with steps and timings, a recurring workflow (a morning writing setup), or a document format to follow. The agent knows the folder: ask by name (*"do my morning ritual"*, *"coach me through the surf warm-up"*) or ask *"what skills do I have?"* and it reads the file and follows it. You can also invoke a skill explicitly, Claude-CLI style, by typing a slash and its name — `/morning_ritual` (press **Tab** to complete the name) — with `/skills` to list them. Built-in system skills ship in `/sd/lib/skills/` (e.g. `dashboard_design` for building graphical apps); your own skills in `/sd/Documents/skills/` take precedence on a name clash. When you teach it a procedure worth repeating, it can save the procedure there as a new skill.
 
 
 ### Auto vs Plan mode
@@ -208,7 +215,7 @@ Command | Effect
 `/tools` | Toggle the function-calling tools on/off.
 `/file <path>` | Attach a file as reference for the next message.
 `/skills` | List available skills (your own plus the built-in system skills).
-`/<skill-name>` | Run a skill by name, e.g. `/morning_ritual` (hyphens, underscores and spaces all match). The agent reads the skill file and carries it out; anything after the name is passed as extra input.
+`/<skill-name>` | Run a skill by name, e.g. `/morning_ritual` (hyphens, underscores and spaces all match). Press **Tab** while typing the name to complete it, or to list the matching skills when several share the prefix. The agent reads the skill file and carries it out; anything after the name is passed as extra input.
 `/compact` | Summarize and shrink the running context now. Chat Completions models only.
 `/auto-compact [n]` | Auto-compact every `n` turns (`off` to disable). Chat Completions models only.
 `/improve` | Improve AI agent knowledge. Save learned preferences and stable behavior notes from recent interaction history into a long-term memo; does not change core system rules or persona.
@@ -225,6 +232,8 @@ A role sets the assistant's persona / system prompt.
 - Any other text is used verbatim as the role.
 
 ## Model configuration (`/config/gpt.json`)
+
+If you just use OpenAI APIs, skip this part.
 
 `gpt` is the single frontend for every model. Which models are available — and
 which API each one speaks — is defined in `/config/gpt.json`, an Ollama-style
@@ -276,3 +285,62 @@ model.
 > The Chat Completions client lives in the internal `gpt_c` module; you don't run
 > it directly anymore. An old `gpt_c ...` command still works — it's routed
 > through `gpt`.
+
+### Audio backend (STT/TTS)
+
+If you just use OpenAI APIs, skip this part.
+
+Speech is configured in the **same** `/config/gpt.json`, as an entry with
+`api: "audio"` — so voice can use a different endpoint than the LLM. This is what
+lets you run a **local LLM** while keeping OpenAI (or a local speech server) for
+voice. With no audio entry selected, `gpt` defaults to OpenAI.
+
+An audio entry speaks the OpenAI audio API shape — `POST {base_url}/audio/speech`
+and `POST {base_url}/audio/transcriptions`. Several local servers implement it:
+[speaches](https://github.com/speaches-ai/speaches) and LocalAI for STT;
+openedai-speech, [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI), and
+LocalAI for TTS. 
+
+Audio-entry fields:
+
+Field | Meaning
+------|--------
+`name` | The label other entries reference via their `audio` field.
+`api` | Must be `audio`.
+`base_url` | Speech endpoint base (`http://` allowed for local servers). Default: `https://api.openai.com/v1`.
+`key` | Bearer token for the speech server. Omit for a keyless local server; on an OpenAI `base_url` it falls back to `/config/openai_api_key`.
+`tts_model` | TTS model id. Default: `tts-1-hd`.
+`stt_model` | STT model id. Default: `gpt-4o-mini-transcribe`.
+`voice` | Default TTS voice (overridable per run with `-vt`). Default: `coral`.
+`format` | TTS `response_format`. Default: `wav`. The device can only play **WAV (16-bit PCM)** — leave this as `wav`; `mp3`/`opus`/etc. won't play. Any sample rate is fine (read from the WAV header).
+
+The TTS server must **stream** its response; the device plays audio as it arrives.
+
+Two ways to select the audio backend:
+
+- **Per LLM entry** — add `"audio": "<name>"` to a model entry.
+- **Registry default** — add a top-level `"audio": "<name>"` used whenever the
+  active LLM entry has no `audio` of its own.
+
+```json
+{
+  "default": "local",
+  "audio": "openai-voice",
+  "models": [
+    { "name": "local", "api": "chat",
+      "base_url": "http://192.168.1.50:11434/v1", "model": "llama3.1",
+      "audio": "kokoro" },
+
+    { "name": "openai-voice", "api": "audio" },
+
+    { "name": "kokoro", "api": "audio",
+      "base_url": "http://192.168.1.50:8880/v1",
+      "tts_model": "kokoro", "stt_model": "Systran/faster-whisper-small",
+      "voice": "af_sky", "format": "wav" }
+  ]
+}
+```
+
+Here `-m local` uses the `kokoro` speech server; any other model with no `audio`
+field falls back to `openai-voice` (the registry default). An `audio` entry is
+never selectable with `-m` — it's only referenced by name.

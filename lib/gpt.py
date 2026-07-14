@@ -204,6 +204,15 @@ def list_skills():
   return out
 
 
+def skill_tokens(prefix=''):
+  """Sorted, de-duplicated skill tokens for tab-completion, optionally filtered
+  to those starting with `prefix`."""
+  toks = sorted(set(t for (t, _p, _s) in list_skills()))
+  if prefix:
+    toks = [t for t in toks if t.startswith(prefix)]
+  return toks
+
+
 def find_skill(name):
   """Resolve a typed name to (path, content), or None if no skill matches."""
   key = _skill_key(name)
@@ -405,7 +414,8 @@ def _normalize_entry(entry):
           "base_url": entry.get("base_url") or OPENAI_BASE,
           "model": entry.get("model") or name,
           "effort": entry.get("effort"),
-          "key": entry.get("key")}
+          "key": entry.get("key"),
+          "audio": entry.get("audio")}  # link to an api:"audio" entry, if any
 
 
 def resolve_entry(registry, name):
@@ -422,6 +432,12 @@ def resolve_entry(registry, name):
   return _normalize_entry({"name": name, "api": "responses", "model": resolve_model(name)})
 
 
+# Audio (STT/TTS) backend resolution lives in gpt_l (imported as `gpt`) so it is
+# shared with standalone tools like tts.py: gpt.resolve_audio / gpt.apply_audio_config.
+# A local LLM can still use OpenAI — or a local OpenAI-compatible speech server —
+# for voice; with no api:"audio" entry selected it defaults to OpenAI.
+
+
 def make_client(entry, vs):
   """Build the API client for a normalized registry entry: the Responses client
   (this module) for api 'responses', else gpt_c's Chat Completions client."""
@@ -435,12 +451,13 @@ def make_client(entry, vs):
   return obj
 
 
-def init_client(entry, vs, plan_mode):
+def init_client(entry, vs, plan_mode, registry=None):
   """Build a client for `entry`, load the API key and set the execution mode.
   An explicit "key" on the entry is used verbatim as the bearer token (for
   non-OpenAI providers like xAI that need their own key). With no "key", an
   OpenAI endpoint falls back to /config/openai_api_key (required, returns None
-  if missing) for backward compatibility; any other endpoint proceeds keyless."""
+  if missing) for backward compatibility; any other endpoint proceeds keyless.
+  When `registry` is given, the STT/TTS backend is resolved and applied too."""
   obj = make_client(entry, vs)
   key = entry.get("key")
   if key:
@@ -451,6 +468,8 @@ def init_client(entry, vs, plan_mode):
   else:
     obj.api_key = ""  # no key field -> no authorization
   obj.mode = 'plan' if plan_mode else 'auto'
+  if registry is not None:
+    gpt.apply_audio_config(obj, gpt.resolve_audio(registry, entry.get("audio")))
   return obj
 
 
@@ -811,7 +830,8 @@ def present_response(vs, gpt_obj, message, raw_response, args, margs, log_filena
       print("TTS processing..", file=vs)
     else:
       _anim = gpt.ThinkingAnimation(vs, "TTS..")
-    res = gpt_obj.tts_stream(raw_response_sub, voice=args.voice_type)
+    vtype = margs['voice_type'] if 'voice_type' in margs else args.voice_type
+    res = gpt_obj.tts_stream(raw_response_sub, voice=vtype)
     if not args.silent:
       _anim.stop()
     print("TTS processing done", file=vs)
@@ -992,6 +1012,24 @@ def _vis_cells(s):
   return total
 
 
+def _install_pc_skill_completer():
+  """Emulator only: teach readline to Tab-complete /skill names. '/' is a default
+  word delimiter, so `text` is the token typed after the slash. Only completes the
+  command word of a slash line, matching the device editor."""
+  try:
+    import readline
+  except ImportError:
+    return
+  def _completer(text, state):
+    line = readline.get_line_buffer()
+    if not line.startswith('/') or ' ' in line:
+      return None
+    matches = skill_tokens(text)
+    return matches[state] if state < len(matches) else None
+  readline.set_completer(_completer)
+  readline.parse_and_bind('tab: complete')
+
+
 def read_line(vs, prompt, history, on_shift_tab=None, lead="\n",
               allow_ime=False, ime_on=False, on_ime_toggle=None):
   """Read one line with editing. Arrows move the cursor; Up/Down browse history;
@@ -1014,6 +1052,7 @@ def read_line(vs, prompt, history, on_shift_tab=None, lead="\n",
     # gives line editing and history (via readline). Ctrl-C cancels the line
     # (return None, like the device); Ctrl-D quits the conversation.
     p = prompt() if callable(prompt) else prompt
+    _install_pc_skill_completer()
     try:
       return input(p)
     except KeyboardInterrupt:
@@ -1168,6 +1207,25 @@ def read_line(vs, prompt, history, on_shift_tab=None, lead="\n",
     elif o == 3:                                   # Ctrl-C: cancel line
       vs.write('^C\r\n')
       return None
+    elif o == 9:                                   # Tab: complete a /skill name
+      # Only while typing the command word of a slash line ("/foo", no space yet)
+      # and with the caret at the end, so Tab is inert everywhere else.
+      s = ''.join(buf)
+      if s.startswith('/') and ' ' not in s and cur == len(buf):
+        prefix = s[1:]
+        toks = skill_tokens(prefix)
+        if len(toks) == 1:                         # unique: fill it in + a space
+          buf = list('/' + toks[0] + ' '); cur = len(buf); redraw()
+        elif len(toks) > 1:
+          cp = toks[0]                             # extend to the common prefix
+          for t in toks[1:]:
+            while not t.startswith(cp):
+              cp = cp[:-1]
+          if len(cp) > len(prefix):
+            buf = list('/' + cp); cur = len(buf); redraw()
+          else:                                    # ambiguous: list the candidates
+            vs.write('\r\n' + '  '.join(toks) + '\r\n')
+            anchor[0] = 0; redraw()
     elif o >= 0x20 and ch != '\x7f':               # printable: insert
       buf.insert(cur, ch); cur += 1; redraw()
 
@@ -1192,7 +1250,7 @@ def main(vs, args_in):
   parser.add_argument('--base-url', action='store', default=None, help='Override the endpoint base URL for this run')
   parser.add_argument('-e', '--effort', action='store', default='medium', help='Reasoning effort (low, medium, high) - Responses models only')
   parser.add_argument('-v', '--voice', action='store_true', help='Use voice mode (STT and TTS)')
-  parser.add_argument('-vt', '--voice-type', action='store', default='coral', help='Voice type for TTS')
+  parser.add_argument('-vt', '--voice-type', action='store', default=None, help='Voice type for TTS (overrides the audio backend voice; default: its configured voice, else coral)')
   parser.add_argument('-r', '--role', action='store', default=None, help="Role preset 'assistant' or 'coder', a /sd/roles/<name>.txt file, or literal text. Default: assistant.")
   parser.add_argument('--log-file', action='store', default=None, help='Internal: reuse the same log filename across iterations')
   parser.add_argument('--resume', action='store_true', help='Save this turn\'s response id to the session list so a later call can continue the conversation')
@@ -1213,7 +1271,7 @@ def main(vs, args_in):
   entry = resolve_entry(registry, args.model)
   if args.base_url:
     entry = dict(entry); entry['base_url'] = args.base_url
-  gpt_obj = init_client(entry, vs, args.plan)
+  gpt_obj = init_client(entry, vs, args.plan, registry)
   if gpt_obj is None:
     return
 
@@ -1312,7 +1370,7 @@ def main(vs, args_in):
       new_entry = dict(new_entry); new_entry['base_url'] = args.base_url
     if (new_entry['api'] != gpt_obj.API or
         new_entry['base_url'].rstrip('/') != gpt_obj.base_url.rstrip('/')):
-      rebuilt = init_client(new_entry, vs, args.plan)
+      rebuilt = init_client(new_entry, vs, args.plan, registry)
       if rebuilt is None:
         return
       rebuilt.jp_font_loaded = gpt_obj.jp_font_loaded
@@ -1431,7 +1489,7 @@ def main(vs, args_in):
       ctx['entry'] = new_entry
       print("Model: %s (%s API)." % (new_entry['name'], new_entry['api']), file=vs)
       return
-    new_obj = init_client(new_entry, vs, gpt_obj.mode == 'plan')
+    new_obj = init_client(new_entry, vs, gpt_obj.mode == 'plan', registry)
     if new_obj is None:
       print("Could not switch to %s (no API key for %s)." %
             (new_entry['name'], new_entry['base_url']), file=vs)
@@ -1538,12 +1596,13 @@ def main(vs, args_in):
       lines.append("  /compact           summarize & shrink the conversation context now")
       lines.append("  /auto-compact [n]  auto-compact every n turns (no arg shows; 'off' disables)")
     lines.append("  /skills            list available skills (user + system)")
-    lines.append("  /<skill-name>      run a skill by name (e.g. /morning_ritual)")
+    lines.append("  /<skill-name>      run a skill by name (e.g. /morning_ritual; Tab completes)")
     lines.append("  /improve           learn from this session & update long-term memory")
     lines.append("  /auto-improve [n]  auto-run /improve every n turns (no arg shows; 'off' disables)")
     lines.append("Plan mode confirms each command_with_return / write_file before it runs.")
     lines.append("Japanese input: Alt+` or Alt+j toggles the kana IME (best with -j font).")
     lines.append("Editing: arrows move, Up/Down history, Ctrl-A/E start/end, Ctrl-K/U kill, Ctrl-C cancel, Shift-Tab toggles mode.")
+    lines.append("Tab on a /<skill> line completes the name (or lists matches).")
     print("\n".join(lines), file=vs)
 
   def show_models():
