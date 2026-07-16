@@ -545,7 +545,7 @@ gpt (`gpt`) is the AI assistant frontend. Refer [[gpt_readme]] for detail. Model
 
 ### gpt_rt
 
-`gpt_rt` is a real-time voice agent using the OpenAI Realtime API. It opens a full-duplex audio conversation over WebSocket — you speak and the AI responds in near real time, with server-side voice activity detection handling turn changes automatically. Requires OpenAI API key at `/config/openai_api_key`. Many options are shared with gpt app. See [[gpt_readme]] for details.
+`gpt_rt` is a real-time voice agent using the OpenAI Realtime API (or an OpenAI-compatible one such as **xAI's Grok Voice Agent**). It opens a full-duplex audio conversation over WebSocket — you speak and the AI responds in near real time, with server-side voice activity detection handling turn changes automatically. Uses OpenAI at `/config/openai_api_key` by default; other providers are configured with an `api:"realtime"` entry in `/config/gpt.json`. Many options are shared with gpt app. See [[gpt_readme]] for details.
 
 ```
 gpt_rt [-m model] [-f file [file...]] [-a]
@@ -553,7 +553,7 @@ gpt_rt [-m model] [-f file [file...]] [-a]
 
 Option | Description
 -------|------------
-`-m model` | Model to use (default: `gpt-realtime-2`)
+`-m model` | Realtime backend: a `name` from `/config/gpt.json` (an `api:"realtime"` entry, e.g. `grok-voice`), or a raw OpenAI realtime model id. Default: OpenAI `gpt-realtime-2`.
 `-f file [file...]` | Attach one or more files as reference context for the session
 `-a` | Agent mode — enables function calling (see below)
 

@@ -93,6 +93,128 @@ def _ws_mask(dst: ptr8, src: ptr8, src_off: int, n: int, mask: ptr8):
     dst[i] = src[g] ^ mask[g & 3]
     i += 1
 
+
+# Base64 helpers that read/write caller-provided buffers. ubinascii allocates a
+# fresh object per call, and the audio loop runs many times per second in both
+# directions — that garbage was the main driver of the periodic gc pauses
+# (audible as glitches). These keep the steady-state audio path allocation-free.
+_B64_ALPHA = b'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+_B64_DEC = bytearray(256)
+for _i in range(256):
+  _B64_DEC[_i] = 255
+for _i in range(64):
+  _B64_DEC[_B64_ALPHA[_i]] = _i
+_B64_DEC = bytes(_B64_DEC)
+
+
+@micropython.viper
+def _b64_encode(dst: ptr8, dst_off: int, src: ptr8, n: int) -> int:
+  # Encode n bytes of src as base64 into dst[dst_off:], '='-padded like
+  # ubinascii.b2a_base64 (minus the trailing newline). Returns chars written.
+  t = ptr8(_B64_ALPHA)
+  o = dst_off
+  i = 0
+  while i + 2 < n:
+    b0 = src[i]
+    b1 = src[i + 1]
+    b2 = src[i + 2]
+    dst[o] = t[b0 >> 2]
+    dst[o + 1] = t[((b0 & 3) << 4) | (b1 >> 4)]
+    dst[o + 2] = t[((b1 & 15) << 2) | (b2 >> 6)]
+    dst[o + 3] = t[b2 & 63]
+    i += 3
+    o += 4
+  rem = n - i
+  if rem == 1:
+    b0 = src[i]
+    dst[o] = t[b0 >> 2]
+    dst[o + 1] = t[(b0 & 3) << 4]
+    dst[o + 2] = 61  # '='
+    dst[o + 3] = 61
+    o += 4
+  elif rem == 2:
+    b0 = src[i]
+    b1 = src[i + 1]
+    dst[o] = t[b0 >> 2]
+    dst[o + 1] = t[((b0 & 3) << 4) | (b1 >> 4)]
+    dst[o + 2] = t[(b1 & 15) << 2]
+    dst[o + 3] = 61
+    o += 4
+  return o - dst_off
+
+
+@micropython.viper
+def _b64_decode(dst: ptr8, src: ptr8, src_off: int, n: int) -> int:
+  # Decode n base64 chars from src[src_off:] into dst. Stops at '=' padding,
+  # skips whitespace/invalid chars. Returns bytes written.
+  t = ptr8(_B64_DEC)
+  o = 0
+  i = src_off
+  end = src_off + n
+  acc = 0
+  bits = 0
+  while i < end:
+    c = src[i]
+    i += 1
+    if c == 61:  # '='
+      break
+    v = t[c]
+    if v == 255:
+      continue
+    acc = (acc << 6) | v
+    bits += 6
+    if bits >= 8:
+      bits -= 8
+      dst[o] = (acc >> bits) & 0xff
+      o += 1
+  return o
+
+
+@micropython.viper
+def _mem_find(hay: ptr8, start: int, end: int, needle: ptr8, nlen: int) -> int:
+  # First index of needle in hay[start:end], or -1. bytearray/memoryview have
+  # no .find() in MicroPython, and this avoids materializing bytes() copies.
+  if nlen <= 0:
+    return start
+  last = end - nlen
+  i = start
+  c0 = needle[0]
+  while i <= last:
+    if hay[i] == c0:
+      j = 1
+      while j < nlen:
+        if hay[i + j] != needle[j]:
+          break
+        j += 1
+      if j == nlen:
+        return i
+    i += 1
+  return -1
+
+
+# Prefer the C implementations in dsplib (same signatures, caller-provided
+# buffers, allocation-free and faster than viper). The viper versions above
+# stay as the fallback for firmware without them.
+#
+# IMPORTANT: keep the viper function objects referenced (_vp aliases) even when
+# dsplib wins. Dropping the last reference to a FROZEN viper function lets gc
+# collect it, and its finalizer then calls esp_native_code_free on flash-
+# resident code — which corrupted the heap (StoreProhibited in gc) on firmware
+# before the guard added to esp_native_code_free on 2026-07-15.
+_b64_encode_vp = _b64_encode
+_b64_decode_vp = _b64_decode
+try:
+  import dsplib
+  _b64_encode = dsplib.b64_encode
+  _b64_decode = dsplib.b64_decode
+except (ImportError, AttributeError):
+  pass
+
+# Byte-level markers for the audio-delta fast path (see _try_audio_delta).
+_DELTA_TYPE = b'"type":"response.output_audio.delta"'
+_DELTA_B64_KEY = b'"delta":"'
+_QUOTE = b'"'
+
 class ConnectionLost(Exception):
   # Raised by SimpleWS when the socket/TLS link breaks (as opposed to a transient
   # "no data yet" state). loop() catches it and transparently reconnects.
@@ -159,14 +281,29 @@ class SimpleWS:
     self.sock.setblocking(False)
     self.mask_buf = bytearray(1024)
     self.mask_mv = memoryview(self.mask_buf)
+    # Preallocated receive/send scratch. The realtime session receives several
+    # audio-delta frames per second; allocating a header + payload bytearray
+    # per frame was a large share of the garbage that drove periodic gc pauses
+    # (audible glitches). Frames are assembled into the shared _rx buffer and
+    # recv() hands out a memoryview into it (valid until the next recv call).
+    self._hdr = bytearray(2)
+    self._hdr_mv = memoryview(self._hdr)
+    self._ext = bytearray(8)
+    self._ext_mv = memoryview(self._ext)
+    self._mask4 = bytearray(4)       # incoming frame mask (recv path)
+    self._send_mask = bytearray(4)   # outgoing frame mask (send path)
+    self._rx_size = 65536
+    self._rx = bytearray(self._rx_size)
+    self._rx_mv = memoryview(self._rx)
+    self._send_hdr = bytearray(4)
+    self.rx_grow = 0  # debug: count of _rx_ensure growths (big allocations)
 
-  def _recv_exact(self, n):
-    res = bytearray(n)
-    view = memoryview(res)
+  def _recv_exact_into(self, view):
+    n = len(view)
     read = 0
     while read < n:
       try:
-        r = self.sock.readinto(view[read:])
+        r = self.sock.readinto(view[read:] if read else view)
         if r is None:
           time.sleep(0.005)
           continue
@@ -185,16 +322,30 @@ class SimpleWS:
           time.sleep(0.005)
           continue
         raise ConnectionLost(str(e))
-    return res
 
-  def _recv_frame(self, block=False):
-    # Reads a single WebSocket frame and returns (fin, opcode, payload), or
-    # None when no data is available yet (only when block=False). When block
-    # is True we are mid-message (waiting for continuation frames) and must
-    # wait for the next frame rather than abandoning the partial message.
+  def _rx_ensure(self, need):
+    # Grow the shared receive buffer (rare: only frames/messages over 64 KB,
+    # e.g. a huge response.done). Preserves already-assembled fragment bytes.
+    if need <= self._rx_size:
+      return
+    size = (need + 0xffff) & ~0xffff
+    self.rx_grow += 1
+    print("[dbg] ws rx buffer grew to %d (big frame/message)" % size)
+    nb = bytearray(size)
+    nb[:self._rx_size] = self._rx
+    self._rx = nb
+    self._rx_mv = memoryview(nb)
+    self._rx_size = size
+
+  def _recv_frame(self, block=False, off=0):
+    # Reads a single WebSocket frame; the payload is written into self._rx at
+    # offset off. Returns (fin, opcode, length), or None when no data is
+    # available yet (only when block=False). When block is True we are
+    # mid-message (waiting for continuation frames) and must wait for the next
+    # frame rather than abandoning the partial message.
     while True:
       try:
-        header = self.sock.read(2)
+        r = self.sock.readinto(self._hdr_mv)
       except OSError as e:
         if e.args[0] == 11:
           if block:
@@ -212,18 +363,18 @@ class SimpleWS:
         # A real TLS/network failure (not a "would block" state): reconnect.
         raise ConnectionLost(str(e))
 
-      if not header:
+      if not r:
         if block:
           time.sleep(0.005)
           continue
         return None
       break
 
-    if len(header) < 2:
+    if r < 2:
       # Got a partial header; the rest is guaranteed to follow.
-      header = bytes(header) + bytes(self._recv_exact(2 - len(header)))
+      self._recv_exact_into(self._hdr_mv[1:])
 
-    b1, b2 = header[0], header[1]
+    b1, b2 = self._hdr[0], self._hdr[1]
     fin = b1 & 0x80
     opcode = b1 & 0x0f
 
@@ -231,54 +382,61 @@ class SimpleWS:
     length = b2 & 0x7f
 
     if length == 126:
-      ext = self._recv_exact(2)
-      length = (ext[0] << 8) | ext[1]
+      self._recv_exact_into(self._ext_mv[:2])
+      length = (self._ext[0] << 8) | self._ext[1]
     elif length == 127:
-      ext = self._recv_exact(8)
+      self._recv_exact_into(self._ext_mv)
       length = 0
       for i in range(8):
-        length = (length << 8) | ext[i]
+        length = (length << 8) | self._ext[i]
 
     if has_mask:
-      mask = self._recv_exact(4)
+      self._recv_exact_into(memoryview(self._mask4))
 
-    payload = self._recv_exact(length) if length else bytearray()
-    if has_mask:
-      for i in range(length):
-        payload[i] ^= mask[i % 4]
+    if length:
+      self._rx_ensure(off + length)
+      self._recv_exact_into(self._rx_mv[off:off + length])
+      if has_mask:
+        m = self._mask4
+        buf = self._rx
+        for i in range(length):
+          buf[off + i] ^= m[i & 3]
 
-    return fin, opcode, payload
+    return fin, opcode, length
 
   def recv(self):
     # Reassembles fragmented messages: a logical message may span a leading
     # data frame (opcode 1/2, FIN=0) plus continuation frames (opcode 0) until
     # FIN is set. Control frames (ping/pong/close) may be interleaved between
     # fragments and are handled without disturbing the message being assembled.
-    data = None
+    # Returns a memoryview into the shared receive buffer — valid only until
+    # the next recv() call — or None when no complete message is ready.
+    total = -1  # -1 = no message started yet
     while True:
-      frame = self._recv_frame(block=data is not None)
+      off = total if total > 0 else 0
+      frame = self._recv_frame(block=total >= 0, off=off)
       if frame is None:
         return None
-      fin, opcode, payload = frame
+      fin, opcode, length = frame
 
       if opcode == 8:        # close
         self.sock.close()
         return None
-      if opcode == 9:        # ping
-        self.send(payload, opcode=10)
+      if opcode == 9:        # ping (payload sits at off; copy before replying)
+        self.send(bytes(self._rx_mv[off:off + length]), opcode=10)
         continue
       if opcode == 10:       # pong
         continue
 
       if opcode == 0:        # continuation
-        if data is None:
+        if total < 0:
           continue           # stray continuation; ignore
-        data += payload
+        total += length
       else:                  # 1 = text, 2 = binary: start of a message
-        data = payload
+        total = length
 
       if fin:
-        return data
+        return self._rx_mv[:total]
 
   def _send_exact(self, data):
     view = memoryview(data)
@@ -307,30 +465,35 @@ class SimpleWS:
         raise ConnectionLost(str(e))
 
   def send(self, data, opcode=1):
+    # Accepts str, bytes, or any buffer (the mic path sends a memoryview of a
+    # preallocated frame). Header and mask use preallocated scratch so the
+    # per-send garbage is zero for buffer inputs.
     if isinstance(data, str):
       data = data.encode()
     length = len(data)
 
-    header = bytearray(2)
-    header[0] = 0x80 | opcode
-    mask = bytes([urandom.getrandbits(8) for _ in range(4)])
+    hdr = self._send_hdr
+    hdr[0] = 0x80 | opcode
+    mask = self._send_mask
+    mask[0] = urandom.getrandbits(8)
+    mask[1] = urandom.getrandbits(8)
+    mask[2] = urandom.getrandbits(8)
+    mask[3] = urandom.getrandbits(8)
 
     if length < 126:
-      header[1] = 0x80 | length
-      self._send_exact(header)
+      hdr[1] = 0x80 | length
+      self._send_exact(memoryview(hdr)[:2])
     elif length < 65536:
-      header[1] = 0x80 | 126
-      ext = bytearray(2)
-      ext[0] = (length >> 8) & 0xff
-      ext[1] = length & 0xff
-      self._send_exact(header)
-      self._send_exact(ext)
+      hdr[1] = 0x80 | 126
+      hdr[2] = (length >> 8) & 0xff
+      hdr[3] = length & 0xff
+      self._send_exact(memoryview(hdr))
     else:
-      header[1] = 0x80 | 127
+      hdr[1] = 0x80 | 127
+      self._send_exact(memoryview(hdr)[:2])
       ext = bytearray(8)
       for i in range(8):
         ext[7-i] = (length >> (i*8)) & 0xff
-      self._send_exact(header)
       self._send_exact(ext)
 
     self._send_exact(mask)
@@ -349,11 +512,19 @@ class SimpleWS:
 
 
 class RealtimeAgent(gpt_tools.ToolExecBase):
-  def __init__(self, ws, vs, model, file_list, references, app_list=None, agent=False, language=None, headers=None):
+  def __init__(self, ws, vs, model, file_list, references, app_list=None, agent=False, language=None, headers=None, rt=None):
     self.ws = ws
     self.vs = vs
     self.model = model
     self.headers = headers or {}
+    # Realtime backend (host/path/voice/provider) so the session config and any
+    # reconnect target the right provider. Defaults keep OpenAI behavior.
+    rt = rt or {}
+    self.rt_host = rt.get("host", "api.openai.com")
+    self.rt_path = rt.get("path", "/v1/realtime")
+    self.rt_port = rt.get("port", 443)
+    self.voice = rt.get("voice", "marin")
+    self.provider = rt.get("provider", "openai")
     self.file_list = file_list or []
     self.references = references
     self.app_list = app_list or []
@@ -376,6 +547,23 @@ class RealtimeAgent(gpt_tools.ToolExecBase):
     self.mic_buf_size = 10000
     self.mic_bufs = [memoryview(bytearray(self.mic_buf_size)), memoryview(bytearray(self.mic_buf_size))]
     self.mic_ready_idx = -1
+
+    # Preallocated outgoing mic frame: JSON envelope + base64 payload, rebuilt
+    # in place each tick (~5/s). The old path (b2a_base64 + strip + decode +
+    # ujson.dumps + encode) allocated ~65 KB of garbage per tick and was a main
+    # driver of the periodic gc pauses that glitch the audio.
+    self._mic_prefix = b'{"type":"input_audio_buffer.append","audio":"'
+    _b64_len = ((self.mic_buf_size + 2) // 3) * 4
+    self._mic_frame = bytearray(len(self._mic_prefix) + _b64_len + 2)
+    self._mic_frame[:len(self._mic_prefix)] = self._mic_prefix
+    self._mic_frame_mv = memoryview(self._mic_frame)
+
+    # Preallocated PCM scratch for the incoming audio-delta fast path: base64
+    # is decoded straight from the websocket receive buffer into here, then
+    # copied into the playback ring. Sized for the largest delta a 64 KB frame
+    # can carry; larger (grown-buffer) frames fall back to the json path.
+    self._pcm_buf = bytearray(49152)
+    self._pcm_mv = memoryview(self._pcm_buf)
 
     self.spk_buf_size = 8000
     self.spk_bufs = [memoryview(bytearray(self.spk_buf_size)), memoryview(bytearray(self.spk_buf_size))]
@@ -426,6 +614,31 @@ class RealtimeAgent(gpt_tools.ToolExecBase):
     self.underrun_count = 0
     self.drop_count = 0
     self.last_stat_time = time.ticks_ms()
+
+    # --- glitch-hunt debug instrumentation ----------------------------------
+    # Per-second "[dbg]" stat line on the REPL (plain print, not the app
+    # screen). With debug=True (-d) it prints every second audio is flowing;
+    # otherwise only on anomaly windows (underrun / drop / late callback /
+    # rx-buffer growth), so glitches leave a trace even without -d.
+    #
+    # The two glitch modes it separates:
+    #  - ring underrun: ring drained -> silence + "underrun" print (ur=).
+    #  - LATE CALLBACK: spk_callback not serviced in time (GIL held by a long
+    #    ujson.loads or a gc pass) -> the I2S DMA replays stale buffer data,
+    #    heard as REPEATED audio with NO underrun print. cbgap= catches this:
+    #    the callback should fire every ~166 ms (8000 B / 2 / 24 kHz).
+    self.debug = False
+    self.cb_gap_max = 0       # max ms between speaker callbacks this window
+    self._cb_last = 0
+    self.fill_min = -1        # lowest ring fill seen while playing (not buffering)
+    self.delta_fast = 0       # audio deltas via the zero-alloc fast path
+    self.delta_slow = 0       # audio deltas via ujson.loads (dict-form: e.g. xAI)
+    self.delta_bytes_max = 0  # largest decoded delta this window
+    self.frame_max = 0        # largest websocket frame this window
+    self.json_ms_max = 0      # slowest ujson.loads this window
+    self.loop_gap_max = 0     # max ms between loop() entries (main-thread stall)
+    self._loop_last = 0
+    self._slow_warned = False
 
     self.ai_text = ""
     self.ai_text_printed = False
@@ -478,12 +691,22 @@ class RealtimeAgent(gpt_tools.ToolExecBase):
   @micropython.native
   def spk_callback(self, index):
     t0 = time.ticks_us()
+    # Late-callback detector: this should fire every ~166 ms. A larger gap means
+    # the DMA already looped stale data (heard as a repeat) before we refilled.
+    now_ms = time.ticks_ms()
+    if self._cb_last:
+      gap = time.ticks_diff(now_ms, self._cb_last)
+      if gap > self.cb_gap_max:
+        self.cb_gap_max = gap
+    self._cb_last = now_ms
     dest = self.spk_bufs[index]
     buf_size = len(dest)
     rpos = self._ring_rpos % self._ring_size
     fill = (self._ring_wpos - self._ring_rpos)  % self._ring_size
 
-    pdeck.led(2,int(fill * (100 / self._ring_size)))
+    # Integer math: the old float expression boxed a new float object on every
+    # callback, adding steady garbage from inside the audio callback itself.
+    pdeck.led(2, fill * 100 // self._ring_size)
 
 
     if self.buffering:
@@ -496,10 +719,18 @@ class RealtimeAgent(gpt_tools.ToolExecBase):
           self.cb_time_max = duration
         return
 
+    if self.fill_min < 0 or fill < self.fill_min:
+      self.fill_min = fill
+
     if fill < buf_size:
       self.buffering = True
-      self.underrun_count += 1
-      print('underrun')
+      # Only a drain while a response is still streaming is a real underrun
+      # (worth reporting and deepening the pre-roll cushion for). After
+      # response.done all audio is already local, so running dry is just the
+      # normal end of the utterance.
+      if self.response_active:
+        self.underrun_count += 1
+        print('underrun')
       if fill > 0:
         end = rpos + fill
         if end <= self._ring_size:
@@ -546,18 +777,24 @@ class RealtimeAgent(gpt_tools.ToolExecBase):
     audio.stream_record(True)
 
   def send_session_update(self):
+    # Input transcription config differs by provider: OpenAI takes a Whisper
+    # model + language; xAI takes a BCP-47 language_hint (no model field).
+    if self.provider == "xai":
+      transcription = {"language_hint": self.language} if self.language else {}
+    else:
+      transcription = {"model": "whisper-1", "language": self.language} if self.language else {"model": "whisper-1"}
     session = {
       "type": "realtime",
       "instructions": build_session_instructions(self.model, self.file_list, self.references, self.app_list, self.agent),
       "audio": {
         "input": {
           "format": {"type": "audio/pcm", "rate": self.sample_rate},
-          "transcription": ({"model": "whisper-1", "language": self.language} if self.language else {"model": "whisper-1"}),
+          "transcription": transcription,
           "turn_detection": {"type": "server_vad"}
         },
         "output": {
           "format": {"type": "audio/pcm", "rate": self.sample_rate},
-          "voice": "marin"
+          "voice": self.voice
         }
       }
     }
@@ -571,6 +808,75 @@ class RealtimeAgent(gpt_tools.ToolExecBase):
     cfg = {"type": "session.update", "session": session}
     self.ws.send(ujson.dumps(cfg))
 
+  def _ring_write(self, src, n):
+    # Copy n bytes from src (a sliceable buffer) into the playback ring.
+    # Returns False when the ring is full (caller counts the drop).
+    wpos = self._ring_wpos % self._ring_size
+    fill = (self._ring_wpos - self._ring_rpos + self._ring_size) % self._ring_size
+    pdeck.led(2, fill * 100 // self._ring_size)
+    if n > self._ring_size - fill:
+      self.drop_count += 1
+      print("Ring buffer full. Dropping")
+      return False  # ring full; drop rather than corrupt
+    end = wpos + n
+    if end <= self._ring_size:
+      self._ring_mv[wpos:end] = src[:n]
+    else:
+      tail = self._ring_size - wpos
+      self._ring_mv[wpos:] = src[:tail]
+      self._ring_mv[:n - tail] = src[tail:n]
+    self._ring_wpos += n
+    return True
+
+  def _try_audio_delta(self, frame):
+    # Zero-allocation fast path for response.output_audio.delta frames: detect
+    # the type marker in the frame head, then base64-decode the delta straight
+    # from the websocket receive buffer into _pcm_buf and copy it into the
+    # ring. Skips ujson.loads, which would build a dict plus a multi-KB base64
+    # string per delta — with the mic path, the main driver of gc pauses.
+    # Returns True when the frame was consumed. Any frame it does not fully
+    # recognize falls back to the json path (return False).
+    n = len(frame)
+    # The event's own "type" comes in the frame head; 80 bytes is enough and
+    # avoids matching the same marker nested inside e.g. a response.done body.
+    if _mem_find(frame, 0, n if n < 80 else 80, _DELTA_TYPE, len(_DELTA_TYPE)) < 0:
+      return False
+    p = _mem_find(frame, 0, n, _DELTA_B64_KEY, len(_DELTA_B64_KEY))
+    if p < 0:
+      return False  # dict-form delta (e.g. xAI): let handle_audio_delta parse it
+    start = p + len(_DELTA_B64_KEY)
+    end = _mem_find(frame, start, n, _QUOTE, 1)
+    if end < 0:
+      return False
+    if end == start:
+      return True   # empty delta; nothing to play
+    self._bump_activity()  # the assistant is speaking: not idle
+    pdeck.led(3, 0)
+    # Grok packs 100 KB+ of PCM into a single delta (OpenAI sends small frequent
+    # ones), far beyond _pcm_buf. Decode in _pcm_buf-sized chunks rather than
+    # falling back to ujson.loads: parsing a 160 KB frame held the GIL for up to
+    # ~1.2 s, starving the speaker callback so the DMA replayed stale audio
+    # (heard as repeats, with no underrun since the ring never drained). The
+    # chunk size is a multiple of 4 b64 chars (one 3-byte quantum) and the
+    # payload is pure base64 — no whitespace/escapes — so splitting is safe.
+    total = 0
+    pos = start
+    chunk = (len(self._pcm_buf) // 3) * 4
+    while pos < end:
+      span = end - pos
+      if span > chunk:
+        span = chunk
+      m = _b64_decode(self._pcm_buf, frame, pos, span)
+      if m > 0:
+        self._ring_write(self._pcm_mv, m)
+        total += m
+      pos += span
+    self.delta_fast += 1
+    if total > self.delta_bytes_max:
+      self.delta_bytes_max = total
+    pdeck.led(3, 5)
+    return True
+
   def handle_audio_delta(self, msg):
     delta = msg.get("delta")
     if not delta:
@@ -580,31 +886,17 @@ class RealtimeAgent(gpt_tools.ToolExecBase):
     else:
       audio_b64 = delta
     if audio_b64:
-      #pdeck.led(2,0)
       pdeck.led(3,0)
       raw = ubinascii.a2b_base64(audio_b64)
-      #pdeck.led(2,40)
-      n = len(raw)
-      wpos = self._ring_wpos % self._ring_size
-      rpos = self._ring_rpos % self._ring_size
-      fill = (self._ring_wpos - self._ring_rpos + self._ring_size) % self._ring_size
-      pdeck.led(2,int(fill * (100 / self._ring_size)))
-      if n > self._ring_size - fill:
-        self.drop_count += 1
-        #pdeck.led(2,100)
-        print("Ring buffer full. Dropping")
-        return  # ring full; drop rather than corrupt
-      end = wpos + n
-      if end <= self._ring_size:
-        self._ring_mv[wpos:end] = raw
-      else:
-        tail = self._ring_size - wpos
-        raw_mv = memoryview(raw)
-        self._ring_mv[wpos:] = raw_mv[:tail]
-        self._ring_mv[:n - tail] = raw_mv[tail:]
-      self._ring_wpos += n #% self._ring_size
-      #pdeck.led(2,0)
+      self._ring_write(memoryview(raw), len(raw))
       pdeck.led(3,5)
+      self.delta_slow += 1
+      if len(raw) > self.delta_bytes_max:
+        self.delta_bytes_max = len(raw)
+      if not self._slow_warned:
+        self._slow_warned = True
+        print("[dbg] audio deltas are taking the SLOW json path (dict-form "
+              "delta, e.g. grok) - per-delta allocations will drive gc pauses")
 
   def handle_text_delta(self, msg):
     delta = msg.get("delta")
@@ -636,6 +928,14 @@ class RealtimeAgent(gpt_tools.ToolExecBase):
       self.user_text = text
     elif self.user_text_partial:
       self.user_text = self.user_text_partial
+
+  def handle_user_text_updated(self, text):
+    # Cumulative transcript (xAI). Replace rather than append; printing is
+    # deferred to print_user_text_if_ready when the model starts replying, by
+    # which point this holds the full utterance.
+    if text:
+      self.user_text_partial = text
+      self.user_text = text
 
   def print_user_text_if_ready(self):
     if self.user_text and not self.user_text_printed:
@@ -907,6 +1207,10 @@ class RealtimeAgent(gpt_tools.ToolExecBase):
     elif mtype == "conversation.item.input_audio_transcription.completed":
       self.handle_user_text_completed(msg.get("transcript", ""))
 
+    elif mtype == "conversation.item.input_audio_transcription.updated":
+      # xAI sends the cumulative transcript (full text so far), not increments.
+      self.handle_user_text_updated(msg.get("transcript", ""))
+
     elif mtype == "response.output_item.added":
       item = msg.get("item", {})
       if item.get("type") == "function_call":
@@ -1138,7 +1442,7 @@ class RealtimeAgent(gpt_tools.ToolExecBase):
     self.reset_turn_text()
     gc.collect()
     try:
-      self.ws = SimpleWS("api.openai.com", "/v1/realtime?model=%s" % self.model, headers=self.headers)
+      self.ws = SimpleWS(self.rt_host, "%s?model=%s" % (self.rt_path, self.model), port=self.rt_port, headers=self.headers)
     except Exception as e:
       print("Failed to reconnect: %s" % e, file=self.vs)
       return False
@@ -1170,6 +1474,15 @@ class RealtimeAgent(gpt_tools.ToolExecBase):
     return False
 
   def loop(self):
+    # Main-thread stall detector: a big gap between loop() entries means
+    # something (gc, a long parse, a tool call) held the thread - and the GIL -
+    # long enough to also delay the audio callback.
+    now_ms = time.ticks_ms()
+    if self._loop_last:
+      g = time.ticks_diff(now_ms, self._loop_last)
+      if g > self.loop_gap_max:
+        self.loop_gap_max = g
+    self._loop_last = now_ms
     # In agent mode gpt_rt is a background helper that drives other screens, so
     # it keeps listening even when its own screen is not the foreground. Plain
     # voice mode still gates on the active screen.
@@ -1230,16 +1543,24 @@ class RealtimeAgent(gpt_tools.ToolExecBase):
         if time.ticks_diff(time.ticks_ms(), self.last_play_time) < 400:
           pass
         else:
-          mic_data = self.mic_bufs[idx]
-          b64 = ubinascii.b2a_base64(mic_data).strip()
-          evt = {
-            "type": "input_audio_buffer.append",
-            "audio": b64.decode()
-          }
+          # Build the input_audio_buffer.append frame in place: base64-encode
+          # the mic buffer directly into the preallocated JSON envelope and
+          # send a memoryview of it. Allocation-free (the base64 payload is
+          # plain ASCII, so no JSON escaping is ever needed). Anything other
+          # than a dropped link is logged instead of killing the app — losing
+          # one mic buffer is inaudible, crashing is not.
           try:
-            self.ws.send(ujson.dumps(evt))
+            off = len(self._mic_prefix)
+            nb64 = _b64_encode(self._mic_frame, off, self.mic_bufs[idx],
+                               self.mic_buf_size)
+            end = off + nb64
+            self._mic_frame[end] = 0x22      # '"'
+            self._mic_frame[end + 1] = 0x7d  # '}'
+            self.ws.send(self._mic_frame_mv[:end + 2])
           except ConnectionLost:
             self.conn_lost = True
+          except Exception as e:
+            print("Mic send error:", e, file=self.vs)
 
     # Limit audio-delta frames per iteration so the scheduler can run the audio
     # callback between bursts. Control events (barge-in, transcript…) are not
@@ -1253,27 +1574,66 @@ class RealtimeAgent(gpt_tools.ToolExecBase):
         break
       if not frame:
         break
+      if len(frame) > self.frame_max:
+        self.frame_max = len(frame)
+      # Audio deltas take the zero-alloc fast path (decoded straight from the
+      # receive buffer into the ring); everything else goes through json.
       try:
+        handled = self._try_audio_delta(frame)
+      except Exception:
+        handled = False
+      if handled:
+        audio_frames += 1
+        # Drain a few audio deltas per iteration so the ring refills quickly,
+        # but cap it so the scheduler still runs the audio callback between
+        # bursts (the main loop's sleep yields the GIL).
+        if audio_frames >= 3:
+          break
+        continue
+      try:
+        t_json = time.ticks_us()
         msg = ujson.loads(frame)
+        t_json = time.ticks_diff(time.ticks_us(), t_json) // 1000
+        if t_json > self.json_ms_max:
+          self.json_ms_max = t_json
         self.process_event(msg)
         if msg.get("type") == "response.output_audio.delta":
           audio_frames += 1
-          # Drain a few audio deltas per iteration so the ring refills quickly,
-          # but cap it so the scheduler still runs the audio callback between
-          # bursts (the main loop's sleep yields the GIL).
           if audio_frames >= 3:
             break
       except ConnectionLost:
         self.conn_lost = True
         break
       except Exception as e:
-        print("Message Error:", e, "Frame:", frame[:80], file=self.vs)
+        print("Message Error:", e, "Frame:", bytes(frame[:80]), file=self.vs)
 
     if time.ticks_diff(time.ticks_ms(), self.last_stat_time) > 1000:
       fill = (self._ring_wpos - self._ring_rpos)
-      #print("[spk] underruns=%d drops=%d cb_max=%d us fill=%d buf=%d" % (
-      #  self.underrun_count, self.drop_count, self.cb_time_max,
-      #  fill, self.buffer_threshold))
+      # Glitch-hunt stat line. Always printed on an anomaly window (underrun,
+      # drop, rx growth, or a speaker callback >250 ms late - i.e. a likely
+      # DMA-repeat glitch even though no underrun fired); with -d it prints
+      # every window that carried audio.
+      rx_grow = self.ws.rx_grow
+      self.ws.rx_grow = 0
+      anomaly = (self.underrun_count or self.drop_count or rx_grow
+                 or self.cb_gap_max > 250)
+      if anomaly or (self.debug and (self.delta_fast or self.delta_slow or fill)):
+        print("[dbg] ur=%d drop=%d fill=%d min=%d thr=%d cbgap=%dms cbmax=%dus "
+              "fast=%d slow=%d dmax=%d fmax=%d json=%dms loopgap=%dms "
+              "rxgrow=%d mem=%d" % (
+          self.underrun_count, self.drop_count, fill, self.fill_min,
+          self.buffer_threshold, self.cb_gap_max, self.cb_time_max,
+          self.delta_fast, self.delta_slow, self.delta_bytes_max,
+          self.frame_max, self.json_ms_max, self.loop_gap_max,
+          rx_grow, gc.mem_free()))
+      self.cb_gap_max = 0
+      self.fill_min = -1
+      self.delta_fast = 0
+      self.delta_slow = 0
+      self.delta_bytes_max = 0
+      self.frame_max = 0
+      self.json_ms_max = 0
+      self.loop_gap_max = 0
       # Adaptive pre-roll cushion: loop() is the sole writer of buffer_threshold
       # (the callback only reads it), so no lock is needed.
       if self.underrun_count > 0:
@@ -1318,26 +1678,41 @@ class RealtimeAgent(gpt_tools.ToolExecBase):
 
 def main(vs, args_in):
   parser = argparse.ArgumentParser(description='OpenAI Realtime Voice Agent PoC')
-  parser.add_argument('-m', '--model', action='store', default='gpt-realtime-2', help='Model to use')
+  parser.add_argument('-m', '--model', action='store', default=None, help='Realtime backend: a name from /config/gpt.json (api:"realtime", e.g. grok-voice), or a raw OpenAI realtime model id. Default: OpenAI gpt-realtime-2.')
   parser.add_argument('-f', '--file', nargs='+', action='store', help='Attach file(s) as reference')
   parser.add_argument('-a', '--agent', action='store_true', help='Enable agent mode (function calling)')
   parser.add_argument('-l', '--language', action='store', default=None, help='Preferred speech-to-text language, e.g. ja for Japanese')
+  parser.add_argument('-d', '--debug', action='store_true', help='Print a per-second [dbg] audio stat line on the REPL (anomaly windows print even without this)')
   args = parser.parse_args(args_in[1:])
 
   if not auto_connect.check(vs, silent = True):
     print("Network is not available", file=vs)
     return
 
-  model = args.model
   file_list = args.file or []
   agent = args.agent
   language = args.language
   if language == 'ja':
     setuni.main(vs, ['setuni'])
 
-  api_key = gpt.read_api_key()
+  # Resolve the realtime backend (-m names an api:"realtime" entry, or a raw
+  # OpenAI model id). Key: the entry's own key wins; an OpenAI host with no entry
+  # key falls back to /config/openai_api_key; a hosted provider like xAI must
+  # carry its key on the entry; a local server may be keyless.
+  rt = gpt.resolve_realtime(gpt.load_registry_ro(), args.model)
+  model = rt["model"]
+  is_openai = "openai.com" in rt["host"]
+  api_key = rt["key"]
+  if api_key is None and is_openai:
+    api_key = gpt.read_api_key()
   if not api_key:
-    return
+    if is_openai:
+      print("No OpenAI API key. Put it in %s" % gpt.api_key_location(), file=vs)
+      return
+    if rt["provider"] == "xai" or "x.ai" in rt["host"]:
+      print("No API key for %s. Add \"key\" to the api:\"realtime\" entry in /config/gpt.json." % rt["host"], file=vs)
+      return
+    api_key = ""   # local / OpenAI-compatible realtime server without auth
 
   references = []
   if file_list:
@@ -1351,20 +1726,24 @@ def main(vs, args_in):
     if app_list:
       print("Agent mode: loaded %d app(s)." % len(app_list), file=vs)
 
-  print("Connecting to OpenAI Realtime API using model %s..." % model, file=vs)
-  headers = {
-    "Authorization": "Bearer %s" % api_key
-  }
+  print("Connecting to %s Realtime API (%s) using model %s..." % (rt["provider"], rt["host"], model), file=vs)
+  headers = {"Authorization": "Bearer %s" % api_key} if api_key else {}
 
   try:
-    ws = SimpleWS("api.openai.com", "/v1/realtime?model=%s" % model, headers=headers)
+    ws = SimpleWS(rt["host"], "%s?model=%s" % (rt["path"], model), port=rt["port"], headers=headers)
     print("Connected!", file=vs)
   except Exception as e:
     print("Failed to connect: %s" % e, file=vs)
     return
 
-  ra = RealtimeAgent(ws, vs, model, file_list, references, app_list, agent, language, headers)
+  ra = RealtimeAgent(ws, vs, model, file_list, references, app_list, agent, language, headers, rt)
   ra.api_key = api_key   # for the memory summarizer's side request
+  ra.debug = args.debug
+  if rt["provider"] != "openai":
+    # The self-evolving memory summarizer posts to OpenAI /chat/completions; it
+    # isn't wired for other realtime providers yet, so don't auto-run it (it would
+    # fail with a non-OpenAI key). The voice conversation itself is unaffected.
+    ra.improve_every = 0
   print("Starting voice agent%s... Press B for menu (reset/quit), 'q' to quit, Enter or Slider+A to mute/unmute mic (Slider+A works in background).%s" % (" (agent mode)" if agent else "", " Press 'u' for a what's-up on recent activity." if agent else ""), file=vs)
 
   # We don't want gc run for a while

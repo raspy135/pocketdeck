@@ -291,6 +291,79 @@ def apply_audio_config(obj, audio):
   obj.audio_key = key if key is not None else ""
 
 
+# ----------------------------------------------------------------------------
+# Realtime (voice-agent) backend resolution. The Realtime WebSocket protocol is
+# shared by OpenAI and OpenAI-compatible providers (e.g. xAI's Grok Voice Agent
+# at wss://api.x.ai/v1/realtime), so gpt_rt can target either from an
+# api:"realtime" entry in /config/gpt.json. Defaults to OpenAI.
+# ----------------------------------------------------------------------------
+DEFAULT_REALTIME_MODEL = "gpt-realtime-2"
+
+
+def _ws_host_path(url):
+  """From a base_url like wss://api.x.ai/v1 or https://api.openai.com/v1 return
+  (host, port, path_prefix). The scheme is informational only — the Realtime link
+  is always TLS WebSocket."""
+  for pre in ("wss://", "ws://", "https://", "http://"):
+    if url.startswith(pre):
+      url = url[len(pre):]
+      break
+  slash = url.find("/")
+  if slash == -1:
+    hostport, prefix = url, ""
+  else:
+    hostport, prefix = url[:slash], url[slash:]
+  if ":" in hostport:
+    host, p = hostport.split(":", 1); port = int(p)
+  else:
+    host, port = hostport, 443
+  return host, port, prefix
+
+
+def _normalize_realtime(entry, raw_name):
+  """Fill a realtime backend from an api:"realtime" entry (or None). `raw_name`
+  is the -m value when it isn't a registered entry — treated as a bare model id
+  on OpenAI, preserving the old `gpt_rt -m <model>` behavior."""
+  e = entry or {}
+  host, port, prefix = _ws_host_path(e.get("base_url") or "https://api.openai.com/v1")
+  path = prefix.rstrip("/") + "/realtime"
+  provider = (e.get("provider") or "").lower()
+  if not provider:
+    if "x.ai" in host:
+      provider = "xai"
+    else:
+      provider = "openai"        # OpenAI or an OpenAI-compatible server
+  model = e.get("model") or raw_name or DEFAULT_REALTIME_MODEL
+  voice = e.get("voice") or ("eve" if provider == "xai" else "marin")
+  return {"host": host, "port": port, "path": path, "key": e.get("key"),
+          "model": model, "voice": voice, "provider": provider}
+
+
+def resolve_realtime(registry, name=None):
+  """Resolve the realtime backend for gpt_rt. `name` selects an api:"realtime"
+  entry; a name that isn't one is treated as a raw OpenAI model id; None uses the
+  registry's top-level "realtime" default, else OpenAI. Returns a dict with host,
+  port, path, key, model, voice, provider."""
+  registry = registry or {}
+  models = registry.get("models") or []
+
+  def find_rt(n):
+    if not n:
+      return None
+    for m in models:
+      if (isinstance(m, dict) and m.get("name") == n
+          and (m.get("api") or "").lower() == "realtime"):
+        return m
+    return None
+
+  entry = find_rt(name)
+  if entry is None and not name:
+    entry = find_rt(registry.get("realtime"))
+  # If `name` was given but isn't a realtime entry, keep it as a raw model id.
+  raw = name if (entry is None and name) else None
+  return _normalize_realtime(entry, raw)
+
+
 def make_log_filename():
   ctime = time.gmtime(time.time()+pu.timezone*60*15)
   name = f"gptlog{ctime[1]:02}{ctime[2]:02}_{ctime[3]:02}{ctime[4]:02}.md"

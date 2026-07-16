@@ -197,6 +197,7 @@ class BLEKeyboardHost:
 
     elif event == _DISCONNECT:
       ch = data[0]
+      self._c_release(ch)
       c = self._conns.pop(ch, None)
       if c:
         self._known.discard(c.addr)
@@ -308,6 +309,7 @@ class BLEKeyboardHost:
           self._dbg(f"CCCD write ch={ch} report_vh={rh} cccd_handle={cccd_h} <- 0100")
           self.ble.gattc_write(ch, cccd_h, b'\x01\x00')
         c.ready = True
+        self._c_intercept(ch, c)
         try: pdeck.led(3, 5)
         except: pass
         self._msg("KB ready")
@@ -326,6 +328,27 @@ class BLEKeyboardHost:
       self._dbg(f"NOTIFY ch={ch} vh={vh} matched={matched} data={bytes(nd).hex()}")
       if matched:
         self._on_report(c, nd)
+
+  def _c_intercept(self, ch, c):
+    # Firmware fast path: register this keyboard's report handles so C parses
+    # the notifications on the NimBLE host task. The Python _NOTIFY IRQ waits
+    # for the GIL, so a gc pause or long import delayed key releases — the
+    # firmware's 1s auto-repeat then flooded the held key (e.g. the phantom
+    # C-s search storm in pem) and the blocked host task could even drop the
+    # link by supervision timeout. Skipped when DEBUG so _on_report tracing
+    # still sees every report; also skipped (hasattr) on older firmware,
+    # where _on_report keeps handling reports as before.
+    if DEBUG or not hasattr(pdeck, 'ble_kb_intercept'):
+      return
+    for rh, _ in c.cccds:
+      pdeck.ble_kb_intercept(ch, rh)
+
+  def _c_release(self, ch):
+    # Drop the C-side registration and force-release any held keys. Safe to
+    # call redundantly (firmware also does this on a real BLE disconnect).
+    if hasattr(pdeck, 'ble_kb_release'):
+      try: pdeck.ble_kb_release(ch)
+      except: pass
 
   def _setup_active(self):
     # True while any link is still scanning/connecting/pairing/discovering.
@@ -431,6 +454,7 @@ class BLEKeyboardHost:
     self._msg("Resume: reconnecting KB...")
     self._stop_scan()
     for ch in list(self._conns):
+      self._c_release(ch)
       try: self.ble.gap_disconnect(ch)
       except: pass
     self._conns.clear()
@@ -447,6 +471,7 @@ class BLEKeyboardHost:
   def stop(self):
     self._stop_scan()
     for ch in list(self._conns):
+      self._c_release(ch)
       try: self.ble.gap_disconnect(ch)
       except: pass
     self._msg("Keyboard service stopped (radio remains active for other services).")

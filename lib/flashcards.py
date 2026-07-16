@@ -535,7 +535,7 @@ class FlashcardsApp:
       # We don't want gc run for a while
       gc.collect()
       print("Asking tts..")
-      res = self.gpt.tts_stream(word, voice='alloy')
+      res = self.gpt.tts_stream(word)#, voice='alloy')
 
       if res and res.status_code == 200:
         print("Got response")

@@ -286,7 +286,7 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False,
       ({"type": "web_search"}). Used for genuine OpenAI Responses endpoints,
       where it is the best available search.
     - hosted_search=False (default): a DEVICE-side web_search FUNCTION tool
-      (see ToolExecBase.execute_web_search) that queries DuckDuckGo (or Jina
+      (see ToolExecBase.execute_web_search) that queries DuckDuckGo (or Tavily
       with a key). This is what non-OpenAI endpoints, the local/Chat-Completions
       models in gpt_c, and the voice agent use — those have no hosted search, so
       without it the model resorts to scraping search pages with curl. Only one
@@ -880,16 +880,17 @@ class ToolExecBase:
     html = body.decode("utf-8", "replace") if body else ""
     return self._format_web_results(query, _ddg_parse(html, num))
 
-  def _jina_search(self, query, num, key):
-    # Jina AI JSON search (used when a key is configured). X-Respond-With:
-    # no-content asks for just the SERP metadata, keeping the reply small.
-    url = JINA_SEARCH_URL + "?q=" + url_quote(query)
-    headers = ["Accept: application/json", "X-Respond-With: no-content",
+  def _tavily_search(self, query, num, key):
+    # Tavily JSON search (used when a key is configured). POSTs the query and
+    # gets back LLM-ready results with a content snippet per hit.
+    payload = ujson.dumps({"query": query, "max_results": num})
+    headers = ["Content-Type: application/json",
                "Authorization: Bearer " + key]
     try:
       import curl
       status, _rh, body = curl.request(
-        url, header_lines=headers, timeout=30, follow=3)
+        TAVILY_SEARCH_URL, method="POST", data=payload,
+        header_lines=headers, timeout=30, follow=3)
     except Exception as e:
       return "Error: web search request failed: %s." % e
     try:
@@ -897,24 +898,24 @@ class ToolExecBase:
     except:
       code = 0
     if code == 401:
-      return ("Error: Jina rejected the API key (HTTP 401). Check the key in "
-              "%s, or remove that file to fall back to keyless search." % JINA_KEY_PATH)
+      return ("Error: Tavily rejected the API key (HTTP 401). Check the key in "
+              "%s, or remove that file to fall back to keyless search." % TAVILY_KEY_PATH)
     if code == 429:
-      return "Error: Jina search is rate-limited (HTTP 429). Retry shortly."
+      return "Error: Tavily search is rate-limited (HTTP 429). Retry shortly."
     if code != 200:
       snippet = body[:200].decode("utf-8", "replace") if body else ""
-      return "Error: Jina search returned HTTP %d. %s" % (code, snippet)
+      return "Error: Tavily search returned HTTP %d. %s" % (code, snippet)
     try:
       data = ujson.loads(body)
     except Exception:
-      return "Error: could not parse Jina search response."
-    results = data.get("data") if isinstance(data, dict) else None
+      return "Error: could not parse Tavily search response."
+    results = data.get("results") if isinstance(data, dict) else None
     if not results:
       return "No web results found for '%s'." % query
     items = []
     for r in results[:num]:
       if isinstance(r, dict):
-        items.append((r.get("title"), r.get("url"), r.get("description")))
+        items.append((r.get("title"), r.get("url"), r.get("content")))
     return self._format_web_results(query, items)
 
   # ---- implementations -----------------------------------------------------

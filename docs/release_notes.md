@@ -1,4 +1,11 @@
 
+## Release Note, July 14, 2026
+
+### Application
+
+- gpt_rt : Experimental : gpt_rt supports X.ai with X.ai API key. However OpenAI is recommended for smarter agentic tasks, and stable conversation.
+
+
 ## Release Note, July 13, 2026
 
 ### Firmware
@@ -9,7 +16,7 @@
 
 ### Applications
 
-- gpt: Tavily(www.tabily.com) search support for better AI web research. Puy jina.ai API key to /config/tavily_api_key to make more robust web search by AI.
+- gpt: Tavily (www.tavily.com) search support for better AI web research. Put a Tavily API key at /config/tavily_api_key to make AI web search more robust.
 - gpt: New tools for beter agentic tasks, bug fixes.
 - gpt: Tab completion for skills.
 

@@ -975,15 +975,17 @@ class analog_clock:
           if self.kt.minute == 0 and self.kt.second == 0 and self.kt.stat != KT_ALARM:
             self.page = 'clock'
           else:
-            self.wavplay_click()
-            org_minute = self.kt.minute
-            self.kt.minute = 0
-            self.kt.second = 0
-            self.kt.anim = anm.anm_object(min(20*org_minute,600),
-            { 'minute' : [ anm.ease_out, self.kt.anim.minute, self.kt.minute ]})
-            self.kt.anim.goal = self.kt.minute
-            self.seq.register('timer_hand', self.kt.anim)
-            self.kt.stat = KT_STOP
+            self.page = 'timer'
+            
+            #self.wavplay_click()
+            #org_minute = self.kt.minute
+            #self.kt.minute = 0
+            #self.kt.second = 0
+            #self.kt.anim = anm.anm_object(min(20*org_minute,600),
+            #{ 'minute' : [ anm.ease_out, self.kt.anim.minute, self.kt.minute ]})
+            #self.kt.anim.goal = self.kt.minute
+            #self.seq.register('timer_hand', self.kt.anim)
+            #self.kt.stat = KT_STOP
 
         #if keys == b'\x1b[D':
         #  self.kt.minute -= 1

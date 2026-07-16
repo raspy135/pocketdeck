@@ -728,7 +728,7 @@
         },
         {
             "path": "tts.py",
-            "md5": "751bb2bfea35abe5a63c38731d44fd5d"
+            "md5": "30692baf555bf33ca5276f699a524a61"
         },
         {
             "path": "rm.py",
@@ -740,7 +740,7 @@
         },
         {
             "path": "analog_clock.py",
-            "md5": "04fb7c37bc3761c59dfc4c17785c43aa"
+            "md5": "66af594ba03df7c720858ecaac20e630"
         },
         {
             "path": "head.py",
@@ -772,7 +772,7 @@
         },
         {
             "path": "ble_kb.py",
-            "md5": "0a3864139326de6c38a61b05cec76d65"
+            "md5": "7ab35cb4ae57e134a346091bc1033247"
         },
         {
             "path": "curl.py",
@@ -820,7 +820,7 @@
         },
         {
             "path": "flashcards.py",
-            "md5": "c4d7e06996bac03dbb2e0fd7a648f3ad"
+            "md5": "99117a72ed281cb342505816c377e3f4"
         },
         {
             "path": "mv.py",
@@ -828,7 +828,7 @@
         },
         {
             "path": "gpt_l.py",
-            "md5": "ddc0ebbcdf840303596c152340cb0fc1"
+            "md5": "46a82883d2d2cd8be0b4a262159fc8b9"
         },
         {
             "path": "esclib.py",
@@ -836,7 +836,7 @@
         },
         {
             "path": "gpt_rt.py",
-            "md5": "9ce726fed06596ac3a824d1c389badd0"
+            "md5": "7be2e1b7cc909d7267b98c91e874f00a"
         },
         {
             "path": "clip.py",
@@ -848,7 +848,7 @@
         },
         {
             "path": "gpt.py",
-            "md5": "15aeb2d15bb31771c3ad0c03d9991af9"
+            "md5": "accf4d4e126fc04b86f07302d305aec3"
         },
         {
             "path": "diff.py",
@@ -908,7 +908,7 @@
         },
         {
             "path": "gpt_c.py",
-            "md5": "22f41b475596fa4816f26a35543ad1b4"
+            "md5": "44a01629b1be0d8d5a38cd7aa20baf3a"
         },
         {
             "path": "update_updater.py",
@@ -1020,7 +1020,7 @@
         },
         {
             "path": "noa/wav_play.py",
-            "md5": "40684ca6fc307a51c3958ba9200476a9"
+            "md5": "14b175658f8c6bbfea2d36f77731c9c8"
         },
         {
             "path": "noa/pc_compat.py",
@@ -1064,7 +1064,7 @@
         },
         {
             "path": "noa/gpt_tools.py",
-            "md5": "3b6cf9481a653649c58a7e2a3b42613d"
+            "md5": "6608d9fc011c4a58c5e318ef0397b407"
         },
         {
             "path": "noa/pdeck_complete.py",

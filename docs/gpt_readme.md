@@ -1,13 +1,13 @@
 
 # gpt
 
-`gpt` is a ChatGPT frontend for Pocket Deck. It supports text queries, voice input/output, file and image attachments, and an **agent mode** in which the model uses native function calling (tools) to write files, run and debug code, and even see and drive other apps on the device. **conversation mode** keeps context across turns.
+`gpt` is an LLM frontend for Pocket Deck. It supports text queries, voice input/output, file and image attachments, and an **agent mode** in which the model uses native function calling (tools) to write files, run and debug code, and even see and drive other apps on the device. **conversation mode** keeps context across turns.
 
-Requires an OpenAI API key stored at `/config/openai_api_key`.
+OpenAI and the other models are supported. OpenAI models are the easiest option.
 
-> The previous markdown-code-block agent (the older `gpt`) is still shipped as
-> `gpt_l` ("legacy") if you need it. The library plumbing it provides
-> (`chatgpt_util`, STT/TTS, logging) also lives in `gpt_l`.
+OpenAI models require an OpenAI API key stored at `/config/openai_api_key`.
+
+To use other LLM models, edit /config/gpt.json.
 
 ## Basic Usage
 
@@ -73,10 +73,7 @@ output streamed straight to the audio engine). The speech backend is separate
 from the LLM, so you can run a local LLM and still use OpenAI — or a local
 OpenAI-compatible speech server — for voice. See [Audio backend](#audio-backend-sttts).
 
-> Note: voice mode with a **local LLM** used to error because STT/TTS still went
-> to OpenAI using the (empty) local key. STT/TTS now follow the configured audio
-> backend; if you don't configure one, they use OpenAI and need a valid
-> `/config/openai_api_key` even when the LLM is local.
+Note: voice mode with a **local LLM** used to error because STT/TTS still went to OpenAI using the (empty) local key. STT/TTS now follow the configured audio backend; if you don't configure one, they use OpenAI and need a valid `/config/openai_api_key` even when the LLM is local.
 
 ## Inline Directives
 
@@ -344,3 +341,29 @@ Two ways to select the audio backend:
 Here `-m local` uses the `kokoro` speech server; any other model with no `audio`
 field falls back to `openai-voice` (the registry default). An `audio` entry is
 never selectable with `-m` — it's only referenced by name.
+
+### Realtime backend (`gpt_rt`)
+
+The `gpt_rt` voice agent talks the OpenAI **Realtime** WebSocket protocol, which
+OpenAI-compatible providers also speak — notably **xAI's Grok Voice Agent**. Pick
+the backend with an `api:"realtime"` entry in the same `/config/gpt.json`:
+
+Field | Meaning
+------|--------
+`name` | The label passed to `gpt_rt -m` (or a top-level `"realtime": "<name>"` default).
+`api` | Must be `realtime`.
+`base_url` | Realtime endpoint base, e.g. `wss://api.x.ai/v1` (xAI) or `https://api.openai.com/v1`. `/realtime` is appended.
+`key` | Bearer token. Required for hosted providers (xAI); an OpenAI base falls back to `/config/openai_api_key`; a local server may be keyless.
+`model` | Realtime model id, e.g. `grok-voice-latest` or `gpt-realtime-2`.
+`voice` | TTS voice. Default: `marin` (OpenAI) / `eve` (xAI). Grok voices: `eve`, `ara`, `rex`, `sal`, `leo`.
+`provider` | Optional; auto-detected from the host (`x.ai` → `xai`, else OpenAI-compatible). Sets provider quirks like the transcription config.
+
+```json
+{ "name": "grok-voice", "api": "realtime",
+  "base_url": "wss://api.x.ai/v1", "key": "xai-...",
+  "model": "grok-voice-latest", "voice": "ara" }
+```
+
+Then `gpt_rt -m grok-voice`. With no `-m`, `gpt_rt` uses OpenAI (`gpt-realtime-2`);
+a bare `-m <model-id>` that isn't a registered entry is treated as an OpenAI
+realtime model, as before. (Get an xAI key from [x.ai/api](https://x.ai/api).)
