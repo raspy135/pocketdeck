@@ -526,6 +526,10 @@ For Japanese text, Adding `-v -f uni` options is recommended.
 - A button: shoot laser
 - Left mouse button (square left button): quit
 
+### screenrec
+
+`screenrec` records screen recording to SD card. The recorded data can be decoded by utils/pdsr2gif.py in GitHub repository. pdsr2gif is a tool for PC.
+
 ### zen_chamber
 
 `zen_chamber` is an ambient audio-visual app. Particles fall under gravity and trigger notes from a musical scale, creating generative music.

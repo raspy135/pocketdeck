@@ -6,7 +6,10 @@
 
 ## Application
 
-- screenrec provides recording screen, the raw file will be saved to SD card.
+- screenrec provides recording screen, the raw file will be saved to SD card. 
+- nudoc: bug fix
+- gpt: Optimizations
+- analog_clock: keyboard shortcuts added in timer mode. 
 
 ## Release Note, July 16, 2026
 
