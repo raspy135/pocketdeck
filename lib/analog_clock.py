@@ -595,6 +595,18 @@ class analog_clock:
     self.v.draw_str(self.coffset[0] - 60, self.offset[1] + 30, 'Rotate your finger')
     self.v.draw_str(self.coffset[0] - 60, self.offset[1] + 30 + 16, 'on D-pad to set time')
     self.v.draw_str(self.coffset[0] - 60, self.offset[1] + 30 + 32, 'Slider: {} min/cycle'.format(self.kt.range_minutes))
+    self.v.draw_str(self.coffset[0]- 80, self.offset[1] + 30 + 32 + 16, 'JL: Set Timer, IK: Range')
+
+    # Help captions: J/L (decrease/increase time) and I/K (change range)
+    # Drawn as inverted text inside rounded rectangles
+    icon_w = 14
+    icon_h = 14
+    r = 4
+    cx = self.offset[0]
+    cy = self.offset[1]
+    radius = 52
+
+
 
 
   def setup_filled_arc(self):
@@ -987,11 +999,40 @@ class analog_clock:
             #self.seq.register('timer_hand', self.kt.anim)
             #self.kt.stat = KT_STOP
 
-        #if keys == b'\x1b[D':
-        #  self.kt.minute -= 1
-        #elif keys == b'\x1b[C':
-        #  self.kt.minute += 1
-          
+        # J/L: decrease/increase timer time
+        if keys == b'j':
+          kt = self.kt
+          step = (1, 2, 3, 5)[kt.range_index]
+          kt.minute = max(0, kt.minute - step)
+          kt.second = 0
+          kt.anim = anm.anm_object(200, {'minute': [anm.ease_out, kt.anim.minute, kt.minute]})
+          kt.anim.goal = kt.minute
+          self.seq.register('timer_hand', kt.anim)
+          self.wavplay_click()
+          self.key_event = True
+          continue
+
+        if keys == b'l':
+          kt = self.kt
+          step = (1, 2, 3, 5)[kt.range_index]
+          kt.minute += step
+          kt.second = 0
+          kt.anim = anm.anm_object(200, {'minute': [anm.ease_out, kt.anim.minute, kt.minute]})
+          kt.anim.goal = kt.minute
+          self.seq.register('timer_hand', kt.anim)
+          self.wavplay_click()
+          self.key_event = True
+          continue
+
+        # I/K: cycle timer range
+        if keys == b'i':
+          self.set_timer_range(self.kt.range_index - 1)
+          continue
+
+        if keys == b'k':
+          self.set_timer_range(self.kt.range_index + 1)
+          continue
+
         self.key_event = True
         continue
 

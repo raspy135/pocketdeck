@@ -402,7 +402,7 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False,
     tools.append({
       "type": "function",
       "name": "launch_app",
-      "description": "Launch a Pocket Deck application by its exact name, or any installed module/custom app by its module name (e.g. 'myapp' for /sd/lib/myapp.py), optionally passing arguments such as a file path to open.",
+      "description": "Launch a Pocket Deck application by its exact name, or any installed module/custom app by its module name (e.g. 'myapp' for /sd/lib/myapp.py), optionally passing arguments such as a file path to open. It returns screen number (0-based).",
       "parameters": {
         "type": "object",
         "properties": {
@@ -434,7 +434,7 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False,
   tools.append({
     "type": "function",
     "name": "switch_screen",
-    "description": "Bring a screen to the foreground so it becomes active. Required before capturing or sending keys to that screen. Note the screen number in the function is 0-based, however, screen number shown in GUI is 1-based. So if the user wants to switch to screen 2, send 1 as an argument.",
+    "description": "Bring a screen to the foreground so it becomes active. Required before capturing or sending keys to that screen. Note the screen number in the function is 0-based.",
     "parameters": {
       "type": "object",
       "properties": {

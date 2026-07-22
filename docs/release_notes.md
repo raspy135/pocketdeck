@@ -1,9 +1,24 @@
+## Release Note, July 17, 2026
 
-## Release Note, July 14, 2026
+## Firmware
+
+- screenrec support
+
+## Application
+
+- screenrec provides recording screen, the raw file will be saved to SD card.
+
+## Release Note, July 16, 2026
+
+### Firmware
+
+- ble_kb : Better handling when high load.
+- Stability improvement
 
 ### Application
 
-- gpt_rt : Experimental : gpt_rt supports X.ai with X.ai API key. However OpenAI is recommended for smarter agentic tasks, and stable conversation.
+- gpt : Fix web search issue with Tavily
+- gpt_rt : Experimental : gpt_rt supports X.ai with X.ai API key. However OpenAI is recommended for smarter agentic tasks.
 
 
 ## Release Note, July 13, 2026
@@ -16,7 +31,7 @@
 
 ### Applications
 
-- gpt: Tavily (www.tavily.com) search support for better AI web research. Put a Tavily API key at /config/tavily_api_key to make AI web search more robust.
+- gpt: Tavily(www.tavily.com) search support for better AI web research. Puy Tavily API key to /config/tavily_api_key to make web search more robust.
 - gpt: New tools for beter agentic tasks, bug fixes.
 - gpt: Tab completion for skills.
 

@@ -620,13 +620,59 @@ class chatgpt_util:
     key (backward-compatible OpenAI behavior)."""
     return self.audio_key if self.audio_key is not None else self.api_key
 
+  def _net_diag(self):
+    """One-line health snapshot for a failed request: link state plus internal
+    (DMA-capable) heap, which is what the Wi-Fi driver allocates TX buffers
+    from. OSError(-1) is lwip ERR_IF - the Wi-Fi netif refused a packet -
+    which in practice means the station lost the AP or the driver could not
+    get an internal buffer (heap pressure after a long session)."""
+    parts = []
+    try:
+      sta = network.WLAN(network.STA_IF)
+      parts.append("wifi=%s" % ("up" if sta.isconnected() else "DOWN"))
+    except Exception:
+      pass
+    try:
+      import esp32
+      free = 0
+      largest = 0
+      for region in esp32.idf_heap_info(esp32.HEAP_DATA):
+        free += region[1]
+        if region[2] > largest:
+          largest = region[2]
+      parts.append("idf free=%dK largest=%dK" % (free // 1024, largest // 1024))
+    except Exception:
+      pass
+    return " ".join(parts)
+
   def post(self, url, json=None):
     headers = {
       'Content-Type' : 'application/json',
       'Accept': 'application/json',
       'Authorization' : 'Bearer ' + self.api_key
       }
-    return requests.post(url, headers=headers, data=json)
+    # Each request is its own connection, and on a busy device the send side
+    # fails transiently: OSError(-1) is lwip ERR_IF (Wi-Fi driver refused the
+    # packet - dropped link or no internal TX buffer), and resets/timeouts
+    # appear under the same conditions. Retry after freeing memory and
+    # re-checking the link. A failure while reading the reply re-issues the
+    # request, which at worst duplicates one model call - better than losing
+    # the turn.
+    attempts = 3
+    for attempt in range(attempts):
+      try:
+        return requests.post(url, headers=headers, data=json)
+      except OSError as e:
+        print("\nRequest failed: %r  [%s]" % (e, self._net_diag()), file=self.vs)
+        if attempt == attempts - 1:
+          raise
+        gc.collect()
+        time.sleep(1 + attempt)
+        try:
+          auto_connect.check(self.vs, silent=True)
+        except Exception:
+          pass
+        print("Retrying (%d/%d)..." % (attempt + 2, attempts), file=self.vs)
 
   def read_api_key(self):
     self.api_key = read_api_key()

@@ -279,9 +279,9 @@ def build_agent_instructions(app_list, my_screen=None):
     "You can see and drive other apps running on the device. Use list_running_apps "
     "to see which app is on which screen. Use switch_screen to bring a screen to "
     "the foreground. IMPORTANT: screen numbers in these tools are 0-based and match "
-    "what list_running_apps reports (screen 0 is the Python REPL), but the device's "
-    "GUI shows them 1-based, so the screen the user calls '2' is screen 1 here — "
-    "always pass the 0-based number from list_running_apps, not the GUI number. "
+    "what list_running_apps reports (screen 0 is the Python REPL), but the user's "
+    "point of view it's 1-based, so the screen the user calls '2' is screen 1 here — "
+    "always pass the 0-based number from list_running_apps, switch_screen. "
     "Use capture_screen to take a screenshot of a screen and look "
     "at it (it is returned to you as an image); it takes some time."
     "Use send_keys to type into the app in the "
@@ -625,14 +625,31 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
       pdeck.led(1, 40)  # working: waiting for the model's response
       if not silent:
         _anim = gpt.ThinkingAnimation(self.vs, "Asking GPT..")
-      response = self.post(self.url, ujson.dumps(payload).encode('utf-8'))
+      try:
+        response = self.post(self.url, ujson.dumps(payload).encode('utf-8'))
+      except BaseException:
+        # post() already retried; a raise here means the network is really
+        # down. Stop the animation (it would keep drawing forever) and drop a
+        # broken chain before letting the caller report the failure.
+        if not silent:
+          _anim.stop()
+        pdeck.led(1, 0)
+        if in_flight:
+          self.prev_response_id = None  # outputs never delivered; chain is broken
+        raise
       try:
         data = response.json()
       except:
         if not silent:
           _anim.stop()
+        # If the body read itself died (e.g. connection reset mid-read), the
+        # socket is already closed and .text would raise; keep the real error.
+        try:
+          body = response.text[:200]
+        except Exception:
+          body = "(body unavailable)"
         print("Error: Non-JSON response (%s)" % response.status_code, file=self.vs)
-        print(response.text[:200], file=self.vs)
+        print(body, file=self.vs)
         response.close()
         pdeck.led(1, 0)
         if in_flight:

@@ -343,14 +343,27 @@ class chatgpt_chat(gpt.chatgpt_agent):
       pdeck.led(1, 40)  # working: waiting for the model's response
       if not silent:
         _anim = gptl.ThinkingAnimation(self.vs, "Asking GPT..")
-      response = self.post(self.url, ujson.dumps(payload).encode('utf-8'))
+      try:
+        response = self.post(self.url, ujson.dumps(payload).encode('utf-8'))
+      except BaseException:
+        # post() already retried; stop the animation (it would keep drawing
+        # forever) before letting the caller report the failure.
+        if not silent:
+          _anim.stop()
+        pdeck.led(1, 0)
+        raise
       try:
         data = response.json()
       except:
         if not silent:
           _anim.stop()
+        # .text can raise if the body read itself died (socket already closed).
+        try:
+          body = response.text[:200]
+        except Exception:
+          body = "(body unavailable)"
         print("Error: Non-JSON response (%s)" % response.status_code, file=self.vs)
-        print(response.text[:200], file=self.vs)
+        print(body, file=self.vs)
         response.close()
         pdeck.led(1, 0)
         break
@@ -506,7 +519,13 @@ class chatgpt_chat(gpt.chatgpt_agent):
     pdeck.led(1, 40)
     if not silent:
       _anim = gptl.ThinkingAnimation(self.vs, label)
-    response = self.post(self.url, ujson.dumps(payload).encode('utf-8'))
+    try:
+      response = self.post(self.url, ujson.dumps(payload).encode('utf-8'))
+    except OSError:
+      if not silent:
+        _anim.stop()
+      pdeck.led(1, 0)
+      return None
     try:
       data = response.json()
     except:

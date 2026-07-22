@@ -626,7 +626,7 @@ class NudocGame:
       r, c, mask = self.find_best_cell_masks(board, rows, cols, boxes)
 
       if r == -1:
-        self.last_solved = self.board_copy(board)
+        self.last_solved = board_copy(board)
         total += 1
         if total >= limit:
           return total
@@ -651,7 +651,7 @@ class NudocGame:
     self.solve_board_mdv(self.solution, True, 1)
 
   def has_unique_solution(self, board):
-    temp = self.board_copy(board)
+    temp = board_copy(board)
     return self.solve_board_mdv(temp, False, 2) == 1
 
   def load_premade_board(self, filename):
@@ -659,11 +659,11 @@ class NudocGame:
     rows, cols, boxes = self.init_masks_from_board(loaded)
     if rows is None:
       raise ValueError("invalid board: duplicate number exists")
-    solved = self.board_copy(loaded)
+    solved = board_copy(loaded)
     if self.solve_board_mdv(solved, False, 2) != 1:
       raise ValueError("board must have exactly one solution")
     # Pulling the solution and copy it
-    self.solution = self.board_copy(self.last_solved)
+    self.solution = board_copy(self.last_solved)
 
     for y in range(9):
       for x in range(9):

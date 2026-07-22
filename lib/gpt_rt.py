@@ -672,6 +672,17 @@ class RealtimeAgent(gpt_tools.ToolExecBase):
     # Independent of resume_at, which a barge-in may have already cleared.
     self.wait_pending = False
 
+    # Reason string for a self-improve queued at response.done. It must not run
+    # there: the ring buffer still holds seconds of the spoken answer, and
+    # _run_improve's _mute_audio would reset the ring and cut the engine off
+    # mid-sentence. loop() fires it once playback has fully drained.
+    self.improve_pending = None
+    # True from barge-in (speech_started) until the answering response is
+    # created. A barge-in resets the ring to empty with response_active still
+    # False, which would otherwise let a pending improve fire — blocking the
+    # loop for a whole LLM call — right while the user is talking.
+    self.user_speaking = False
+
     # Chime cues for timed programs: a soft 'get ready' note ~3s before a hold
     # ends (chime_at is its ticks_ms deadline) and a two-note ding at resume.
     # The wavetable synth is created lazily and mixes with the PCM stream; any
@@ -1252,6 +1263,7 @@ class RealtimeAgent(gpt_tools.ToolExecBase):
     elif mtype == "input_audio_buffer.speech_started":
       print("\n%s[User speaking... barge in detected]%s" % (_el.bold(), _el.bold_off()), file=self.vs)
       self._bump_activity()  # the user is talking: not idle
+      self.user_speaking = True  # holds off a pending self-improve
       if self.resume_at is not None:
         # Barge-in during a timed wait: cancel the auto-resume and tell the model
         # so it knows the program is paused and must re-arm to continue. Inject
@@ -1277,9 +1289,11 @@ class RealtimeAgent(gpt_tools.ToolExecBase):
 
     elif mtype == "response.created":
       self.response_active = True
+      self.user_speaking = False  # response_active now gates the pending improve
 
     elif mtype == "response.done":
       self.response_active = False
+      self.user_speaking = False  # safety net if response.created was never seen
       resp = msg.get("response", {})
       status = resp.get("status", "")
       if status and status != "completed":
@@ -1312,7 +1326,7 @@ class RealtimeAgent(gpt_tools.ToolExecBase):
         self.responses_since_improve += 1
         if self.improve_every and self.responses_since_improve >= self.improve_every:
           self.responses_since_improve = 0
-          self._run_improve(reason="periodic auto-improve")
+          self.improve_pending = "periodic auto-improve"
         # A deferred "what's up?" (queued while a response was in flight) can run
         # now that the session is idle.
         if self.pending_prompt is not None:
@@ -1534,6 +1548,19 @@ class RealtimeAgent(gpt_tools.ToolExecBase):
           self._bump_activity()
         except ConnectionLost:
           self.conn_lost = True
+
+    # A queued self-improve runs only once the session is idle AND the spoken
+    # answer has fully played out: ring drained, plus a grace period covering
+    # the two DMA speaker buffers (~170 ms each) still sounding after the last
+    # full ring read bumped last_play_time. Skipped while a timed program is
+    # armed so the blocking improve call can't delay the resume nudge.
+    if (self.improve_pending is not None and not self.response_active
+        and not self.user_speaking and self.resume_at is None):
+      fill = (self._ring_wpos - self._ring_rpos) % self._ring_size
+      if fill == 0 and time.ticks_diff(time.ticks_ms(), self.last_play_time) >= 600:
+        reason = self.improve_pending
+        self.improve_pending = None
+        self._run_improve(reason=reason)
 
     if self.mic_ready_idx != -1:
       idx = self.mic_ready_idx

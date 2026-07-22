@@ -637,6 +637,10 @@
             "rmdir.py"
         ],
         [
+            "screenrec.py",
+            "screenrec.py"
+        ],
+        [
             "setjpf.py",
             "setjpf.py"
         ],
@@ -740,7 +744,7 @@
         },
         {
             "path": "analog_clock.py",
-            "md5": "66af594ba03df7c720858ecaac20e630"
+            "md5": "14cda68aeca8c8f3f6b122c5def5ad03"
         },
         {
             "path": "head.py",
@@ -764,7 +768,7 @@
         },
         {
             "path": "nudoc.py",
-            "md5": "6f1e569b7d7e95c7e2e4491ace758557"
+            "md5": "d7d79391e0c55a02cdb7fc1b2f040eaf"
         },
         {
             "path": "gdrive.py",
@@ -828,7 +832,7 @@
         },
         {
             "path": "gpt_l.py",
-            "md5": "46a82883d2d2cd8be0b4a262159fc8b9"
+            "md5": "92b7b5daa22131aff7a2438caee3ba36"
         },
         {
             "path": "esclib.py",
@@ -836,7 +840,7 @@
         },
         {
             "path": "gpt_rt.py",
-            "md5": "7be2e1b7cc909d7267b98c91e874f00a"
+            "md5": "ca3699577822bdffb1409ec5c5beece4"
         },
         {
             "path": "clip.py",
@@ -848,7 +852,7 @@
         },
         {
             "path": "gpt.py",
-            "md5": "accf4d4e126fc04b86f07302d305aec3"
+            "md5": "0ed317eca6ba4b7ecd48c0c7283b531d"
         },
         {
             "path": "diff.py",
@@ -899,6 +903,10 @@
             "md5": "375042ce44f86b5ff13fc7464e166e4f"
         },
         {
+            "path": "screenrec.py",
+            "md5": "90fc23565470990ddc11003df0fdff7e"
+        },
+        {
             "path": "setup.py",
             "md5": "bd18994b500681efe200d7c28538318b"
         },
@@ -908,7 +916,7 @@
         },
         {
             "path": "gpt_c.py",
-            "md5": "44a01629b1be0d8d5a38cd7aa20baf3a"
+            "md5": "6f43cba69a4f587d4bc2ddfbc8af8392"
         },
         {
             "path": "update_updater.py",
@@ -1064,7 +1072,7 @@
         },
         {
             "path": "noa/gpt_tools.py",
-            "md5": "6608d9fc011c4a58c5e318ef0397b407"
+            "md5": "93c2b2f459a636f131daeb961073a0c8"
         },
         {
             "path": "noa/pdeck_complete.py",
@@ -1212,7 +1220,7 @@
         },
         {
             "path": "data/apps_db.json",
-            "md5": "a929db66fc87de7ed4a30e823473a4c8"
+            "md5": "9ae4b54227f7aef0f9998886c91f5bda"
         },
         {
             "path": "data/cat3.xbmr",
