@@ -275,11 +275,15 @@ def module_exists(modname):
 
 
 def build_tools(app_list, agent=False, web_search=True, realtime=False,
-                hosted_search=False):
+                hosted_search=False, vision=True):
   """Tool schemas in the flat function format. Function tools are only included
   in agent mode; plain mode keeps just web_search (when requested). `realtime`
   adds tools that only make sense in the always-on voice agent (gpt_rt), where a
   non-blocking wait can run in the background with the mic still live.
+  `vision=False` drops capture_screen: some models (a "text_only" entry in
+  /config/gpt.json) are never told they lack vision, so instead of it silently
+  failing (or the model hallucinating a description of an image it never saw),
+  the tool is not offered to them at all.
 
   Web search comes in two flavours, selected by `hosted_search`:
     - hosted_search=True: OpenAI's server-side hosted web_search tool
@@ -444,18 +448,19 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False,
     }
   })
 
-  tools.append({
-    "type": "function",
-    "name": "capture_screen",
-    "description": "Take a screenshot of a screen and return it to you as an image so you can read what is on it. If screen is given, switches to it first.",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "screen": {"type": "integer", "description": "Optional screen number to switch to and capture. If omitted, captures the current foreground screen."}
-      },
-      "required": []
-    }
-  })
+  if vision:
+    tools.append({
+      "type": "function",
+      "name": "capture_screen",
+      "description": "Take a screenshot of a screen and return it to you as an image so you can read what is on it. If screen is given, switches to it first.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "screen": {"type": "integer", "description": "Optional screen number to switch to and capture. If omitted, captures the current foreground screen."}
+        },
+        "required": []
+      }
+    })
 
   tools.append({
     "type": "function",

@@ -243,8 +243,11 @@ CaptureStream = pu.CaptureStream
 _parse_cmd_string = pu.parse_cmd_string
 
 
-def build_agent_instructions(app_list, my_screen=None):
-  """System prompt describing the function tools (mirrors gpt_rt.py)."""
+def build_agent_instructions(app_list, my_screen=None, vision=True):
+  """System prompt describing the function tools (mirrors gpt_rt.py). `vision`
+  must match whatever was passed to build_tools_for/build_tools: a False model
+  never gets told about capture_screen (a tool it wasn't given can't be called),
+  and it isn't reminded to "look at" a screenshot it will never receive."""
   text = (
     "You have function tools for working directly on the device;\n"
     "A runnable script/app is a module that defines main(vs, args); run it by "
@@ -282,13 +285,19 @@ def build_agent_instructions(app_list, my_screen=None):
     "what list_running_apps reports (screen 0 is the Python REPL), but the user's "
     "point of view it's 1-based, so the screen the user calls '2' is screen 1 here — "
     "always pass the 0-based number from list_running_apps, switch_screen. "
-    "Use capture_screen to take a screenshot of a screen and look "
-    "at it (it is returned to you as an image); it takes some time."
+    + ("Use capture_screen to take a screenshot of a screen and look "
+       "at it (it is returned to you as an image); it takes some time."
+       if vision else
+       "You have NO VISION: there is no capture_screen tool and you cannot see "
+       "screenshots. Drive apps blind via send_keys and verify results with "
+       "read_console_log instead.") +
     "Use send_keys to type into the app in the "
     "foreground; set enter=true to press Enter, and use escape sequences for "
     "special keys (Up=\\x1b[A, Down=\\x1b[B, Right=\\x1b[C, Left=\\x1b[D, Esc=\\x1b, "
-    "Backspace=\\x08, Ctrl-X=\\x18). After acting, capture_screen again to confirm "
-    "the result before continuing.\n"
+    "Backspace=\\x08, Ctrl-X=\\x18). "
+    + ("After acting, capture_screen again to confirm the result before continuing.\n"
+       if vision else
+       "After acting, read_console_log to confirm the result before continuing.\n") +
     "To read TEXT a command-line app printed (e.g. to diagnose an error the user "
     "asks about), prefer read_console_log over a screenshot — it returns the "
     "recent console text directly and cheaply.\n"
@@ -366,6 +375,8 @@ def _format_registry(models, default):
     if m.get("base_url"):
       parts.append('"base_url": "%s"' % m["base_url"])
     parts.append('"model": "%s"' % m.get("model", m.get("name", "")))
+    if m.get("text_only"):
+      parts.append('"text_only": true')
     comma = "," if i < len(models) - 1 else ""
     lines.append("    {" + ", ".join(parts) + "}" + comma)
   lines.append("  ]")
@@ -415,7 +426,12 @@ def _normalize_entry(entry):
           "model": entry.get("model") or name,
           "effort": entry.get("effort"),
           "key": entry.get("key"),
-          "audio": entry.get("audio")}  # link to an api:"audio" entry, if any
+          "audio": entry.get("audio"),  # link to an api:"audio" entry, if any
+          # Some models (local/text-only endpoints) can't see images but are
+          # never told that, so they'll happily "call" capture_screen and then
+          # invent a description of what it returned. Set true in /config/gpt.json
+          # to drop capture_screen from this model's tools entirely.
+          "text_only": bool(entry.get("text_only", False))}
 
 
 def resolve_entry(registry, name):
@@ -448,6 +464,7 @@ def make_client(entry, vs):
     obj = chatgpt_agent(vs)
     obj.url = entry["base_url"].rstrip("/") + "/responses"
   obj.base_url = entry["base_url"]  # remembered so /model can detect endpoint changes
+  obj.text_only = entry.get("text_only", False)  # drives capture_screen inclusion
   return obj
 
 
@@ -485,6 +502,7 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
   USE_EFFORT = True
   USE_WEB_SEARCH = True
   CAN_COMPACT = False
+  text_only = False  # overridden per-instance by make_client from the registry entry
   def __init__(self, vs):
     super().__init__(vs)
     self.app_list = []
@@ -542,7 +560,8 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
     # Responses-compatible provider (e.g. xAI) has no hosted search, so it falls
     # back to the device-side web_search function instead of scraping with curl.
     hosted = getattr(self, 'base_url', '').rstrip('/') == OPENAI_BASE
-    return build_tools(app_list, agent=agent, web_search=True, hosted_search=hosted)
+    return build_tools(app_list, agent=agent, web_search=True, hosted_search=hosted,
+                       vision=not self.text_only)
 
   def resume_from(self, rid, vs=None, silent=False):
     """Seed server-side context from a saved session id ('last' = most recent).
@@ -952,12 +971,12 @@ def resolve_model(m):
   return m
 
 
-def assemble_instructions(role, tts, agent, app_list, my_screen=None):
+def assemble_instructions(role, tts, agent, app_list, my_screen=None, vision=True):
   text = role if role else DEFAULT_ROLE
   if tts:
     text += "\n\n" + TTS_NOTE
   if agent:
-    text += "\n\n" + build_agent_instructions(app_list, my_screen)
+    text += "\n\n" + build_agent_instructions(app_list, my_screen, vision=vision)
     # Fold in the self-evolving memory (learned in past sessions) in agent mode.
     text += ai_improve.memory_block()
   return text
@@ -1393,6 +1412,11 @@ def main(vs, args_in):
       rebuilt.jp_font_loaded = gpt_obj.jp_font_loaded
       rebuilt.training_file = training_file
       gpt_obj = rebuilt
+    else:
+      # Same API/endpoint as the current client, so it wasn't rebuilt above —
+      # but text_only can still differ between two entries on the same
+      # endpoint, so it must be updated explicitly here.
+      gpt_obj.text_only = new_entry.get('text_only', False)
     entry = new_entry
   model = entry['model']
 
@@ -1452,7 +1476,8 @@ def main(vs, args_in):
     'tts': tts_response,
     'agent': agent,
     'app_list': app_list,
-    'instructions': assemble_instructions(role, tts_response, agent, app_list, my_screen),
+    'instructions': assemble_instructions(role, tts_response, agent, app_list, my_screen,
+                                          vision=not gpt_obj.text_only),
     'tools': gpt_obj.build_tools_for(app_list, agent),
   }
 
@@ -1490,7 +1515,8 @@ def main(vs, args_in):
   improve_state = {'every': 8, 'since': 0}
 
   def refresh():
-    ctx['instructions'] = assemble_instructions(ctx['role'], ctx['tts'], ctx['agent'], ctx['app_list'], my_screen)
+    ctx['instructions'] = assemble_instructions(ctx['role'], ctx['tts'], ctx['agent'], ctx['app_list'], my_screen,
+                                                vision=not gpt_obj.text_only)
     ctx['tools'] = gpt_obj.build_tools_for(ctx['app_list'], ctx['agent'])
 
   def switch_model(name):
@@ -1504,6 +1530,12 @@ def main(vs, args_in):
     if same:
       ctx['model'] = new_entry['model']
       ctx['entry'] = new_entry
+      # Two entries can share an API/endpoint but differ on text_only (e.g. a
+      # vision and a text-only model both served by the same local endpoint),
+      # so the tool set/instructions must be rebuilt here too, not just on a
+      # full client rebuild.
+      gpt_obj.text_only = new_entry.get('text_only', False)
+      refresh()
       print("Model: %s (%s API)." % (new_entry['name'], new_entry['api']), file=vs)
       return
     new_obj = init_client(new_entry, vs, gpt_obj.mode == 'plan', registry)

@@ -1,6 +1,20 @@
 import argparse
 
 
+def _normalize_args(args):
+  # Traditional form: 'head -50 file' means 'head -n 50 file'.
+  out = []
+  prev = None
+  for a in args:
+    if a[:1] == '-' and a[1:].isdigit() and prev not in ('-n', '-c'):
+      out.append('-n')
+      out.append(a[1:])
+    else:
+      out.append(a)
+    prev = a
+  return out
+
+
 def _decode(data):
   # Trim a trailing partial UTF-8 sequence left by a byte-count cut.
   for trim in range(4):
@@ -45,7 +59,7 @@ def main(vs, args_in):
   parser.add_argument('files', nargs='*', help='file paths')
 
   try:
-    args = parser.parse_args(args_in[1:])
+    args = parser.parse_args(_normalize_args(args_in[1:]))
   except SystemExit:
     return
 

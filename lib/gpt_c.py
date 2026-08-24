@@ -119,8 +119,8 @@ def load_conversation(cid):
 # with curl.
 # ----------------------------------------------------------------------------
 
-def build_tools_c(app_list, agent=False):
-  flat = gpt.build_tools(app_list, agent=agent, web_search=True)
+def build_tools_c(app_list, agent=False, vision=True):
+  flat = gpt.build_tools(app_list, agent=agent, web_search=True, vision=vision)
   tools = []
   for t in flat:
     if t.get("type") != "function":
@@ -195,7 +195,7 @@ class chatgpt_chat(gpt.chatgpt_agent):
     self.messages = []
 
   def build_tools_for(self, app_list, agent):
-    return build_tools_c(app_list, agent=agent)
+    return build_tools_c(app_list, agent=agent, vision=not self.text_only)
 
   def resume_from(self, rid, vs=None, silent=False):
     """Load a saved messages list ('last' = most recent). Returns the id resumed

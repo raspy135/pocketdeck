@@ -243,7 +243,8 @@ registry. It's created with OpenAI defaults the first time `gpt` runs.
     { "name": "gpt-5.4", "api": "responses", "model": "gpt-5.4" },
     { "name": "gpt-5.5", "api": "responses", "model": "gpt-5.5" },
     { "name": "llama3",  "api": "chat",
-      "base_url": "http://192.168.1.50:11434/v1", "model": "llama3.1" }
+      "base_url": "http://192.168.1.50:11434/v1", "model": "llama3.1",
+      "text_only": true }
   ]
 }
 ```
@@ -258,6 +259,7 @@ Field | Meaning
 `model` | The actual model id sent to the API. Default: same as `name`.
 `effort` | Optional default reasoning effort for a `responses` entry.
 `key` | Optional API key (bearer token) for this entry, for a provider that needs its own — e.g. xAI. With no `key`, an OpenAI endpoint uses `/config/openai_api_key` and any other endpoint is called without authorization.
+`text_only` | Set `true` if this model has no vision. The model itself is never told it lacks vision, so `capture_screen` is dropped from its tools entirely (and the system prompt stops mentioning it) instead of the model calling it and hallucinating a description of a screenshot it never received. Default: `false`.
 
 `default` names the entry used when `-m` is omitted. An OpenAI endpoint with no
 `key` falls back to `/config/openai_api_key`; a third-party provider (e.g. xAI)
