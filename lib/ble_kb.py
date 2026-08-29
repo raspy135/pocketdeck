@@ -1,4 +1,3 @@
-import bluetooth
 import struct
 import time
 import pdeck
@@ -68,11 +67,6 @@ class _Secrets:
     v = self._d.get(f"{sec_type}:{bytes(key).hex()}")
     return bytes.fromhex(v) if v else None
 
-  def clear(self):
-    self._d = {}
-    try: os.remove(_SEC)
-    except: pass
-
 
 class _Conn:
   """Per-connection state for one keyboard."""
@@ -91,7 +85,6 @@ class _Conn:
     self.pair_tried = is_new  # new devices pair via pair_q; known ones may re-pair
     self.disc_at = 0
     self.prev_keys = set()
-    self.prev_mod = 0
     self.conn_at = time.time()  # for measuring how long a link survives
 
 
@@ -126,11 +119,7 @@ class BLEKeyboardHost:
     try:
       os.stat(_CFG)
       with open(_CFG, "r") as f:
-        d = json.load(f)
-        # Migrate single-device config to list
-        if isinstance(d, dict):
-          return [d]
-        return d
+        return json.load(f)
     except: return []
 
   def _save_cfg(self):
@@ -159,9 +148,8 @@ class BLEKeyboardHost:
     if event == _SCAN_RESULT:
       addr_type, addr, _, _, adv = data
       ah = bytes(addr).hex()
-      # Skip only if already connected or actively connecting to this device
-      already = any(c.addr == ah for c in self._conns.values())
-      if not already and ah not in self._known and self._match_kb(adv):
+      # _known holds every connected/connecting addr (watchdog below re-adds them)
+      if ah not in self._known and self._match_kb(adv):
         self._known.add(ah)
         self.connecting += 1
         self._msg("Found KB")
@@ -218,10 +206,8 @@ class BLEKeyboardHost:
         except: pass
       # Show enough on-screen (even with DEBUG=False) to tell a clean drop from
       # the "connected then dropped before encryption" failure and see reconnect.
-      if c:
-        self._msg(f"Disconnected ({n}) enc={c.encrypted} up={time.time()-c.conn_at:.0f}s")
-      else:
-        self._msg(f"Disconnected ({n})")
+      self._msg(f"Disconnected ({n})" +
+                (f" enc={c.encrypted} up={time.time()-c.conn_at:.0f}s" if c else ""))
       self._recon_t = time.time() + 2
 
     elif event == _ENC_UPDATE:
@@ -229,11 +215,7 @@ class BLEKeyboardHost:
       c = self._conns.get(ch)
       # data = (conn_handle, encrypted, authenticated, bonded, key_size)
       enc = data[1] if len(data) > 1 else None
-      auth = data[2] if len(data) > 2 else None
-      bonded = data[3] if len(data) > 3 else None
-      ksz = data[4] if len(data) > 4 else None
-      self._dbg(f"ENC_UPDATE ch={ch} encrypted={enc} authenticated={auth} "
-                f"bonded={bonded} key_size={ksz}", scr=True)
+      self._dbg(f"ENC_UPDATE ch={ch} {tuple(data[1:])}", scr=True)
       if c and enc:
         c.encrypted = True
         if not c.disc_q and not c.discovering:
@@ -324,7 +306,7 @@ class BLEKeyboardHost:
       c = self._conns.get(ch)
       if not c: return
       vh, nd = data[1], data[2]
-      matched = any(vh == r for r, _ in c.cccds) or vh in c.reports
+      matched = vh in c.reports
       self._dbg(f"NOTIFY ch={ch} vh={vh} matched={matched} data={bytes(nd).hex()}")
       if matched:
         self._on_report(c, nd)
@@ -346,21 +328,16 @@ class BLEKeyboardHost:
   def _c_release(self, ch):
     # Drop the C-side registration and force-release any held keys. Safe to
     # call redundantly (firmware also does this on a real BLE disconnect).
-    if hasattr(pdeck, 'ble_kb_release'):
-      try: pdeck.ble_kb_release(ch)
-      except: pass
+    try: pdeck.ble_kb_release(ch)
+    except: pass
 
   def _setup_active(self):
     # True while any link is still scanning/connecting/pairing/discovering.
     # The main loop uses this to tick fast during setup so each stage of the
     # connect state machine advances quickly; keypresses are IRQ-driven, so
     # this affects connection speed only, not key latency.
-    if self.scanning or self.connecting:
-      return True
-    for c in self._conns.values():
-      if not c.ready:
-        return True
-    return False
+    return bool(self.scanning or self.connecting) or any(
+      not c.ready for c in self._conns.values())
 
   def _disc_desc(self, c):
     vh = c.reports[c.desc_i]
@@ -407,7 +384,6 @@ class BLEKeyboardHost:
     if mod and not keys:
       self.v.send_key_event(0, mod, 1)
     c.prev_keys = keys
-    c.prev_mod = mod
 
   def scan(self, ms=30000):
     if self.scanning: return
@@ -439,6 +415,14 @@ class BLEKeyboardHost:
         self._known.discard(ah)
         self.connecting = max(0, self.connecting - 1)
 
+  def _drop_links(self):
+    # Cleanly tear down every live link (shared by resume and stop).
+    self._stop_scan()
+    for ch in list(self._conns):
+      self._c_release(ch)
+      try: self.ble.gap_disconnect(ch)
+      except: pass
+
   def _reset_ble(self):
     # Called on resume from lightsleep. lightsleep powers down the radio, so the
     # links are dead — but the controller itself comes back fine (restarting the
@@ -452,11 +436,7 @@ class BLEKeyboardHost:
     # immediately dropping during re-encryption ("connected then disconnected").
     # It would also tear down other services' links on the SHARED radio.
     self._msg("Resume: reconnecting KB...")
-    self._stop_scan()
-    for ch in list(self._conns):
-      self._c_release(ch)
-      try: self.ble.gap_disconnect(ch)
-      except: pass
+    self._drop_links()
     self._conns.clear()
     self._known.clear()
     self.connecting = 0
@@ -469,11 +449,7 @@ class BLEKeyboardHost:
       self.scan(1500)
 
   def stop(self):
-    self._stop_scan()
-    for ch in list(self._conns):
-      self._c_release(ch)
-      try: self.ble.gap_disconnect(ch)
-      except: pass
+    self._drop_links()
     self._msg("Keyboard service stopped (radio remains active for other services).")
     self.mgr.unsubscribe('ble_kb')
 
@@ -492,7 +468,6 @@ def main(vs, args):
     except: pass
 
   kb = BLEKeyboardHost(vs.v)
-  fails = 0
   conn_t = time.time()
 
   # Start with both reconnect + scan
@@ -501,7 +476,6 @@ def main(vs, args):
   else:
     kb.scan(1500)
   kb._recon_t = time.time() + 3
-  req_scan = False
   last_tick = time.time()
   try:
     while True:
@@ -519,11 +493,9 @@ def main(vs, args):
         kb._recon_t = now + 1
       last_tick = now
       key = vs.v.read_nb(1)
-      if key and key[0] > 0 and key[1].encode('ascii') == b'\x0d':
-        req_scan = True
-      if req_scan and not kb.scanning:
+      if key and key[0] > 0 and key[1] == '\r' and not kb.scanning:
         kb.scan(1500)
-        
+
       # Per-connection: pair & discover
       for c in list(kb._conns.values()):
         if c.pair_q:
@@ -566,26 +538,14 @@ def main(vs, args):
 
       # Reconnect + scan together
       if kb.connecting == 0 and now > kb._recon_t:
-        #if not kb._conns and fails >= 1:
-        #  kb._msg("Fresh pair...")
-        #  try: os.remove(_CFG)
-        #  except: pass
-        #  kb._saved = []
-        #  kb._sec.clear()
-        #  kb._known.clear()
-        #  fails = 0
         if not kb._conns:
           if kb._saved:
             kb.reconnect_all()
             conn_t = now
-            fails += 1
           else:
             if not kb.scanning:
               kb.scan(1500)
         kb._recon_t = now + 3
-
-      if any(c.ready for c in kb._conns.values()):
-        fails = 0
 
       # Tick fast (~0.1s) while a link is still being set up so each stage
       # advances quickly; idle slowly (0.5s) once every keyboard is ready.

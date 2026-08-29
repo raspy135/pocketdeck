@@ -322,7 +322,7 @@ Pocket deck supports XBM and the original XBMR format for image. XBMR is binary 
 - `set_draw_color(color)` - 0 is black, 1 is white, 2 is xor
 - `set_font_mode(mode)` 
 - `set_font_direction(dir)` - sets font orientation (0: 0°, 1: 90°, 2: 180°, 3: 270°)
-- `set_font_pos_baseline()` - sets font position mode to baseline
+- `set_font_pos_baseline()` - sets font position mode to baseline(default)
 - `set_font_pos_bottom()` - sets font position mode to bottom
 - `set_font_pos_center()` - sets font position mode to center
 - `set_font_pos_top()` - sets font position mode to top

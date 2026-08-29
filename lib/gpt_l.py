@@ -6,11 +6,10 @@ if _IS_PC:
   import pc_compat
   pc_compat.install()
 
-import network, socket
+import network
 import auto_connect
 import codec_config
 import ujson
-import wifi
 import time
 import math
 import urequests as requests
@@ -18,14 +17,18 @@ import pdeck
 import pdeck_utils as pu
 import esclib as elib
 import argparse
-import ubinascii
 import audio
 import wav_play
 import recorder
-import setuni
 import os
-import re
 import gc
+
+# Per-socket timeout for every model request. Without one, urequests never
+# calls settimeout() and a stalled TLS socket blocks the app forever - the
+# retry loop in post() only ever sees OSError, so a hang can't trigger it.
+# This is per socket operation, not a deadline for the whole turn: a reasoning
+# model sends nothing until it's done thinking, so keep it generous.
+REQUEST_TIMEOUT = 300
 
 API_KEY_FILENAME = "/config/openai_api_key"
 # On a PC the key lives under ~/.config/gpt/ (with $OPENAI_API_KEY as fallback).
@@ -40,11 +43,70 @@ def file_exists(name):
   except OSError:
     return False
 
-def parse_inline_directives(message, references, images, args, vs):
+def user_dir(device_dir, pc_sub=""):
+  """Where config/logs live for the current platform: `device_dir` as-is on the
+  device, ~/.config/gpt[/pc_sub] (created on demand) on a PC."""
+  if not _IS_PC:
+    return device_dir
+  d = os.path.expanduser("~/.config/gpt")
+  if pc_sub:
+    d += "/" + pc_sub
+  try:
+    os.makedirs(d, exist_ok=True)
+  except Exception:
+    pass
+  return d
+
+# Options accepted inside a [[...]] block, by argparse dest. Anything else the
+# block names is reported and ignored (-f included: an attachment can't be added
+# after the message has been built).
+_INLINE_DESTS = ('model', 'effort', 'jp', 'clipboard', 'no_format', 'nosave',
+                 'voice', 'voice_type')
+_inline_p = None
+
+def inline_parser():
+  """Parser for a [[...]] option block. Every default is None so the caller can
+  tell "set inline" from "left alone"; built once (ArgumentParser opens a screen
+  stream) and reused."""
+  global _inline_p
+  if _inline_p is None:
+    p = argparse.ArgumentParser(description='inline options')
+    p.add_argument('-m', '--model', default=None)
+    p.add_argument('-e', '--effort', default=None)
+    p.add_argument('-j', '--jp', action='store_true', default=None)
+    p.add_argument('-c', '--clipboard', action='store_true', default=None)
+    p.add_argument('-nf', '--no-format', action='store_true', default=None)
+    p.add_argument('-n', '--nosave', action='store_true', default=None)
+    p.add_argument('-v', '--voice', action='store_true', default=None)
+    p.add_argument('-vt', '--voice-type', default=None)
+    p.add_argument('-i', '--image', nargs='+', default=None)
+    _inline_p = p
+  return _inline_p
+
+def load_images(paths, images, vs):
+  """Append each path (or http/https url) to `images` as raw bytes (or the url).
+  Returns False if a file could not be read."""
+  ok = True
+  for path in paths or []:
+    if path.startswith("http://") or path.startswith("https://"):
+      images.append(path)
+      continue
+    try:
+      with open(path, 'rb') as f:
+        images.append(f.read())
+    except Exception:
+      print("Error when opening image %s" % path, file=vs)
+      ok = False
+  return ok
+
+def parse_inline_directives(message, references, images, vs):
+  """Strip [[...]] directives out of `message`. A block starting with '-' is a
+  set of options for this message only; any other block is a file path attached
+  as a reference. Returns (cleaned_message, margs), margs holding just the
+  options that were actually set inline."""
   idx = 0
   result = ""
-  mod_args = {}
-  changed = False
+  margs = {}
 
   while True:
     start = message.find('[[', idx)
@@ -59,122 +121,41 @@ def parse_inline_directives(message, references, images, args, vs):
 
     result += message[idx:start]
     block = message[start+2:end].strip()
-    handled = False
+    handled = True
 
-    if len(block) > 0 and block[0] == '-':
+    if block[:1] == '-':
       try:
-        opt_args = block.split()
-      except Exception:
-        opt_args = []
+        ns, unknown = inline_parser().parse_known_args(block.split())
+      except BaseException:
+        # argparse reports a missing value itself, then exits; keep the turn.
+        print("Inline option error in [[%s]]; ignored." % block, file=vs)
+        ns, unknown = None, []
+      if unknown:
+        print("Inline option note: unsupported %s" % " ".join(unknown), file=vs)
+      if ns is not None:
+        load_images(getattr(ns, 'image', None), images, vs)
+        for dest in _INLINE_DESTS:
+          val = getattr(ns, dest, None)
+          if val is not None:
+            margs[dest] = val
 
-      i = 0
-      ok = True
-      while i < len(opt_args):
-        opt = opt_args[i]
-
-        if opt == '-m' or opt == '--model':
-          if i + 1 < len(opt_args):
-            mod_args['model'] = opt_args[i + 1]
-            i += 2
-            handled = True
-          else:
-            print("Inline option error: -m requires a value", file=vs)
-            ok = False
-            break
-
-        elif opt == '-e' or opt == '--effort':
-          if i + 1 < len(opt_args):
-            mod_args['effort'] = opt_args[i + 1]
-            i += 2
-            handled = True
-          else:
-            print("Inline option error: -e requires a value", file=vs)
-            ok = False
-            break
-
-        elif opt == '-j' or opt == '--jp':
-          mod_args['jp'] = True
-          i += 1
-          handled = True
-
-        elif opt == '-c' or opt == '--clipboard':
-          mod_args['clipboard'] = True
-          i += 1
-          handled = True
-
-        elif opt == '-nf' or opt == '--no-format':
-          mod_args['no_format'] = True
-          i += 1
-          handled = True
-
-        elif opt == '-n' or opt == '--nosave':
-          mod_args['nosave'] = True
-          i += 1
-          handled = True
-
-        elif opt == '-v' or opt == '--voice':
-          mod_args['voice'] = True
-          i += 1
-          handled = True
-
-        elif opt == '-vt' or opt == '--voice-type':
-          if i + 1 < len(opt_args):
-            mod_args['voice_type'] = opt_args[i + 1]
-            i += 2
-            handled = True
-          else:
-            print("Inline option error: -vt requires a value", file=vs)
-            ok = False
-            break
-
-        elif opt == '-i' or opt == '--image':
-          i += 1
-          handled = True
-          while i < len(opt_args) and not opt_args[i].startswith('-'):
-            img_path = opt_args[i]
-            if img_path.startswith("http://") or img_path.startswith("https://"):
-              images.append(img_path)
-            else:
-              try:
-                with open(img_path, 'rb') as f:
-                  images.append(f.read())
-              except Exception:
-                print(f'Inline option error when opening image {img_path}', file=vs)
-            i += 1
-
-        elif opt == '-f' or opt == '--file':
-          print("Inline option note: -f is not supported in [[...]] blocks", file=vs)
-          i += 1
-          while i < len(opt_args) and not opt_args[i].startswith('-'):
-            i += 1
-          handled = True
-
-        else:
-          print(f"Inline option note: unsupported option {opt}", file=vs)
-          i += 1
-          handled = True
-
-      if ok:
-        changed = True
+    elif file_exists(block):
+      try:
+        with open(block, 'r') as f:
+          references.append("---- " + block + " ----\n" + f.read())
+      except Exception as e:
+        print("Error reading inline reference %s: %s" % (block, e), file=vs)
 
     else:
-      if file_exists(block):
-        try:
-          with open(block, 'r') as f:
-            references.append("---- " + block + " ----\n" + f.read())
-          handled = True
-          changed = True
-        except Exception as e:
-          print(f"Error reading inline reference {block}: {e}", file=vs)
-      else:
-        print(f"Inline reference file not found: {block}", file=vs)
+      print("Inline reference file not found: %s" % block, file=vs)
+      handled = False
 
     if not handled:
       result += message[start:end+2]
 
     idx = end + 2
 
-  return result, changed, mod_args
+  return result, margs
 
 def api_key_location():
   """Human-readable hint of where the key is expected, for error messages."""
@@ -209,8 +190,10 @@ def read_api_key():
 # from /config/gpt.json without importing the heavy gpt module.
 # ----------------------------------------------------------------------------
 OPENAI_BASE = "https://api.openai.com/v1"
-REGISTRY_FILENAME = "/config/gpt.json"
-PC_REGISTRY_FILENAME = "~/.config/gpt/gpt.json"
+
+def registry_path():
+  """The model registry file (/config/gpt.json on the device)."""
+  return user_dir("/config") + "/gpt.json"
 
 DEFAULT_AUDIO = {
   "base_url": OPENAI_BASE,
@@ -225,9 +208,8 @@ DEFAULT_AUDIO = {
 def load_registry_ro():
   """Read /config/gpt.json without creating or rewriting it (unlike the gpt
   frontend's load_registry). Returns the parsed dict, or {} if missing/bad."""
-  path = os.path.expanduser(PC_REGISTRY_FILENAME) if _IS_PC else REGISTRY_FILENAME
   try:
-    with open(path, "r") as f:
+    with open(registry_path(), "r") as f:
       data = ujson.load(f)
     return data if isinstance(data, dict) else {}
   except Exception:
@@ -367,14 +349,7 @@ def resolve_realtime(registry, name=None):
 def make_log_filename():
   ctime = time.gmtime(time.time()+pu.timezone*60*15)
   name = f"gptlog{ctime[1]:02}{ctime[2]:02}_{ctime[3]:02}{ctime[4]:02}.md"
-  if _IS_PC:
-    log_dir = os.path.expanduser("~/.config/gpt/log")
-    try:
-      os.makedirs(log_dir, exist_ok=True)
-    except Exception:
-      pass
-    return log_dir + "/" + name
-  return "/sd/log/" + name
+  return user_dir("/sd/log", "log") + "/" + name
 
 # ----------------------------------------------------------------------------
 # Conversation session list (for --resume / --resume-id)
@@ -384,19 +359,10 @@ def make_log_filename():
 #   response_id, YYYY-MM-DD HH:MM, trimmed initial prompt
 # Only the response id and datetime are parsed back; the prompt is a human hint.
 
-SESSION_LIST_FILENAME = "/sd/log/gpt_session_list"
-PC_SESSION_LIST_FILENAME = "~/.config/gpt/gpt_session_list"
 SESSION_MAX = 10
 
 def session_list_path():
-  if _IS_PC:
-    p = os.path.expanduser(PC_SESSION_LIST_FILENAME)
-    try:
-      os.makedirs(os.path.dirname(p), exist_ok=True)
-    except Exception:
-      pass
-    return p
-  return SESSION_LIST_FILENAME
+  return user_dir("/sd/log") + "/gpt_session_list"
 
 def read_sessions():
   """Return [(response_id, datetime_str, prompt), ...], oldest first."""
@@ -599,6 +565,39 @@ class AudioResponse:
       pass
 
 
+def sse_events(resp):
+  """Yield the JSON payload of each `data:` line of an SSE body as a dict.
+
+  Reads in blocks rather than byte-at-a-time: ChunkedReader.read() never asks
+  the socket for more than the current chunk holds, so a block read returns as
+  soon as the server has flushed an event instead of waiting for a full buffer.
+  Malformed/keepalive lines are skipped; `[DONE]` ends the stream."""
+  raw = resp.raw
+  buf = b''
+  while True:
+    nl = buf.find(b'\n')
+    if nl < 0:
+      try:
+        d = raw.read(512)
+      except Exception:
+        return
+      if not d:
+        return
+      buf += d
+      continue
+    line = buf[:nl].rstrip(b'\r')
+    buf = buf[nl + 1:]
+    if not line.startswith(b'data:'):
+      continue                       # event:/id:/comment lines carry nothing new
+    body = line[5:].strip()
+    if body == b'[DONE]':
+      return
+    try:
+      yield ujson.loads(body)
+    except Exception:
+      continue
+
+
 class chatgpt_util:
   def __init__(self,vs):
     self.vs = vs
@@ -661,7 +660,8 @@ class chatgpt_util:
     attempts = 3
     for attempt in range(attempts):
       try:
-        return requests.post(url, headers=headers, data=json)
+        return requests.post(url, headers=headers, data=json,
+                             timeout=REQUEST_TIMEOUT)
       except OSError as e:
         print("\nRequest failed: %r  [%s]" % (e, self._net_diag()), file=self.vs)
         if attempt == attempts - 1:
@@ -682,62 +682,20 @@ class chatgpt_util:
     return True
     
 
-  def make_json(self, message, references, images=None, model="gpt-5.5", instructions = None, effort="medium"):
-    content_items = []
-    
-    # Add text message
-    if len(references) > 0:
-      ref_text = "I put some attached text files as reference. Then answer the question by using attached information. You are not limited to reference the attached text, you can use all your knowledge. \n"
-      for i, item in enumerate(references):
-        ref_text += f"----- reference {i} -----\n{item}\n"
-      ref_text += "----- Question -----\n"
-      message = ref_text + message
-
-    content_items.append({"type": "input_text", "text": message})
-
-    # Add images
-    if images:
-      for img in images:
-        if type(img) == str:
-          img_url = img
-        else:
-          b64 = ubinascii.b2a_base64(img).decode('utf-8').strip()
-          img_url = f"data:image/jpeg;base64,{b64}"
-          
-        content_items.append({
-          "type": "input_image",
-          "image_url": img_url
-        })
-
-    payload_dic = {
-        "model" : model,
-        "reasoning" : {
-          "effort" : effort
-        },
-        "tools" : [
-          { "type" : "web_search" }
-          ],
-        "input" : [
-          {
-            "type": "message",
-            "role": "user",
-            "content": content_items
-          }
-        ]
-    }
-    if instructions:
-      payload_dic['instructions'] = instructions
-      
-    payload = ujson.dumps(payload_dic)
-    #print(payload)
-    return payload
-    
   def complete(self, prompt, model=None, instructions=None):
     """One-shot text completion: send `prompt`, return the reply text (or None).
     No tool loop, no history, no printing — for lightweight callers like
     flashcards. gpt_c.chatgpt_chat overrides this for the Chat Completions API,
     so a caller can stay agnostic to which endpoint the model uses."""
-    return self.ask(self.make_json(prompt, [], None, model or "gpt-5.4-mini", instructions))
+    payload = {
+      "model": model or "gpt-5.4-mini",
+      "reasoning": {"effort": "medium"},
+      "input": [{"type": "message", "role": "user",
+                 "content": [{"type": "input_text", "text": prompt}]}],
+    }
+    if instructions:
+      payload['instructions'] = instructions
+    return self.ask(ujson.dumps(payload))
 
   def ask(self,json):
     response = self.post(self.url,json.encode('utf-8'))
@@ -917,6 +875,12 @@ class chatgpt_util:
     you read .raw, and streaming TTS servers (uvicorn/Qwen etc.) reply with
     Transfer-Encoding: chunked — so we parse the response ourselves and unwrap
     the chunking, letting the WAV player see clean audio bytes."""
+    return self._raw_post(url, payload, "audio/wav", self._audio_auth())
+
+  def _raw_post(self, url, payload, accept, auth, timeout=REQUEST_TIMEOUT):
+    """The socket half of _audio_post, shared with the SSE stream: connect,
+    send the request, parse the status line and headers, and hand back a
+    de-chunked readable body."""
     host, port, path, use_tls = split_url(url)
     import usocket
     try:
@@ -926,19 +890,19 @@ class chatgpt_util:
     addr = usocket.getaddrinfo(host, port)[0][-1]
     s = usocket.socket()
     s.connect(addr)
+    s.settimeout(timeout)   # a stalled stream must not hang the device forever
     if use_tls:
       try:
         s = ssl.wrap_socket(s, server_hostname=host)
       except TypeError:
         s = ssl.wrap_socket(s)
 
-    auth = self._audio_auth()
     req = ("POST %s HTTP/1.1\r\n"
            "Host: %s\r\n"
            "Connection: close\r\n"
            "Content-Type: application/json\r\n"
-           "Accept: audio/wav\r\n"
-           "Content-Length: %d\r\n" % (path, host, len(payload)))
+           "Accept: %s\r\n"
+           "Content-Length: %d\r\n" % (path, host, accept, len(payload)))
     if auth:
       req += "Authorization: Bearer %s\r\n" % auth
     req += "\r\n"
@@ -951,6 +915,7 @@ class chatgpt_util:
     except Exception:
       status = 0
     chunked = False
+    sse = False
     while True:                                  # consume + inspect headers
       h = s.readline()
       if not h or h == b'\r\n':
@@ -958,21 +923,70 @@ class chatgpt_util:
       hl = h.lower()
       if hl.startswith(b'transfer-encoding:') and b'chunked' in hl:
         chunked = True
+      elif hl.startswith(b'content-type:') and b'event-stream' in hl:
+        sse = True
     raw = ChunkedReader(s) if chunked else s
-    return AudioResponse(status, s, raw)
+    r = AudioResponse(status, s, raw)
+    r.sse = sse
+    return r
+
+  def stream_post(self, url, payload):
+    """POST expecting a Server-Sent Events reply. Returns the response (check
+    .sse: False means the endpoint answered with a plain body instead, so the
+    caller should fall back to the blocking path)."""
+    return self._raw_post(url, payload, "text/event-stream", self.api_key)
 
 el = elib.esclib()
+
+class KeyWatch:
+  """Non-blocking ESC watch for the long request paths. Anything typed that
+  isn't ESC is stashed and handed back to the keyboard in release(), so
+  type-ahead while the model works isn't swallowed."""
+  def __init__(self, v):
+    self.v = v
+    self.pressed = False
+    self._typed = b''
+
+  def poll(self):
+    try:
+      r = self.v.read_nb_bytes(8)
+    except Exception:
+      return self.pressed
+    if r and r[0]:
+      d = r[1]
+      if b'\x1b' in d:
+        self.pressed = True
+        d = d.replace(b'\x1b', b'')
+      if d:
+        self._typed += d
+    return self.pressed
+
+  def release(self):
+    if self._typed:
+      try:
+        self.v.send_char(self._typed)
+      except Exception:
+        pass
+      self._typed = b''
+
 
 class ThinkingAnimation:
   _SPIN = '▌▄▐▀'
   _CHARS = '▁▂▃▄▅▆▇█'
   _COLS = [36, 92, 33, 92]  # cyan → lightgreen → yellow → lightgreen
 
-  def __init__(self, vs, label='Asking GPT..'):
+  def __init__(self, vs, label='Asking GPT..', interrupt_label=None):
     self.vs = vs
     self.label = label
+    # Shown instead of `label` once ESC is seen. None = this caller ignores
+    # interrupts (e.g. TTS), so the label never changes.
+    self.interrupt_label = interrupt_label
     self.tick = 0
     self.running = True
+    # Set when the user hits ESC while the request is in flight; the caller
+    # reads it after stop().
+    self.interrupted = False
+    self.keys = None
     self._el = elib.esclib()
     if _IS_PC:
       # No frame callback on a PC: just print the label once.
@@ -980,6 +994,7 @@ class ThinkingAnimation:
       return
     if hasattr(self.vs, 'v'):
       self.v = vs.v
+      self.keys = KeyWatch(self.v)
       self.v.callback(self.update)
     vs.write('\r\n\r\n')
 
@@ -988,6 +1003,7 @@ class ThinkingAnimation:
       self.v.finished()
       return
 
+    self._poll_keys()
     self.tick += 1
     if self.tick % 32:
       self.v.finished()
@@ -1014,12 +1030,23 @@ class ThinkingAnimation:
     self.v.finished()
     return
 
+  def _poll_keys(self):
+    """Look for ESC while the request blocks on the socket. This callback is
+    scheduled by the display task but runs on the main thread from
+    mp_handle_pending() inside the socket read retry loop, so it is the only
+    place a keypress is seen during a blocking request."""
+    if self.keys.poll() and not self.interrupted:
+      self.interrupted = True
+      if self.interrupt_label:
+        self.label = self.interrupt_label
+
   def stop(self):
     self.running = False
     if _IS_PC:
       return
     if hasattr(self.vs, 'v'):
       self.v.callback(None)
+      self.keys.release()   # give back what wasn't ESC
     el = self._el
     self.vs.write(
       el.cur_up(2) +
@@ -1124,310 +1151,3 @@ def format(message):
   if numfound & 1:
     result += el.bold_off()
   return result
-
-def main(vs, args_in):
-  #vs = pu.vscreen_stream()
-  parser = argparse.ArgumentParser(
-            description='ChatGPT query' )
-  parser.add_argument('-a', '--agent', action='store_true', help='Enable Agent Mode')
-  parser.add_argument('-n', '--nosave',action='store_true',help='do not save the result')
-  parser.add_argument('-s', '--silent', action='store_true', help='Suppress progress output')
-  parser.add_argument('-nf', '--no-format',action='store_true',help='do not format text (No bold)')
-  parser.add_argument('-c', '--clipboard', action='store_true', help='use clipboard as reference text')
-  parser.add_argument('-j', '--jp',action='store_true',help='Answer in Japanese')
-  parser.add_argument('-f', '--file',nargs='+',action='store',help='Attach file(s) as reference. file1 file2...')
-  parser.add_argument('-i', '--image', nargs='+', action='store',help='Attach image file(s) or image url(s). img1 img2...')
-  parser.add_argument('-m', '--model',action='store',default='gpt-5.4',help='Model to use (e.g. gpt-5-mini)')
-  parser.add_argument('-e', '--effort',action='store',default='medium',help='Reasoning effort (low, medium, high)')
-  parser.add_argument('-v', '--voice',action='store_true',help='Use voice mode (STT and TTS)')
-  parser.add_argument('-vt', '--voice-type',action='store',default='coral',help='Voice type for TTS (alloy, coral, echo, fable, onyx, nova, shimmer)')
-  parser.add_argument('--log-file', action='store', default=None, help='Internal: reuse the same log filename across iterations')
-  parser.add_argument('content', nargs='*',help='Content to ask')
-  parser.add_argument('-q', nargs='+',help='Content to ask, use this when you want to specify content explicitly. If you specify a filename, it uses file content as a main content.')
-
-  args = parser.parse_args(args_in[1:])
-
-  if not auto_connect.check(vs, silent = True):
-    print("Network is not available", file=vs)
-    return
-
-  gpt = chatgpt_util(vs)
-  if not gpt.read_api_key():
-    return
-
-  message = ""
-  instructions = None
-
-  if args.voice and not args.q and not args.content:
-    rec_file = "/sd/work/voice_rec.wav"
-    record_audio(vs, rec_file)
-    print("Transcribing...", file=vs)
-    message = gpt.stt(rec_file)
-    if not message:
-      print("Failed to transcribe audio", file=vs)
-      return
-    print(f"You (STT): {message}", file=vs)
-    instructions = "Response will be fed to OpenAI TTS engine. Optimize your responce for Text to speech. Basically keep it short, suitable input for your text to speech engine."
-    
-  elif not args.content and not args.q:
-    message = get_message(vs)
-  else:
-    if args.content:
-      message += ' '.join(args.content)
-    if args.q:
-      if len(args.q) == 1 and file_exists(args.q[0]):
-        with open( args.q[0],"r") as f:
-          message = f.read()
-      else:
-        message += ' '.join(args.q)
-  if len(message) == 0:
-    return
-
-  references = []
-  images = []
-
-  message, _ , margs = parse_inline_directives(message, references, images, args, vs)
-
-  jp = margs['jp'] if 'jp' in margs else args.jp
-  
-  ex1 = " and answer in Japanese" if jp else  ""
-  message = message + ex1
-  if jp:
-    setuni.main(vs, ['setuni'])
-    
-  ctime = time.gmtime(time.time() + pu.timezone * 60 * 15)
-  time_str = f"[User current time: {ctime[0]:04d}-{ctime[1]:02d}-{ctime[2]:02d} {ctime[3]:02d}:{ctime[4]:02d}]\n"
-  message = time_str + message
-
-  log_filename = args.log_file
-  if log_filename == None:
-    log_filename = make_log_filename()
-
-  if args.agent:
-    idx = 0
-    while True:
-        start = message.find('[[', idx)
-        if start == -1:
-            break
-        end = message.find(']]', start)
-        if end == -1:
-            break
-        match = message[start+2:end]
-        idx = end + 2
-        if file_exists(match):
-            try:
-                with open(match, 'r') as f:
-                    references.append("---- " + match + " ----\n" + f.read())
-            except Exception as e:
-                print(f"Agent Mode: Error reading {match}: {e}", file=vs)
-        else:
-            print(f"Agent Mode: File {match} not found", file=vs)
-            
-    for auto_file in ["/sd/lib/data/agent_mode.md", "/sd/Documents/pd/README.md"]:
-        if file_exists(auto_file):
-            try:
-                with open(auto_file, 'r') as f:
-                    references.append("---- " + auto_file + " ----\n" + f.read())
-            except Exception:
-                pass
-                
-    agent_instruction = (
-        "CRITICAL INSTRUCTION: You are an autonomous agent operating on a MicroPython device. "
-        "You MUST execute commands by strictly using the markdown code blocks defined in agent_mode.md."
-        "(`[type]:filename`, `python:execute`, `iterate`). "
-    )
-    
-    if instructions:
-        instructions += "\n\n" + agent_instruction
-    else:
-        instructions = agent_instruction
-        
-    message += "\n\n[SYSTEM NOTE: Follow the critical rules in agent_mode.md to perform actions.]"
-
-  if args.file:
-    files = args.file
-    for file in files:
-      if file.startswith("http://") or file.startswith("https://"):
-        references.append(file)
-        continue
-        
-      try:
-        with open(file,'r') as f:
-          references.append("---- " + file + " ----\n" + f.read())
-      except Exception as e:
-        print(f'Error when opening {file}', file=vs)
-        return
-  clipboard = margs['clipboard'] if 'clipboard' in margs else args.clipboard    
-  if clipboard:
-    references.append(pdeck.clipboard_paste().decode("utf-8"))
-  
-  if args.image:
-    image_paths = args.image
-    for img_path in image_paths:
-      if img_path.startswith("http://") or img_path.startswith("https://"):
-        images.append(img_path)
-      else:
-        try:
-          with open(img_path, 'rb') as f:
-            images.append(f.read())
-        except Exception as e:
-          print(f'Error when opening image {img_path}', file=vs)
-          return
-  model = margs['model'] if 'model' in margs else args.model
-  if model in ('m','medium'):
-    model = 'ngpt-5.4'
-  elif model in ('h','high'):
-    model = 'gpt-5.5'
-  elif model in ('f','fast'):
-    model = 'gpt-5.4-mini'
-
-  effort = margs['effort'] if 'effort' in margs else args.effort
-  if effort not in ('low', 'medium', 'high'):
-    print(f"Invalid effort: {effort}. Using medium.", file=vs)
-    effort = 'medium'
-
-  if not args.silent:
-    _anim = ThinkingAnimation(vs, "Asking GPT..")
-    
-  raw_response = gpt.ask(gpt.make_json(message, references, images, model, instructions = instructions, effort=effort))
-  if not args.silent:
-    _anim.stop()
-
-  if not raw_response:
-    return
-  
-  no_format = margs['no_format'] if 'no_format' in margs else args.no_format
-  if no_format:
-    response = raw_response
-  else:
-    response = format(raw_response)
-  if response:
-    print(response, file=vs)
-    voice = margs['voice'] if 'voice' in margs else args.voice
-    if voice:
-      raw_response_sub = re.sub('\]\(ht.+?\)',']',raw_response)
-      
-      gc.collect()
-      if args.silent:
-        print("TTS processing..", file=vs)
-      else:
-        _anim = ThinkingAnimation(vs, "TTS..")
-      res = gpt.tts_stream(raw_response_sub, voice=args.voice_type)
-      if not args.silent:
-        _anim.stop()
-      print("TTS processing done", file=vs)
-      if res and res.status_code == 200:
-        # In MicroPython urequests, the raw socket is often .raw or .s
-        # If none exist, we try the object itself as a backup
-        stream = getattr(res, "raw", getattr(res, "s", res))
-        #print(f"Connecting stream... {type(stream)}", file=vs)
-        try:
-          play_audio_stream(vs, stream)
-        except Exception as e:
-          print(f"Streaming failed: {e}. Falling back to file mode.", file=vs)
-          # Re-save to file if possible or just report error
-          # For now, we've already consumed part of the stream, so fallback is tricky
-        res.close()
-
-    nosave = margs['nosave'] if 'nosave' in margs else args.nosave
-    if not nosave:
-      try:
-        saved_filename = save_log(message, raw_response, log_filename)
-        print(el.bold_off(), file=vs)
-        print(f"Saved to {saved_filename} and the filename copied to clipboard", file = vs)
-      except Exception as e:
-        print(f"Failed to save log: {e}", file=vs)
-      
-  if args.agent:
-    idx = 0
-    while True:
-      start = raw_response.find("```", idx)
-      while start != -1 and start != 0 and raw_response[start-1] != '\n':
-        start = raw_response.find("```", start + 1)
-        
-      if start == -1:
-        break
-        
-      end = raw_response.find("```", start + 3)
-      while end != -1 and raw_response[end-1] != '\n':
-        end = raw_response.find("```", end + 1)
-        
-      if end == -1:
-        break
-        
-      block = raw_response[start+3:end]
-      idx = end + 3
-      
-      first_nl = block.find('\n')
-      if first_nl == -1:
-        continue
-        
-      lang_tag = block[:first_nl].strip()
-      code = block[first_nl+1:]
-      
-      if ":" in lang_tag and lang_tag != "python:execute":
-        out_filename = lang_tag.split(":", 1)[1].strip()
-        print(f"{el.set_font_color(1)}Agent: Saving to {out_filename}{el.bold_off()}", file=vs)
-        
-        if file_exists(out_filename):
-          try:
-            os.stat("/sd/backup")
-          except OSError:
-            try:
-              os.mkdir("/sd/backup")
-            except:
-              pass
-          base = out_filename.split("/")[-1]
-          ctime = time.gmtime(time.time()+pu.timezone*60*15)
-          backup_name = f"/sd/backup/{base}_{ctime[1]:02}{ctime[2]:02}_{ctime[3]:02}{ctime[4]:02}"
-          try:
-            os.rename(out_filename, backup_name)
-            print(f"{el.set_font_color(1)}Agent: Backing up original file to {backup_name}{el.reset_font_color()}", file=vs)
-          except:
-            pass
-            
-        try:
-          with open(out_filename, "w") as f:
-            f.write(code)
-        except Exception as e:
-          print(f"{el.set_font_color(1)}Agent: Failed to write {out_filename}: {e}{el.reset_font_color()}", file=vs)
-          
-      elif lang_tag == "python:execute":
-        print(f"{el.set_font_color(1)}Agent: Executing python block...{el.reset_font_color()}", file=vs)
-        try:
-          exec_locals = {'vs': vs, 'pdeck': pdeck}
-          exec(code, globals(), exec_locals)
-        except Exception as e:
-          print(f"{el.set_font_color(1)}Agent: Execution Error: {e}{el.reset_font_color()}", file=vs)
-          
-      elif lang_tag == "iterate":
-        print(  f"{el.set_font_color(1)}Agent: Iterating...{el.reset_font_color()}", file=vs)
-
-        # Skipping the model and effort if AI put them
-        iter_args_in = code.split()
-        iter_args = []
-        skip = False
-        for item in iter_args:
-          if skip:
-            skip = False
-            continue
-          if item in  ('-m', '-e'):
-            skip = True
-            continue
-          iter_args.args.append(item)
-       
-        iter_args = ['gpt', '-m', args.model, '-e', args.effort ] + code.split()
-        has_log_file = False
-        for item in iter_args:
-          if item == '--log-file':
-            has_log_file = True
-            break
-        if not has_log_file:
-          iter_args.extend(['--log-file', log_filename])
-        for i, item in enumerate(iter_args):
-          if item == '-q':
-            iter_args = iter_args[0:i+1] + [" ".join(iter_args[i+2:])]
-            break
-        print(f"{el.set_font_color(1)}Agent: Calling main with {iter_args}{el.reset_font_color()}", file=vs)
-        main(vs, iter_args)
-        print(el.bold_off(), file=vs)

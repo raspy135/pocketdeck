@@ -120,22 +120,6 @@ def _noop(*args, **kwargs):
   return None
 
 
-def _utf8_width(ch):
-  """Stand-in for the device's pdeck.get_utf8_width: cells a glyph occupies.
-  `ch` may be a code point, a 1-char str, or a utf-8 bytes slice."""
-  import unicodedata
-  if isinstance(ch, int):
-    ch = chr(ch)
-  elif isinstance(ch, (bytes, bytearray)):
-    try:
-      ch = ch.decode('utf-8')
-    except Exception:
-      return 1
-  if not ch:
-    return 1
-  return 2 if unicodedata.east_asian_width(ch[0]) in ('W', 'F') else 1
-
-
 class _StubModule(types.ModuleType):
   def __getattr__(self, name):
     return _noop
@@ -228,7 +212,6 @@ def install():
           show_screen_num=_noop,
           cmd_exists=lambda i: False,
           command_shell=lambda n: False,
-          get_utf8_width=_utf8_width,
           vscreen=lambda: _StubModule('vscreen'))
 
   # pdeck_utils: timezone (quarter-hours), empty app list, no-op launch.

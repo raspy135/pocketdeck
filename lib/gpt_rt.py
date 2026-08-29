@@ -54,20 +54,9 @@ def build_session_instructions(model, file_list, references, app_list=None, agen
   )
 
   if agent:
-    text += "\nUse command_with_return to look up information before answering (e.g. list files with 'ls /sd/Documents/word*', read a file with 'cat /path'). Pocket deck is not Linux: no redirects ('>'), no '&&' or ';', no subshells; simple pipes '|' work but only INTO grep/head/tail. Always call it when the user asks about files or device state.\nUse write_file to create or save files on the device filesystem before launching an app that needs them.\nWhen you get a logical question which can be solved by writing code, you can write Micropython code temporarily on /sd/py, filename starts temp_*, then delete after the creation (rm command). \n"
-    text += "\nThe device keeps an activity log under /sd/elog/, one markdown file per day named YYYY-MM-DD.md, each line an event: app launches, file opens/saves, and shell commands the user ran. Read the current day's file (its name is today's date; 'ls /sd/elog' if unsure, then 'cat' it) to see what the user has recently been doing, resume their work, or answer questions about recent device activity.\n"
-    text += "\nYou can see and drive other apps running on the device. Use list_running_apps to see which app is on which screen. Use switch_screen to bring a screen to the foreground. IMPORTANT: screen numbers in these tools are 0-based and match what list_running_apps reports (screen 0 is the Python REPL), but the device's GUI shows them 1-based, so the screen the user calls '2' is screen 1 here — always pass the 0-based number from list_running_apps, not the GUI number. Use capture_screen to take a screenshot of a screen and look at it (it is sent to you as an image) it take some time (about 0.3s), so requesting screenshot at high rate is not recommended. Use send_keys to type into the app currently in the foreground; include a newline or set enter=true to press Enter, and use escape sequences for special keys (Up=\\x1b[A, Down=\\x1b[B, Right=\\x1b[C, Left=\\x1b[D, Esc=\\x1b, Backspace=\\x08, Ctrl-X=\\x18). After acting, capture_screen again to confirm the result before continuing.\nTo read TEXT a command-line app printed (e.g. to diagnose an error the user asks about), prefer read_console_log over a screenshot — it returns the recent console text directly and cheaply.\n"
-    text += "\nTo run a timed routine (a stretch or exercise sequence with holds), use wait_and_resume. In one single reply, ALWAYS speak the current move out loud FIRST, then in that same reply call wait_and_resume for how many seconds to hold it. Never call wait_and_resume without speaking the move first in the same reply, or the user just hears silence. When resumed, speak the next move and repeat.\n"
-    text += "\nThe user keeps SKILLS at /sd/Documents/skills/ — one markdown file per skill: a named, reusable procedure you can perform (a routine with steps and timings, a recurring workflow, a document format). When the user asks for something by name ('do my morning ritual', 'coach me through the surf warm-up'), or asks what you can do, 'ls /sd/Documents/skills' and cat the matching file, then follow it step by step — for timed routines, pace the steps with wait_and_resume. When the user teaches you a repeatable procedure worth keeping, offer to save it there as a new skill file (the folder may not exist yet — 'mkdir /sd/Documents/skills' first if needed).\n"
-    text += "\nThe device also ships read-only SYSTEM skills at /sd/lib/skills/. Before you write a graphical app (dashboard, chart, meter), cat /sd/lib/skills/dashboard_design.md and follow it; 'ls /sd/lib/skills' for the rest.\n"
-    if app_list:
-      text += "\nUse launch_app to open apps. Pass optional args (e.g. a file path) to open a specific file. Besides the registered apps listed below, any installed module can be launched by its module name (e.g. 'myapp' for /sd/lib/myapp.py). Available apps:\n"
-      for item in app_list:
-        if isinstance(item, list) and len(item) == 2:
-          name = item[0]
-          info = item[1]
-          desc = info.get('description', '') if isinstance(info, dict) else ''
-          text += "  - %s: %s\n" % (name, desc)
+    # The device/tool prose is shared with the text frontends (gpt.py) so the
+    # two prompts can't drift apart; realtime=True swaps in wait_and_resume.
+    text += "\n" + gpt_tools.device_instructions(app_list, realtime=True)
     # In agent mode, fold in what the assistant has learned about this user and
     # device in past sessions (self-evolving memory).
     text += ai_improve.memory_block()
@@ -512,6 +501,10 @@ class SimpleWS:
 
 
 class RealtimeAgent(gpt_tools.ToolExecBase):
+  # self.model here is the realtime/audio model from the websocket URL; it can't
+  # do chat completions, so the memory rewrite keeps ai_improve's text model.
+  SUMMARY_USES_ACTIVE_MODEL = False
+
   def __init__(self, ws, vs, model, file_list, references, app_list=None, agent=False, language=None, headers=None, rt=None):
     self.ws = ws
     self.vs = vs
@@ -1764,13 +1757,14 @@ def main(vs, args_in):
     return
 
   ra = RealtimeAgent(ws, vs, model, file_list, references, app_list, agent, language, headers, rt)
-  ra.api_key = api_key   # for the memory summarizer's side request
   ra.debug = args.debug
-  if rt["provider"] != "openai":
-    # The self-evolving memory summarizer posts to OpenAI /chat/completions; it
-    # isn't wired for other realtime providers yet, so don't auto-run it (it would
-    # fail with a non-OpenAI key). The voice conversation itself is unaffected.
-    ra.improve_every = 0
+  # The memory summarizer is a side request to OpenAI /chat/completions
+  # (ai_improve.SUMMARY_MODEL), so it needs the OPENAI key - not the realtime
+  # provider's. On an OpenAI backend they are the same key; on xAI or a local
+  # server they are not, and passing the wrong one is why /improve failed there.
+  ra.api_key = api_key if is_openai else (gpt.read_api_key() or "")
+  if not ra.api_key:
+    ra.improve_every = 0   # no OpenAI key: nothing to summarize with
   print("Starting voice agent%s... Press B for menu (reset/quit), 'q' to quit, Enter or Slider+A to mute/unmute mic (Slider+A works in background).%s" % (" (agent mode)" if agent else "", " Press 'u' for a what's-up on recent activity." if agent else ""), file=vs)
 
   # We don't want gc run for a while

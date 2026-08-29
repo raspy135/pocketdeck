@@ -58,6 +58,39 @@ def _match_line(line, pat, ignore_case, regex):
     return pat.search(line)
   return pat in line
 
+def _line_matches(s, pat, use_regex, ignore_case):
+  # All non-overlapping matches in a line, left to right (GNU grep -o
+  # behavior). Returns the matched text in its original case. Empty
+  # (zero-length) matches are skipped, like GNU grep.
+  t = s.lower() if ignore_case else s
+  spans = []
+  if use_regex:
+    # No finditer in MicroPython's re; walk non-overlapping matches with
+    # search(pos), advancing past each hit (GNU grep -o behavior).
+    off = 0
+    while off < len(t):
+      m = pat.search(t, off)
+      if m is None:
+        break
+      a, b = m.start(), m.end()
+      if b > a:
+        spans.append((a, b))
+        off = b
+      else:
+        off = a + 1
+  else:
+    spans = []
+    start = 0
+    L = len(pat)
+    if L > 0:
+      while True:
+        idx = t.find(pat, start)
+        if idx < 0:
+          break
+        spans.append((idx, idx + L))
+        start = idx + L
+  return [s[a:b] for a, b in spans if b > a]
+
 def _file_size(path):
   try:
     return os.stat(path)[6]
@@ -68,7 +101,7 @@ def grep_path(pattern, path=".", recursive=False, show_line_numbers=False,
               ignore_case=False, list_files_only=False, includes=None,
               max_bytes=None, out=None, regex=True, invert=False,
               after=0, before=0, count_only=False, max_count=None,
-              no_filename=False, stdin_text=None):
+              no_filename=False, only_matching=False, stdin_text=None):
   if out is None:
     out = sys.stdout
   if includes is None:
@@ -138,6 +171,24 @@ def grep_path(pattern, path=".", recursive=False, show_line_numbers=False,
     for line in line_source:
       ln += 1
       s = line.rstrip("\n")
+      if only_matching:
+        # GNU grep -o: print each non-overlapping match on its own line,
+        # skipping the rest of the line. Context flags are ignored.
+        if invert:
+          continue
+        for mtext in _line_matches(s, pat, use_regex, ignore_case):
+          if max_count is None or count < max_count:
+            count += 1
+            matched_this_file = True
+            if list_files_only:
+              out.write((fp if fp is not None else "(standard input)") + "\n")
+              return True
+            if not count_only:
+              emit(fp, ln, mtext, True)
+              last_printed = ln
+        if max_count is not None and count >= max_count:
+          break
+        continue
       hit = bool(_match_line(s, pat, ignore_case, use_regex))
       if invert:
         hit = not hit
@@ -232,6 +283,8 @@ def build_parser():
                       help="Print only a count of matching lines per file")
   parser.add_argument("-m", "--max-count", type=int, default=None, dest="max_count",
                       metavar="N", help="Stop after N matching lines per file")
+  parser.add_argument("-o", "--only-matching", action="store_true", dest="only_matching",
+                      help="Print only the matching parts of a line, each on its own line")
   parser.add_argument("--no-filename", action="store_true", dest="no_filename",
                       help="Suppress the filename prefix on output lines")
   parser.add_argument(
@@ -284,6 +337,7 @@ def main(vs, argv):
         count_only=args.count_only,
         max_count=args.max_count,
         no_filename=args.no_filename,
+        only_matching=args.only_matching,
         stdin_text=pstdin.take()
       )
       return 0
@@ -306,7 +360,8 @@ def main(vs, argv):
       before=before,
       count_only=args.count_only,
       max_count=args.max_count,
-      no_filename=args.no_filename
+      no_filename=args.no_filename,
+      only_matching=args.only_matching
     )
   return 0
 

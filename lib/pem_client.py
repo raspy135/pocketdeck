@@ -9,7 +9,6 @@
 # Override the port with PEM_SERVER_PORT (must match the server's).
 
 import os
-import socket
 import sys
 
 def _parse(arg):
@@ -24,6 +23,7 @@ def _parse(arg):
 
 def _send(path, line, col, port):
   # Resolve against the client's cwd so the server opens the intended file.
+  import socket
   path = os.path.abspath(os.path.expanduser(path))
   try:
     s = socket.create_connection(('127.0.0.1', port), timeout=2)

@@ -40,7 +40,6 @@ if _IS_PC:
 import ujson
 import ubinascii
 import time
-import os
 import gc
 import pdeck
 import pdeck_utils as pu
@@ -70,19 +69,8 @@ def chat_url(base_url=None):
 # and reuse gpt_l's rolling session-id list to remember which file is latest).
 # ----------------------------------------------------------------------------
 
-def conv_dir():
-  if _IS_PC:
-    d = os.path.expanduser("~/.config/gpt")
-    try:
-      os.makedirs(d, exist_ok=True)
-    except Exception:
-      pass
-    return d
-  return "/sd/log"
-
-
 def conv_path(cid):
-  return conv_dir() + "/gptconv_" + cid + ".json"
+  return gptl.user_dir("/sd/log") + "/gptconv_" + cid + ".json"
 
 
 def make_conv_id():
@@ -310,6 +298,67 @@ class chatgpt_chat(gpt.chatgpt_agent):
       })
     return out
 
+  # --- Chat Completions event decoding (see gpt.chatgpt_agent._stream_round) --
+  #
+  # Unlike the Responses API there is no final "completed" event carrying the
+  # whole message: the deltas ARE the message, so we accumulate them into the
+  # same {"choices": [{"message": ...}]} shape the loop below parses.
+
+  def _stream_payload(self, payload):
+    p = dict(payload)          # shallow copy: never mutate the caller's
+    p["stream"] = True
+    return p
+
+  def _stream_begin(self):
+    self._text = ''
+    self._calls = {}           # index -> partial tool_call
+    self._err = None
+    self._got = False
+
+  def _stream_result(self):
+    if self._err is not None:
+      return {"error": self._err}
+    if not self._got:
+      return None              # nothing usable arrived; let the caller re-ask
+    msg = {"role": "assistant", "content": self._text or None}
+    if self._calls:
+      msg["tool_calls"] = [self._calls[i] for i in sorted(self._calls)]
+    return {"choices": [{"message": msg}]}
+
+  def _stream_event(self, ev):
+    if ev.get("error"):
+      self._err = ev["error"]
+      return
+    for ch in ev.get("choices") or []:
+      d = ch.get("delta") or {}
+      self._got = True
+      # Reasoning goes by different names per provider (DeepSeek/Qwen/vLLM).
+      think = d.get("reasoning_content") or d.get("reasoning")
+      if isinstance(think, str) and think:
+        self._think(think)
+      c = d.get("content")
+      if isinstance(c, str) and c:
+        self._text += c
+        self._say(c)
+      for tc in d.get("tool_calls") or []:
+        self._tool_call_delta(tc)
+
+  def _tool_call_delta(self, tc):
+    i = tc.get("index", 0)
+    call = self._calls.get(i)
+    if call is None:
+      call = {"id": "", "type": "function", "function": {"name": "", "arguments": ""}}
+      self._calls[i] = call
+    if tc.get("id"):
+      call["id"] = tc["id"]
+    fn = tc.get("function") or {}
+    if fn.get("name"):
+      call["function"]["name"] += fn["name"]
+      self._call_start(call["function"]["name"])   # name arrives before the args
+    if fn.get("arguments"):
+      call["function"]["arguments"] += fn["arguments"]
+      self._arg_delta(fn["arguments"])
+
   def ask_agent(self, message, references, images, model, instructions,
                 effort=None, tools=None, silent=False, max_iters=25):
     """Run one user turn over Chat Completions: append the user message, resolve
@@ -318,6 +367,8 @@ class chatgpt_chat(gpt.chatgpt_agent):
     is accepted for a uniform signature with the Responses client but unused
     here (Chat Completions has no server-side reasoning effort)."""
     self._prune_old_images()
+    self.interrupted = False
+    self.text_shown = False
     self._ensure_system(instructions)
     pre_len = len(self.messages)   # rollback point if the turn fails outright
     self.messages.append({"role": "user",
@@ -335,41 +386,55 @@ class chatgpt_chat(gpt.chatgpt_agent):
         "model": model,
         "messages": self.messages,
       }
+      payload.update(self.extra_args)  # registry entry's "extra_args"
       if tools:
         payload["tools"] = tools
         if force_final:
           payload["tool_choice"] = "none"
 
       pdeck.led(1, 40)  # working: waiting for the model's response
-      if not silent:
-        _anim = gptl.ThinkingAnimation(self.vs, "Asking GPT..")
-      try:
-        response = self.post(self.url, ujson.dumps(payload).encode('utf-8'))
-      except BaseException:
-        # post() already retried; stop the animation (it would keep drawing
-        # forever) before letting the caller report the failure.
-        if not silent:
-          _anim.stop()
-        pdeck.led(1, 0)
-        raise
-      try:
-        data = response.json()
-      except:
-        if not silent:
-          _anim.stop()
-        # .text can raise if the body read itself died (socket already closed).
+      data = None
+      streamed = False
+      if not silent and self.stream_ok:
         try:
-          body = response.text[:200]
-        except Exception:
-          body = "(body unavailable)"
-        print("Error: Non-JSON response (%s)" % response.status_code, file=self.vs)
-        print(body, file=self.vs)
+          data = self._stream_round(payload)
+          streamed = data is not None
+        except BaseException as e:
+          # Nothing was consumed on our side, so the blocking path can re-ask.
+          data = self._fallback("\n(streaming failed: %r - retrying)" % (e,))
+
+      if data is None:
+        if not silent:
+          _anim = gptl.ThinkingAnimation(self.vs, "Asking GPT.. (ESC to interrupt)",
+                                         "Asking GPT.. (ESC pressed, waiting for AI)")
+        try:
+          response = self.post(self.url, ujson.dumps(payload).encode('utf-8'))
+        except BaseException:
+          # post() already retried; stop the animation (it would keep drawing
+          # forever) before letting the caller report the failure.
+          if not silent:
+            _anim.stop()
+          pdeck.led(1, 0)
+          raise
+        try:
+          data = response.json()
+        except:
+          if not silent:
+            _anim.stop()
+          # .text can raise if the body read itself died (socket already closed).
+          try:
+            body = response.text[:200]
+          except Exception:
+            body = "(body unavailable)"
+          print("Error: Non-JSON response (%s)" % response.status_code, file=self.vs)
+          print(body, file=self.vs)
+          response.close()
+          pdeck.led(1, 0)
+          break
         response.close()
-        pdeck.led(1, 0)
-        break
-      response.close()
-      if not silent:
-        _anim.stop()
+        if not silent:
+          _anim.stop()
+          self.note_interrupt(_anim.interrupted)
       pdeck.led(1, 0)  # got the response
 
       if data.get("error"):
@@ -399,6 +464,7 @@ class chatgpt_chat(gpt.chatgpt_agent):
 
       if not tool_calls:
         break
+      self.text_shown = False   # that text was narration, not the answer
 
       if force_final:
         # Model ignored tool_choice="none" and still asked for calls. Answer them
@@ -420,17 +486,12 @@ class chatgpt_chat(gpt.chatgpt_agent):
         name = fn.get("name", "")
         call_id = tc.get("id", "")
         arguments = fn.get("arguments", "") or ""
-        print("\n%s[Call]%s %s" % (el.bold(), el.bold_off(), self._call_display(name, arguments)), file=self.vs)
-        # Plan mode: the two effectful tools must be confirmed before they run.
-        if self.mode == 'plan' and name in ('command_with_return', 'write_file'):
-          approved, feedback = self.confirm_tool(name, arguments)
-          if not approved:
-            result = "User declined to run %s (Plan mode)." % name
-            if feedback:
-              result += " User feedback: " + feedback
-            print("%s[Skipped]%s %s" % (el.bold(), el.bold_off(), result[:200]), file=self.vs)
-            self.messages.append({"role": "tool", "tool_call_id": call_id, "content": result})
-            continue
+        if not streamed:   # a streamed round already drew the call as it arrived
+          print("\n%s[Call]%s %s" % (el.bold(), el.bold_off(), self._call_display(name, arguments)), file=self.vs)
+        declined = self.gate_tool(name, arguments)
+        if declined is not None:
+          self.messages.append({"role": "tool", "tool_call_id": call_id, "content": declined})
+          continue
         try:
           result = self.execute_function_call(call_id, name, arguments)
         except BaseException as e:
@@ -438,6 +499,8 @@ class chatgpt_chat(gpt.chatgpt_agent):
           result = "Error: %r" % (e,)
         print("%s[Result]%s %s" % (el.bold(), el.bold_off(), result[:200]), file=self.vs)
         self.messages.append({"role": "tool", "tool_call_id": call_id, "content": result})
+
+      self.interrupted = False  # the ESC interrupt covered this round only
 
       # A capture_screen call leaves a base64 PNG to feed back as a user image.
       # It must come AFTER every tool result (each tool_call needs its answer
@@ -463,39 +526,45 @@ class chatgpt_chat(gpt.chatgpt_agent):
     if final_text is None and not got_assistant:
       del self.messages[pre_len:]
 
-    # Training capture (-T): dump this turn as one JSONL example, mirroring the
-    # Responses client and reusing gpt's helpers. Attachments/images are
-    # excluded — we record the clean `message` (not the reference-augmented
-    # content that was sent) and replace image-feedback turns with a placeholder.
+    # Training capture (-T): dump this turn as one JSONL example.
     if self.training_file and final_text:
-      msgs = []
-      if self.messages and self.messages[0].get("role") == "system":
-        msgs.append({"role": "system", "content": self.messages[0].get("content", "")})
-      msgs.append({"role": "user", "content": message})
-      for m in self.messages[pre_len + 1:]:
-        role = m.get("role")
-        if role == "assistant":
-          a = {"role": "assistant", "content": m.get("content") or ""}
-          if m.get("tool_calls"):
-            a["tool_calls"] = m["tool_calls"]
-          msgs.append(a)
-        elif role == "tool":
-          c = m.get("content", "")
-          if isinstance(c, str) and len(c) > gpt.TRAIN_MAX_FIELD:
-            c = c[:gpt.TRAIN_MAX_FIELD] + "...[truncated]"
-          msgs.append({"role": "tool", "tool_call_id": m.get("tool_call_id", ""), "content": c})
-        elif role == "user":
-          msgs.append({"role": "user", "content": "[screen capture image omitted]"})
-      nimg = len(images) if images else 0
-      if gpt.append_training_example(self.training_file, {
-        "messages": msgs,
-        "tools": gpt._tools_for_training(tools),
-        "attachments": {"files": len(references), "images": nimg},
-        "model": model,
-      }, self.vs) and not silent:
-        print("[training] saved example -> %s" % self.training_file, file=self.vs)
+      self._dump_training_example(message, references, images, model, tools,
+                                  pre_len, silent)
 
     return final_text
+
+  def _dump_training_example(self, message, references, images, model, tools,
+                             pre_len, silent):
+    """Append this turn to the -T JSONL dataset, reusing gpt's helpers.
+    Attachments/images are excluded: we record the clean `message` (not the
+    reference-augmented content that was sent) and replace image-feedback turns
+    with a placeholder."""
+    msgs = []
+    if self.messages and self.messages[0].get("role") == "system":
+      msgs.append({"role": "system", "content": self.messages[0].get("content", "")})
+    msgs.append({"role": "user", "content": message})
+    for m in self.messages[pre_len + 1:]:
+      role = m.get("role")
+      if role == "assistant":
+        a = {"role": "assistant", "content": m.get("content") or ""}
+        if m.get("tool_calls"):
+          a["tool_calls"] = m["tool_calls"]
+        msgs.append(a)
+      elif role == "tool":
+        c = m.get("content", "")
+        if isinstance(c, str) and len(c) > gpt.TRAIN_MAX_FIELD:
+          c = c[:gpt.TRAIN_MAX_FIELD] + "...[truncated]"
+        msgs.append({"role": "tool", "tool_call_id": m.get("tool_call_id", ""), "content": c})
+      elif role == "user":
+        msgs.append({"role": "user", "content": "[screen capture image omitted]"})
+    nimg = len(images) if images else 0
+    if gpt.append_training_example(self.training_file, {
+      "messages": msgs,
+      "tools": gpt._tools_for_training(tools),
+      "attachments": {"files": len(references), "images": nimg},
+      "model": model,
+    }, self.vs) and not silent:
+      print("[training] saved example -> %s" % self.training_file, file=self.vs)
 
   # --- context compaction ----------------------------------------------------
   # Chat Completions is stateless, so the whole `messages` list is resent each
@@ -516,6 +585,7 @@ class chatgpt_chat(gpt.chatgpt_agent):
     or None on failure. Used by compaction."""
     gc.collect()
     payload = {"model": model, "messages": messages}
+    payload.update(self.extra_args)
     pdeck.led(1, 40)
     if not silent:
       _anim = gptl.ThinkingAnimation(self.vs, label)
@@ -593,20 +663,7 @@ class chatgpt_chat(gpt.chatgpt_agent):
 # gpt_c is one of the assistant modules refused by command_with_return's
 # recursion guard (gpt_tools.ToolExecBase.RECURSIVE_GUARD), so no override is
 # needed here — the shared executors are inherited via gpt.chatgpt_agent.
-
-
-# ----------------------------------------------------------------------------
-# main - gpt_c is now an internal module. The user-facing frontend is `gpt`,
-# which constructs chatgpt_chat for 'chat'-api entries in /config/gpt.json. This
-# shim keeps an old `gpt_c ...` invocation working by routing it through gpt so
-# nothing that referenced gpt_c directly breaks.
-# ----------------------------------------------------------------------------
-
-def main(vs, args_in):
-  import gpt
-  return gpt.main(vs, ['gpt'] + list(args_in[1:]))
-
-
-# On a PC: `python3 gpt_c.py ...` still works, routed through the gpt frontend.
-if __name__ == '__main__':
-  main(pc_compat.PCStream(), ['gpt_c'] + sys.argv[1:])
+#
+# There is no main() here: gpt_c is an internal module. The user-facing frontend
+# is `gpt`, which constructs chatgpt_chat for 'chat'-api entries in
+# /config/gpt.json.

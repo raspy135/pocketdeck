@@ -736,7 +736,7 @@
         },
         {
             "path": "rm.py",
-            "md5": "812835e7e78bce2c25108a59b7457b94"
+            "md5": "9a400039470f09df214ad3b0e13076ce"
         },
         {
             "path": "setuni.py",
@@ -748,7 +748,7 @@
         },
         {
             "path": "head.py",
-            "md5": "d0059f1746223207e149895580b67489"
+            "md5": "68438d3aac2783f1299117a8a7e75217"
         },
         {
             "path": "tasks.py",
@@ -776,7 +776,7 @@
         },
         {
             "path": "ble_kb.py",
-            "md5": "7ab35cb4ae57e134a346091bc1033247"
+            "md5": "98ce65afdb1ed2123869aabe21ca14ae"
         },
         {
             "path": "curl.py",
@@ -800,11 +800,11 @@
         },
         {
             "path": "pem_open.py",
-            "md5": "163d423145bd00084e70573a0298f719"
+            "md5": "9e8d4c76d3ec640d1337f8ec2fb358e5"
         },
         {
             "path": "pem_client.py",
-            "md5": "8effa3217c4e54ec12dd092672bc0379"
+            "md5": "6acb5aee0ff0a6d76f3c542d55e2fcb2"
         },
         {
             "path": "listup.py",
@@ -832,7 +832,7 @@
         },
         {
             "path": "gpt_l.py",
-            "md5": "92b7b5daa22131aff7a2438caee3ba36"
+            "md5": "7bf418b3aee05503a2365c96ecdc572d"
         },
         {
             "path": "esclib.py",
@@ -840,7 +840,7 @@
         },
         {
             "path": "gpt_rt.py",
-            "md5": "ca3699577822bdffb1409ec5c5beece4"
+            "md5": "f690bd4c194b36bdc96d910733e0d6fa"
         },
         {
             "path": "clip.py",
@@ -852,7 +852,7 @@
         },
         {
             "path": "gpt.py",
-            "md5": "0ed317eca6ba4b7ecd48c0c7283b531d"
+            "md5": "196ba4c07bbec347b00e553f736dcafc"
         },
         {
             "path": "diff.py",
@@ -868,7 +868,7 @@
         },
         {
             "path": "tail.py",
-            "md5": "ecd04bad0ecd73e986e87436a31a8b29"
+            "md5": "0bd11f20059b8478fda932969a258ff7"
         },
         {
             "path": "wavtest.py",
@@ -916,7 +916,7 @@
         },
         {
             "path": "gpt_c.py",
-            "md5": "6f43cba69a4f587d4bc2ddfbc8af8392"
+            "md5": "5eb31a559b711a3e1b1528a3ac3b9706"
         },
         {
             "path": "update_updater.py",
@@ -924,7 +924,7 @@
         },
         {
             "path": "pem.py",
-            "md5": "f5bbb5a3f13071c9153aa04cce0fb087"
+            "md5": "13f20f483ab8007bb876babd4f0518d7"
         },
         {
             "path": "recorder.py",
@@ -960,7 +960,7 @@
         },
         {
             "path": "grep.py",
-            "md5": "c3188b72e5c31b636123cebb52eacfac"
+            "md5": "969e6b83f8d2d2e4d9a3d60bb273bdd9"
         },
         {
             "path": "sync.py",
@@ -1032,7 +1032,7 @@
         },
         {
             "path": "noa/pc_compat.py",
-            "md5": "642e9d0ae191a581c9056e05373660a6"
+            "md5": "10156fe5a967992537ec3fcb6c701f32"
         },
         {
             "path": "noa/benchmark.py",
@@ -1072,7 +1072,7 @@
         },
         {
             "path": "noa/gpt_tools.py",
-            "md5": "93c2b2f459a636f131daeb961073a0c8"
+            "md5": "5fedc6f43fe8da1a9309c2ec952ee5fc"
         },
         {
             "path": "noa/pdeck_complete.py",
@@ -1096,7 +1096,7 @@
         },
         {
             "path": "noa/ai_improve.py",
-            "md5": "0a6d11b287acda8b4cbce834db4e8994"
+            "md5": "23873cfb610a08bbf6e3286f64fb3522"
         },
         {
             "path": "noa/font2d.py",
@@ -1156,7 +1156,7 @@
         },
         {
             "path": "noa/erow.py",
-            "md5": "6c49a2ac74ba7843ad7548dd4e6be805"
+            "md5": "393e80cd47d45803e639aefbaa74c9a4"
         },
         {
             "path": "noa/overlay.py",
@@ -1220,7 +1220,7 @@
         },
         {
             "path": "data/apps_db.json",
-            "md5": "9ae4b54227f7aef0f9998886c91f5bda"
+            "md5": "62c5a96f0264b0500166ecbd4124788e"
         },
         {
             "path": "data/cat3.xbmr",

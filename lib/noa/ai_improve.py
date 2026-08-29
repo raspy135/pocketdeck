@@ -13,7 +13,6 @@
 # the result with a hard character limit.
 
 import os
-import time
 
 try:
   import ujson
@@ -25,25 +24,28 @@ try:
 except ImportError:
   _requests = None
 
-try:
-  import pdeck_utils as pu
-  _TZ = pu.timezone
-except Exception:
-  _TZ = 0
-
 MEMORY_DIR = '/sd/Documents/ai_memory'
 MEMORY_PATH = MEMORY_DIR + '/ai_memory.md'
-ELOG_DIR = '/sd/elog'
 
-# Cheap, fast text model for the summarization step (gpt_rt's own model is a
-# realtime/audio model and cannot do this, so a separate text model is used).
+# Cheap, fast text model for the summarization step, used when the caller passes
+# no model (gpt_rt: its own model is a realtime/audio one and cannot do chat
+# completions). The text frontends pass their active model, so this is gpt_rt's.
 SUMMARY_MODEL = 'gpt-5.4-mini'
+# It's still a reasoning model, and rewriting a memory file does not need deep
+# thought - without this it thinks at the default effort and the tool call
+# stalls the turn for minutes. Only sent to gpt-5* models; other endpoints
+# would reject the field.
+SUMMARY_EFFORT = 'low'
+# No socket timeout on the summarizer POST. With SUMMARY_USES_ACTIVE_MODEL the
+# rewrite runs on the active reasoning model, which sends nothing at all while
+# it thinks, so any fixed guard just kills a call that was working. Trade-off:
+# a genuinely stalled socket now hangs the update_memory tool until the app is
+# restarted.
 
 # Hard cap on the saved memory. A large file blurs the assistant's goal, so this
 # is intentionally tight. Applied after the model rewrites the file.
 MAX_MEMORY_CHARS = 2400
 # How much recent context to feed the summarizer.
-_MAX_ELOG_CHARS = 2000
 _MAX_CONVO_CHARS = 6000
 
 
@@ -67,28 +69,11 @@ def memory_block():
           "them in mind, but don't recite them verbatim.\n%s\n" % mem)
 
 
-def _today_elog_path():
-  t = time.gmtime(time.time() + 60 * 15 * _TZ)
-  return '%s/%04d-%02d-%02d.md' % (ELOG_DIR, t[0], t[1], t[2])
-
-
-def read_recent_elog(max_chars=_MAX_ELOG_CHARS):
-  """Tail of today's event log -- the most recent device activity."""
-  try:
-    with open(_today_elog_path()) as f:
-      data = f.read()
-  except OSError:
-    return ''
-  if len(data) > max_chars:
-    data = data[-max_chars:]
-  return data
-
-
 _SYS = (
   "You maintain a COMPACT long-term memory file for an on-device AI assistant "
   "(voice and text) running on a small handheld device called Pocket Deck. You "
-  "are given the assistant's existing memory, a recent system event log, and a "
-  "recent conversation. Output an UPDATED version of the memory file.\n"
+  "are given the assistant's existing memory and a recent conversation. Output "
+  "an UPDATED version of the memory file.\n"
   "Record only durable, reusable knowledge:\n"
   "- the user's stable preferences (language, tone, recurring tasks, names, paths)\n"
   "- what WORKED: which function calls / tools and which shell commands succeeded\n"
@@ -107,14 +92,12 @@ _SYS = (
 )
 
 
-def build_messages(existing, elog, conversation, stats):
+def build_messages(existing, conversation, stats):
   if conversation and len(conversation) > _MAX_CONVO_CHARS:
     conversation = conversation[-_MAX_CONVO_CHARS:]
   user = ("===== EXISTING MEMORY =====\n%s\n\n"
-          "===== RECENT EVENT LOG =====\n%s\n\n"
           "===== RECENT CONVERSATION =====\n%s\n" % (
             existing.strip() or '(empty)',
-            elog.strip() or '(none)',
             conversation.strip() or '(none)'))
   if stats:
     user += "\n===== THIS SESSION'S TOOL OUTCOMES =====\n%s\n" % stats
@@ -133,6 +116,8 @@ def _request(api_key, messages, model, base_url=None, response_format=None):
   payload = {"model": model, "messages": messages}
   if response_format is not None:
     payload["response_format"] = response_format
+  if model and model.startswith("gpt-5"):
+    payload["reasoning_effort"] = SUMMARY_EFFORT
   headers = {"Content-Type": "application/json",
              "Authorization": "Bearer " + api_key}
   r = _requests.post(url, headers=headers, data=ujson.dumps(payload).encode('utf-8'))
@@ -180,21 +165,20 @@ def write_memory(text):
 
 def improve(api_key, conversation='', stats=None, model=None, base_url=None,
             requester=None):
-  """Analyze the recent event log + conversation and rewrite the compact memory.
+  """Analyze the recent conversation and rewrite the compact memory.
 
   Returns (ok: bool, message: str). `requester` overrides the network call
   (signature: requester(api_key, messages, model, base_url) -> str) and is used
   by the tests."""
   existing = load_memory()
-  elog = read_recent_elog()
-  if not (elog.strip() or (conversation or '').strip() or existing.strip()):
+  if not ((conversation or '').strip() or existing.strip()):
     return (False, 'nothing to learn from yet')
   # A key is only required for OpenAI's hosted endpoint; local / self-hosted
   # OpenAI-compatible servers (Ollama, LM Studio, ...) run keyless.
   is_openai = (not base_url) or base_url.rstrip('/') == 'https://api.openai.com/v1'
   if is_openai and not api_key:
     return (False, 'no API key configured')
-  messages = build_messages(existing, elog, conversation or '', stats)
+  messages = build_messages(existing, conversation or '', stats)
   call = requester or _request
   try:
     new_mem = call(api_key, messages, model or SUMMARY_MODEL, base_url)

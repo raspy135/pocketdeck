@@ -27,8 +27,8 @@
 
 import sys
 import os
-import io
 import time
+import gc
 import ujson
 import ubinascii
 import pdeck
@@ -280,6 +280,7 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False,
   in agent mode; plain mode keeps just web_search (when requested). `realtime`
   adds tools that only make sense in the always-on voice agent (gpt_rt), where a
   non-blocking wait can run in the background with the mic still live.
+  Plain mode also keeps wait_and_resume (a timer needs no agent powers).
   `vision=False` drops capture_screen: some models (a "text_only" entry in
   /config/gpt.json) are never told they lack vision, so instead of it silently
   failing (or the model hallucinating a description of an image it never saw),
@@ -319,13 +320,31 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False,
           "required": ["query"]
         }
       })
+
+  # A timer is useful without agent mode too (plain chat can still be asked to
+  # wait), so this one sits above the agent gate. gpt_rt overrides the executor
+  # with a non-blocking version; elsewhere it is a plain sleep.
+  tools.append({
+    "type": "function",
+    "name": "wait_and_resume",
+    "description": "Pace a spoken, timed routine such as a stretch or yoga sequence, workout intervals, or guided breathing. CRITICAL ORDERING: This function call will wait specified time period in seconds. Speak what you need to inform to user before this function call. Example: in one reply, say 'Let's start with a standing quad stretch — hold it for thirty seconds,' and in that same reply call wait_and_resume with seconds=30. This does NOT block: the wait runs in the background with the microphone live, so the user can interrupt at any moment. When the hold finishes, this function call returns result. You are prompted again; then SPEAK the NEXT move and, in that reply, call wait_and_resume for it — repeat until the routine is done, then give a short 'nice work, that's the set' and stop calling it. " if realtime else
+                   'Wait (a timer) for a number of seconds before you continue, then you are resumed automatically. Use it whenever the user asks you to wait, remind them in N minutes, count down, or pace a timed routine step by step (stretches, intervals, brewing tea, breathing). ORDERING: in the SAME reply, first TELL the user what is being timed, then call wait_and_resume. The device is busy while it waits and the user can cancel with Ctrl-C. When it returns, deliver the next step (or say the time is up). Maximum 600 seconds per call — for longer, chain several calls.',
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "seconds": {"type": "integer", "description": "How many seconds to wait before you are resumed (1-600)."}
+      },
+      "required": ["seconds"]
+    }
+  })
+
   if not agent:
     return tools
 
   tools.append({
     "type": "function",
     "name": "command_with_return",
-    "description": "Run a device command (or any installed module) and return its captured output for non-graphical apps. GRAPHIC/interactive apps cannot run here (there is no screen to draw on): launch them with launch_app instead, setting reload=true after editing their source — launch_app's reload replaces the 'r' prefix. If a graphic app is run here by mistake it is detected and relaunched via launch_app automatically. This is your primary tool for TESTING AND VERIFYING CODE: after you write a script with write_file, run it here by name and read the output to confirm it works, see errors, and iterate. A runnable script/app is a module exposing main(vs, args); invoke it by its name plus arguments, e.g. 'temp_foo arg1' for /sd/py/temp_foo.py, or any existing app/command. IMPORTANT: if you EDIT a script and run it again, prefix the command with 'r ' to reload it (e.g. 'r temp_foo arg1') — without 'r' the previous, cached version runs instead of your new code. Built-in commands include: ls (glob patterns like 'word*'; 'ls -r path' lists recursively), cat (read file), head, tail, rm, mv, cp, mkdir, rmdir, grep (search in files), ping, curl. This not Linux, available options are limited. See README.md for available options for the commands. Simple pipes ('|') are supported: a stage's output is fed to the next command as stdin, and stdin-aware filters read it when given no file (grep, head, and tail, e.g. 'ls -r /sd/py | grep clock', 'curl -s URL | grep -i error | head -n 5', or 'cat log.txt | tail -n 20'). Other commands ignore piped stdin, so only pipe INTO grep/head/tail. Output redirect to a file is supported on the final stage: '> file' truncates, '>> file' appends (e.g. 'ls -r /sd/py > files.txt' or 'curl -s URL | grep -i error >> log.txt'); the written text is plain (color codes stripped) and capped at ~50KB. This is not Linux otherwise: no input redirect ('<'), backticks, '&&', or subshells; use one command per stage.",
+    "description": "Run a device command (or any installed module) and return its captured output for non-graphical apps. GRAPHIC/interactive apps cannot run here (there is no screen to draw on): launch them with launch_app instead, setting reload=true after editing their source — launch_app's reload replaces the 'r' prefix. If a graphic app is run here by mistake it is detected and relaunched via launch_app automatically. This is your primary tool for TESTING AND VERIFYING CODE: after you write a script with write_file, run it here by name and read the output to confirm it works, see errors, and iterate. A runnable script/app is a module exposing main(vs, args); invoke it by its name plus arguments, e.g. 'temp_foo arg1' for /sd/py/temp_foo.py, or any existing app/command. IMPORTANT: if you EDIT a script and run it again, prefix the command with 'r ' to reload it (e.g. 'r temp_foo arg1') — without 'r' the previous, cached version runs instead of your new code. Built-in commands include: ls, cat, head, tail, rm, mv, cp, mkdir, rmdir, grep (search in files), ping, curl. **This not Linux**, available options are limited. See README.md for available options for the commands. Simple pipes ('|') are supported: a stage's output is fed to the next command as stdin, and stdin-aware filters read it when given no file (grep, head, and tail, e.g. 'ls -r /sd/py | grep clock', 'curl -s URL | grep -i error | head -n 5', or 'cat log.txt | tail -n 20'). Other commands ignore piped stdin, so only pipe INTO grep/head/tail. Output redirect to a file is supported on the final stage: '> file' truncates, '>> file' appends (e.g. 'ls -r /sd/py > files.txt' or 'curl -s URL | grep -i error >> log.txt'); the written text is plain (color codes stripped) and capped at ~50KB. This is not Linux otherwise: **No input redirect ('<'), backticks, '&&', command connection ';' or subshells**; use one command per stage.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -553,24 +572,10 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False,
     }
   })
 
-  if realtime:
-    tools.append({
-      "type": "function",
-      "name": "wait_and_resume",
-      "description": "Pace a spoken, timed routine such as a stretch or yoga sequence, workout intervals, or guided breathing. CRITICAL ORDERING: This function call will wait specified time period in seconds. Speak what you need to inform to user before this function call. Example: in one reply, say 'Let's start with a standing quad stretch — hold it for thirty seconds,' and in that same reply call wait_and_resume with seconds=30. This does NOT block: the wait runs in the background with the microphone live, so the user can interrupt at any moment. When the hold finishes, this function call returns result. You are prompted again; then SPEAK the NEXT move and, in that reply, call wait_and_resume for it — repeat until the routine is done, then give a short 'nice work, that's the set' and stop calling it. ",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "seconds": {"type": "integer", "description": "How many seconds the user should hold the move you JUST spoke, before you are resumed to give the next one (1-600)."}
-        },
-        "required": ["seconds"]
-      }
-    })
-
   tools.append({
     "type": "function",
     "name": "update_memory",
-    "description": "Review this session and update your long-term memory now (the same thing the /improve command does). Call this when the user asks you to 'remember this', 'learn from this', 'improve yourself', or update your memory, or when you notice a lasting user preference or a tool/command that reliably worked or failed. It analyzes the recent event log and conversation, distills durable lessons (user preferences, what worked, what to avoid), and saves a small memory file that is loaded back into your prompt in future sessions. Keep it rare; there is nothing to undo.",
+    "description": "Review this session and update your long-term memory now (the same thing the /improve command does). Call this when the user asks you to 'remember this', 'learn from this', 'improve yourself', or update your memory, or when you notice a lasting user preference or a tool/command that reliably worked or failed. It analyzes the recent conversation, distills durable lessons (user preferences, what worked, what to avoid), and saves a small memory file that is loaded back into your prompt in future sessions. Keep it rare; there is nothing to undo.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -581,6 +586,104 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False,
   })
 
   return tools
+
+
+def device_instructions(app_list=None, vision=True, realtime=False, my_screen=None):
+  """The prose half of the agent prompt: how to drive the tools built above and
+  how this device differs from Linux. Shared by every frontend so the wording
+  can't drift from the schemas. The flags must match what build_tools() was
+  given: `vision=False` tells the model it has no capture_screen instead of
+  inviting it to look at screenshots, and `realtime` swaps ask_user for the
+  voice agent's wait_and_resume pacing. `my_screen` (text agents) names the
+  screen the assistant's own answers appear on."""
+  text = (
+    "You have function tools for working directly on the device;\n"
+    "A runnable script/app is a module that defines main(vs, args); run it by "
+    "passing its name (plus arguments) to command_with_return. After you EDIT a "
+    "script and run it again, prefix the command with 'r ' (e.g. 'r temp_foo') so "
+    "the module is reloaded — without it the old cached code runs instead of your "
+    "edits. Keep scratch/experimental scripts in /sd/py with names starting temp_* "
+    "and rm them when finished. "
+    "main(vs, args) receives an output stream as its first argument; write results "
+    "with print(..., file=vs) so command_with_return can capture and return that "
+    "output to you (plain print() goes to the REPL and is NOT captured).\n"
+    "Use command_with_return to look up information too (e.g. list files with "
+    "'ls /sd/Documents/word*', read a file with 'cat /path', search with grep).\n "
+    "**Pocket Deck is not Linux**: no redirects ('>'), no '&&' or ';', no subshells."
+    "See README.md for full command list.\n"
+    "The device keeps an activity log under /sd/elog/, one markdown file per day "
+    "named YYYY-MM-DD.md, each line an event: app launches, file opens/saves, and "
+    "shell commands the user ran. Read the current day's file as needed.\n"
+    "The user keeps SKILLS at /sd/Documents/skills/ — one markdown file per "
+    "skill: a named, reusable procedure you can perform (a routine with steps "
+    "and timings, a recurring workflow like a morning writing setup, a document "
+    "format to follow). When the user asks for something by name ('do my morning "
+    "ritual', 'make the weekly report'), or asks what you can do, 'ls "
+    "/sd/Documents/skills' and cat the matching file, then follow its "
+    "instructions step by step. When the user teaches you a repeatable procedure "
+    "worth keeping, offer to save it there as a new skill file (the folder may "
+    "not exist yet — 'mkdir /sd/Documents/skills' first if needed).\n"
+    "The device also ships read-only SYSTEM skills at /sd/lib/skills/. Before you "
+    "write a graphical app (dashboard, chart, meter), cat "
+    "/sd/lib/skills/dashboard_design.md and follow it; 'ls /sd/lib/skills' for the "
+    "rest.\n"
+    "You can see and drive other apps running on the device. Use list_running_apps "
+    "to see which app is on which screen. Use switch_screen to bring a screen to "
+    "the foreground. IMPORTANT: screen numbers in these tools are 0-based and match "
+    "what list_running_apps reports (screen 0 is the Python REPL), but the user's "
+    "point of view it's 1-based, so the screen the user calls '2' is screen 1 here — "
+    "always pass the 0-based number from list_running_apps, switch_screen. "
+    + ("Use capture_screen to take a screenshot of a screen and look "
+       "at it (it is returned to you as an image); it takes some time."
+       if vision else
+       "You have NO VISION: there is no capture_screen tool and you cannot see "
+       "screenshots. Drive apps blind via send_keys and verify results with "
+       "read_console_log instead.") +
+    "Use send_keys to type into the app in the "
+    "foreground; set enter=true to press Enter, and use escape sequences for "
+    "special keys (Up=\\x1b[A, Down=\\x1b[B, Right=\\x1b[C, Left=\\x1b[D, Esc=\\x1b, "
+    "Backspace=\\x08, Ctrl-X=\\x18). "
+    + ("After acting, capture_screen again to confirm the result before continuing.\n"
+       if vision else
+       "After acting, read_console_log to confirm the result before continuing.\n") +
+    "To read TEXT a command-line app printed (e.g. to diagnose an error the user "
+    "asks about), prefer read_console_log over a screenshot — it returns the "
+    "recent console text directly and cheaply.\n"
+  )
+  if realtime:
+    text += (
+      "To run a timed routine (a stretch or exercise sequence with holds), use "
+      "wait_and_resume. In one single reply, ALWAYS speak the current move out "
+      "loud FIRST, then in that same reply call wait_and_resume for how many "
+      "seconds to hold it. Never call wait_and_resume without speaking the move "
+      "first in the same reply, or the user just hears silence. When resumed, "
+      "speak the next move and repeat.\n")
+  else:
+    text += (
+      "You do not have to solve everything alone. If the same approach has failed "
+      "twice, or you need a decision, permission, or information only the user has, "
+      "call ask_user with a short question instead of retrying in circles — then "
+      "stop and wait for the answer. Asking early beats a long stretch of failing "
+      "tool calls.\n")
+  if my_screen is not None:
+    text += ("\nIMPORTANT: your own screen — where your typed answers are shown — "
+             "is screen %d. While working you may switch to other screens to drive "
+             "apps, but the user only sees the foreground screen. Whenever you have "
+             "an answer or output you want the user to read, call switch_screen(%d) "
+             "to bring your screen back to the foreground before you finish.\n"
+             % (my_screen, my_screen))
+  if app_list:
+    text += ("\nUse launch_app to open apps. Pass optional args (e.g. a file path) "
+             "to open a specific file. Besides the registered apps listed below, "
+             "any installed module can be launched by its module name (e.g. 'myapp' "
+             "for /sd/lib/myapp.py). Available apps:\n")
+    for item in app_list:
+      if isinstance(item, list) and len(item) == 2:
+        name = item[0]
+        info = item[1]
+        desc = info.get('description', '') if isinstance(info, dict) else ''
+        text += "  - %s: %s\n" % (name, desc)
+  return text
 
 
 class ToolExecBase:
@@ -613,6 +716,12 @@ class ToolExecBase:
   def _show_write(self, path, backup_path, content):
     # gpt.py shows a diff (or new-file view) of a write_file; no-op elsewhere.
     pass
+
+  # Which model rewrites the long-term memory. The text frontends summarize with
+  # whatever model is currently active (self.model), on its own endpoint. gpt_rt
+  # sets this False: its self.model is a realtime/audio model that cannot do
+  # chat completions, so it keeps ai_improve's dedicated text model instead.
+  SUMMARY_USES_ACTIVE_MODEL = True
 
   # ---- self-improvement hooks (overridden by the frontends) ----------------
   def _improve_conversation(self):
@@ -683,13 +792,22 @@ class ToolExecBase:
     return seconds, None
 
   def execute_wait_and_resume(self, arguments):
-    # Base (synchronous) fallback. gpt_rt overrides this with a non-blocking
-    # version and is the only frontend that registers the tool, so this is a
-    # safety net rather than a normal path.
+    # Synchronous timer for the text frontends (gpt_rt overrides this with a
+    # non-blocking one so the mic stays live). Slept a second at a time so a
+    # Ctrl-C lands promptly and the countdown stays visible.
     seconds, err = self._parse_wait_seconds(arguments)
     if err:
       return err
-    time.sleep(seconds)
+    left = seconds
+    try:
+      while left > 0:
+        if left % 10 == 0 or left == seconds:
+          print("[ waiting %ds... ]" % left, file=self.vs)
+        time.sleep(1)
+        left -= 1
+    except KeyboardInterrupt:
+      return ("Wait cancelled by the user after %d of %d seconds. Do not call "
+              "wait_and_resume again unless asked." % (seconds - left, seconds))
     return "Waited %d seconds. Deliver the next step now." % seconds
 
   # ---- PEM editor remote control -------------------------------------------
@@ -792,20 +910,23 @@ class ToolExecBase:
   # ---- self-improvement (the /improve command, AI-callable) ----------------
   def run_self_improve(self, reason=None):
     # Shared by the update_memory tool, gpt_c's /improve command and gpt_rt's
-    # periodic auto-run. Analyzes the recent event log + conversation and
-    # rewrites the compact memory file. Returns (ok, message).
+    # periodic auto-run. Analyzes the recent conversation and rewrites the
+    # compact memory file. Returns (ok, message).
     api_key = getattr(self, 'api_key', '') or ''
     base_url = getattr(self, 'base_url', '') or ''
-    is_openai = (not base_url) or base_url.rstrip('/') == 'https://api.openai.com/v1'
-    # For OpenAI keep the cheap dedicated summary model (ai_improve's default);
-    # for a local / other endpoint that model won't exist there, so summarize
-    # with the model currently in use (set by the frontend as self.model).
-    model = None if is_openai else getattr(self, 'model', None)
+    if self.SUMMARY_USES_ACTIVE_MODEL:
+      # Summarize with the model the user actually picked, on its own endpoint.
+      # A frontend that never set self.model falls back to ai_improve's default.
+      model = getattr(self, 'model', None)
+    else:
+      # ai_improve's dedicated text model only exists on OpenAI, so the endpoint
+      # has to fall back with it.
+      model, base_url = None, ''
     stats = self._improve_stats()
     if reason:
       stats = (stats + "\n" if stats else "") + "Trigger: " + str(reason)
     return ai_improve.improve(api_key, self._improve_conversation(), stats or None,
-                              model=model, base_url=(None if is_openai else base_url))
+                              model=model, base_url=(base_url or None))
 
   def execute_update_memory(self, arguments):
     try:

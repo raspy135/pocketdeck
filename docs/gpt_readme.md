@@ -162,7 +162,7 @@ AI can do the following things in agent mode.
 - Send keycode
 - Read the console output (scrollback) of a command-line app, so you can ask things like "what's the error in the console?"
 - Read the device activity log at `/sd/elog/YYYY-MM-DD.md` (one file per day: app launches, file opens/saves, commands) to see what you've recently been doing or resume your work.
-- (Voice agent only) Run a **timed routine** — a stretch or yoga sequence, workout intervals, guided breathing — pacing itself through the schedule with `wait_and_resume` (it speaks each move, then holds for the right number of seconds before the next).
+- Run a **timed routine** — a stretch or yoga sequence, workout intervals, guided breathing, or a plain "remind me in 5 minutes" — pacing itself with `wait_and_resume` (max 600 s per call, chained for longer). In the voice agent the wait is non-blocking, so the mic stays live and you can interrupt. In the text agents it blocks with a countdown and Ctrl-C cancels it. This tool and `web_search` are the two available with agent mode OFF.
 
 In the voice agent (`gpt_rt -a`), press **`u`** for a quick "what's up?" — it silently checks today's activity log and what you're currently editing in PEM, then speaks a one-line summary (or says things look quiet).
 
@@ -184,6 +184,50 @@ Two execution modes control the effectful tools (`command_with_return` and
 
 In conversation mode, **Shift-Tab** toggles Auto/Plan, or use `/mode`,
 `/auto`, `/plan`.
+
+### Live view while the model works
+
+**Off by default.** Turn it on with `--stream` on the command line, or `/stream`
+in conversation mode (`/stream on|off`, no argument toggles). Device only — it
+needs the raw-socket SSE path.
+
+With it on, the turn streams (`stream: true`, Server-Sent Events) and you see,
+as they arrive:
+
+- **`[Thinking]`** — the model's reasoning summary, in cyan.
+- **`[Call] <tool> <arguments…>`** — the tool call being drafted, argument text
+  echoed live and capped at 200 characters (a big `write_file` shows its path,
+  not the whole file).
+- the answer text itself, as the model writes it.
+
+A streamed answer is not printed again at the end of the turn, so it stays
+unformatted (no markdown bold/headers); with streaming off you get the
+formatted version as before.
+
+Both APIs stream. What you get for `[Thinking]` depends on the endpoint:
+
+| `api` | thinking text |
+|---|---|
+| `responses` | reasoning summary (the request asks for `summary: "auto"`; endpoints that reject it are re-asked once without, and you still get the answer and call drafts live) |
+| `chat` | whatever the provider sends as `reasoning_content` / `reasoning` in the delta — local servers (llama.cpp, vLLM, Ollama with a thinking model) do; OpenAI's Chat Completions does not expose reasoning text at all |
+
+Also in `-h`: `--stream`.
+
+The spinner still covers the wait before the first byte. Endpoints that don't
+speak SSE, or streams that end without a usable message, print one line saying
+so, fall back to a blocking request, and stop being asked to stream for the
+rest of the session.
+
+### Interrupting a long tool chain
+
+While `Asking GPT.. (ESC to interrupt)` is shown, press **ESC**. The request in
+flight still finishes (the label switches to `(ESC pressed, waiting for AI)` —
+it can't be cancelled), but the tool calls it comes back
+with are then confirmed one by one, as in Plan mode: run the next step, skip it,
+or type a comment that goes back to the model as feedback. Once that batch is
+handled the chain resumes in whatever mode you were in — press ESC again to take
+control of the next round. Your Auto/Plan setting is never changed, and anything
+else you typed while waiting is kept, not swallowed.
 
 ## Conversation Mode (`-C`)
 
@@ -216,7 +260,7 @@ Command | Effect
 `/compact` | Summarize and shrink the running context now. Chat Completions models only.
 `/auto-compact [n]` | Auto-compact every `n` turns (`off` to disable). Chat Completions models only.
 `/improve` | Improve AI agent knowledge. Save learned preferences and stable behavior notes from recent interaction history into a long-term memo; does not change core system rules or persona.
-`/auto-improve [n]` | Auto-run `/improve` every `n` completed turns (`off` to disable). On by default (every 8 turns); shows the current setting when given no argument.
+`/auto-improve [n]` | Auto-run `/improve` every `n` completed turns (`off` to disable). Off by default (each run blocks the prompt for an extra model call); shows the current setting when given no argument.
 
 ## Roles (`-r`)
 
@@ -259,6 +303,7 @@ Field | Meaning
 `model` | The actual model id sent to the API. Default: same as `name`.
 `effort` | Optional default reasoning effort for a `responses` entry.
 `key` | Optional API key (bearer token) for this entry, for a provider that needs its own — e.g. xAI. With no `key`, an OpenAI endpoint uses `/config/openai_api_key` and any other endpoint is called without authorization.
+`extra_args` | Optional object merged verbatim into every request payload for this entry, for provider-specific fields the client doesn't model. E.g. a llama.cpp/vLLM Qwen3 server takes `"extra_args": {"chat_template_kwargs": {"reasoning_effort": "medium"}}`; also useful for `temperature`, `top_p`, etc. Keys collide last-write-wins with the client's own fields, so you can override `reasoning` on a `responses` entry too.
 `text_only` | Set `true` if this model has no vision. The model itself is never told it lacks vision, so `capture_screen` is dropped from its tools entirely (and the system prompt stops mentioning it) instead of the model calling it and hallucinating a description of a screenshot it never received. Default: `false`.
 
 `default` names the entry used when `-m` is omitted. An OpenAI endpoint with no

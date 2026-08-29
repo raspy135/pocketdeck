@@ -23,13 +23,11 @@ import ujson
 import ubinascii
 import time
 import os
-import io
 import argparse
 import re
 import gc
 import pdeck
 import pdeck_utils as pu
-import pngwriter
 import setuni
 import auto_connect
 import gpt_l as gpt
@@ -43,14 +41,11 @@ try:
 except ImportError:
   jp_input = None
 
-# Used to auto-clear the "result ready" LED a couple of seconds after output
-# without blocking the prompt. Absent on the desktop emulator.
-try:
-  import _thread
-except ImportError:
-  _thread = None
-
 el = gpt.el
+
+# Deadline (0 = none) for auto-clearing the "result ready" LED (2). Set after a
+# conversation-mode answer, honoured by read_line's idle poll.
+_led2_off_at = [0]
 
 
 # ----------------------------------------------------------------------------
@@ -66,8 +61,6 @@ def print_exc(e, vs):
   except AttributeError:
     import traceback
     traceback.print_exception(type(e), e, e.__traceback__, file=vs)
-  except Exception:
-    pass
 
 
 def load_app_list():
@@ -243,91 +236,6 @@ CaptureStream = pu.CaptureStream
 _parse_cmd_string = pu.parse_cmd_string
 
 
-def build_agent_instructions(app_list, my_screen=None, vision=True):
-  """System prompt describing the function tools (mirrors gpt_rt.py). `vision`
-  must match whatever was passed to build_tools_for/build_tools: a False model
-  never gets told about capture_screen (a tool it wasn't given can't be called),
-  and it isn't reminded to "look at" a screenshot it will never receive."""
-  text = (
-    "You have function tools for working directly on the device;\n"
-    "A runnable script/app is a module that defines main(vs, args); run it by "
-    "passing its name (plus arguments) to command_with_return. After you EDIT a "
-    "script and run it again, prefix the command with 'r ' (e.g. 'r temp_foo') so "
-    "the module is reloaded — without it the old cached code runs instead of your "
-    "edits. Keep scratch/experimental scripts in /sd/py with names starting temp_* "
-    "and rm them when finished. "
-    "main(vs, args) receives an output stream as its first argument; write results "
-    "with print(..., file=vs) so command_with_return can capture and return that "
-    "output to you (plain print() goes to the REPL and is NOT captured).\n"
-    "Use command_with_return to look up information too (e.g. list files with "
-    "'ls /sd/Documents/word*', read a file with 'cat /path', search with grep).\n "
-    "**Pocket Deck is not Linux**: no redirects ('>'), no '&&' or ';', no subshells."
-    "See README.md for full command list.\n"
-    "The device keeps an activity log under /sd/elog/, one markdown file per day "
-    "named YYYY-MM-DD.md, each line an event: app launches, file opens/saves, and "
-    "shell commands the user ran. Read the current day's file as needed.\n"
-    "The user keeps SKILLS at /sd/Documents/skills/ — one markdown file per "
-    "skill: a named, reusable procedure you can perform (a routine with steps "
-    "and timings, a recurring workflow like a morning writing setup, a document "
-    "format to follow). When the user asks for something by name ('do my morning "
-    "ritual', 'make the weekly report'), or asks what you can do, 'ls "
-    "/sd/Documents/skills' and cat the matching file, then follow its "
-    "instructions step by step. When the user teaches you a repeatable procedure "
-    "worth keeping, offer to save it there as a new skill file (the folder may "
-    "not exist yet — 'mkdir /sd/Documents/skills' first if needed).\n"
-    "The device also ships read-only SYSTEM skills at /sd/lib/skills/. Before you "
-    "write a graphical app (dashboard, chart, meter), cat "
-    "/sd/lib/skills/dashboard_design.md and follow it; 'ls /sd/lib/skills' for the "
-    "rest.\n"
-    "You can see and drive other apps running on the device. Use list_running_apps "
-    "to see which app is on which screen. Use switch_screen to bring a screen to "
-    "the foreground. IMPORTANT: screen numbers in these tools are 0-based and match "
-    "what list_running_apps reports (screen 0 is the Python REPL), but the user's "
-    "point of view it's 1-based, so the screen the user calls '2' is screen 1 here — "
-    "always pass the 0-based number from list_running_apps, switch_screen. "
-    + ("Use capture_screen to take a screenshot of a screen and look "
-       "at it (it is returned to you as an image); it takes some time."
-       if vision else
-       "You have NO VISION: there is no capture_screen tool and you cannot see "
-       "screenshots. Drive apps blind via send_keys and verify results with "
-       "read_console_log instead.") +
-    "Use send_keys to type into the app in the "
-    "foreground; set enter=true to press Enter, and use escape sequences for "
-    "special keys (Up=\\x1b[A, Down=\\x1b[B, Right=\\x1b[C, Left=\\x1b[D, Esc=\\x1b, "
-    "Backspace=\\x08, Ctrl-X=\\x18). "
-    + ("After acting, capture_screen again to confirm the result before continuing.\n"
-       if vision else
-       "After acting, read_console_log to confirm the result before continuing.\n") +
-    "To read TEXT a command-line app printed (e.g. to diagnose an error the user "
-    "asks about), prefer read_console_log over a screenshot — it returns the "
-    "recent console text directly and cheaply.\n"
-    "You do not have to solve everything alone. If the same approach has failed "
-    "twice, or you need a decision, permission, or information only the user has, "
-    "call ask_user with a short question instead of retrying in circles — then "
-    "stop and wait for the answer. Asking early beats a long stretch of failing "
-    "tool calls.\n"
-  )
-  if my_screen is not None:
-    text += ("\nIMPORTANT: your own screen — where your typed answers are shown — "
-             "is screen %d. While working you may switch to other screens to drive "
-             "apps, but the user only sees the foreground screen. Whenever you have "
-             "an answer or output you want the user to read, call switch_screen(%d) "
-             "to bring your screen back to the foreground before you finish.\n"
-             % (my_screen, my_screen))
-  if app_list:
-    text += ("\nUse launch_app to open apps. Pass optional args (e.g. a file path) "
-             "to open a specific file. Besides the registered apps listed below, "
-             "any installed module can be launched by its module name (e.g. 'myapp' "
-             "for /sd/lib/myapp.py). Available apps:\n")
-    for item in app_list:
-      if isinstance(item, list) and len(item) == 2:
-        name = item[0]
-        info = item[1]
-        desc = info.get('description', '') if isinstance(info, dict) else ''
-        text += "  - %s: %s\n" % (name, desc)
-  return text
-
-
 # build_tools moved to gpt_tools (shared, single source of truth). Re-exported
 # here so existing callers (and gpt_c.build_tools_c) keep using gpt.build_tools.
 build_tools = gpt_tools.build_tools
@@ -354,15 +262,7 @@ DEFAULT_REGISTRY_MODELS = [
 DEFAULT_REGISTRY_DEFAULT = "gpt-5.4"
 
 
-def config_path():
-  if _IS_PC:
-    d = os.path.expanduser("~/.config/gpt")
-    try:
-      os.makedirs(d, exist_ok=True)
-    except Exception:
-      pass
-    return d + "/gpt.json"
-  return "/config/gpt.json"
+config_path = gpt.registry_path
 
 
 def _format_registry(models, default):
@@ -431,21 +331,25 @@ def _normalize_entry(entry):
           # never told that, so they'll happily "call" capture_screen and then
           # invent a description of what it returned. Set true in /config/gpt.json
           # to drop capture_screen from this model's tools entirely.
-          "text_only": bool(entry.get("text_only", False))}
+          "text_only": bool(entry.get("text_only", False)),
+          # Free-form extra top-level request fields merged into the payload
+          # (e.g. {"chat_template_kwargs": {"reasoning_effort": "medium"}} for
+          # a local Qwen3 server, or "top_p"/"temperature").
+          "extra_args": entry.get("extra_args") or {}}
 
 
 def resolve_entry(registry, name):
   """Resolve a model name to a normalized entry. None -> the registry default;
-  a registered name -> that entry; a legacy shortcut (f/m/h...) or any other
-  string -> an ad-hoc OpenAI Responses entry with that model id."""
+  a registered name -> that entry; any other string -> an ad-hoc OpenAI
+  Responses entry with that model id."""
   models = registry.get("models") or []
   if not name:
     name = registry.get("default") or (models[0].get("name") if models else DEFAULT_REGISTRY_DEFAULT)
   for m in models:
     if isinstance(m, dict) and m.get("name") == name:
       return _normalize_entry(m)
-  # Not registered: a legacy shortcut or raw model id -> ad-hoc Responses entry.
-  return _normalize_entry({"name": name, "api": "responses", "model": resolve_model(name)})
+  # Not registered: treat it as a raw model id on OpenAI.
+  return _normalize_entry({"name": name, "api": "responses", "model": name})
 
 
 # Audio (STT/TTS) backend resolution lives in gpt_l (imported as `gpt`) so it is
@@ -465,6 +369,7 @@ def make_client(entry, vs):
     obj.url = entry["base_url"].rstrip("/") + "/responses"
   obj.base_url = entry["base_url"]  # remembered so /model can detect endpoint changes
   obj.text_only = entry.get("text_only", False)  # drives capture_screen inclusion
+  obj.extra_args = entry.get("extra_args") or {}  # merged into every request payload
   return obj
 
 
@@ -503,6 +408,7 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
   USE_WEB_SEARCH = True
   CAN_COMPACT = False
   text_only = False  # overridden per-instance by make_client from the registry entry
+  extra_args = {}    # ditto: provider-specific top-level request fields
   def __init__(self, vs):
     super().__init__(vs)
     self.app_list = []
@@ -520,35 +426,25 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
     # records whether the unicode terminal font has been switched in.
     self.jp_ime = False
     self.jp_font_loaded = False
-    # Generation token for the deferred "result ready" LED (2) auto-off, so a
-    # stale timer can't clear an LED that a newer result has just relit.
-    self.led2_gen = 0
     # Training-data capture: when set to a path, each completed turn's full
     # trajectory is appended there as a JSONL example (-T / --training).
     self.training_file = None
+    # Rolling transcript for the self-evolving memory. The Responses client
+    # keeps its context server-side (previous_response_id), so without this
+    # run_self_improve/update_memory would see an empty conversation.
+    self.turn_log = []
 
-  def schedule_led2_off(self, secs=2):
-    """Turn LED 2 off `secs` seconds from now in a tiny background thread, so
-    the prompt isn't blocked. Guarded by led2_gen: if a newer result lights the
-    LED (or the conversation ends) before the timer fires, this no-ops."""
-    self.led2_gen += 1
-    gen = self.led2_gen
-    def _worker():
-      try:
-        time.sleep(secs)
-      except Exception:
-        return
-      if self.led2_gen == gen:
-        try:
-          pdeck.led(2, 0)
-        except Exception:
-          pass
-    if _thread is None:
-      return            # no threads (emulator): leave it; next turn clears it
-    try:
-      _thread.start_new_thread(_worker, ())
-    except Exception:
-      pass
+  _TURN_LOG_MAX = 12  # exchanges kept; ai_improve caps the text at 6000 chars anyway
+
+  def _log_turn(self, who, text):
+    if not text:
+      return
+    self.turn_log.append("%s: %s" % (who, text))
+    if len(self.turn_log) > self._TURN_LOG_MAX:
+      del self.turn_log[0:len(self.turn_log) - self._TURN_LOG_MAX]
+
+  def _improve_conversation(self):
+    return "\n\n".join(self.turn_log)
 
   # --- uniform client interface (shared driver in main() calls these) --------
 
@@ -606,17 +502,177 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
         content_items.append({"type": "input_image", "image_url": img_url})
     return content_items
 
+  # Live view of the model working, like a desktop harness: thinking, answer
+  # text and tool-call arguments are echoed as they stream in. Off unless asked
+  # for (--stream / /stream): it needs a raw socket + SSE, and an endpoint that
+  # doesn't speak that falls back to one blocking request, latching this off so
+  # we don't pay for the extra round trip twice.
+  stream_ok = False
+  no_summary = False       # set if the endpoint rejects reasoning summaries
+  ARG_ECHO_MAX = 200       # cap the echoed tool arguments (write_file is huge)
+  text_shown = False       # the answer already reached the screen as it streamed
+  THINK_COLOR = 36         # cyan, as in the thinking animation
+
+  def _stream_round(self, payload):
+    """POST with stream:true, echoing the model's thinking and its tool-call
+    drafts as they arrive. Returns the final response dict (identical to what
+    the blocking path parses), or None to fall back to that path.
+
+    The socket/animation/ESC scaffolding is shared; each API subclass decodes
+    its own events via _stream_payload / _stream_begin / _stream_event /
+    _stream_result."""
+    anim = gpt.ThinkingAnimation(self.vs, "Asking GPT.. (ESC to interrupt)",
+                                 "Asking GPT.. (ESC pressed, waiting for AI)")
+    keys = None
+    resp = None
+    self._thinking = False   # a [Thinking] block is open
+    self._fresh = False      # cursor already sits on a blank fresh line
+    self._echoed = 0         # arguments echoed for the call being drafted
+    self._stream_begin()
+    try:
+      resp = self.stream_post(self.url,
+                              ujson.dumps(self._stream_payload(payload)).encode('utf-8'))
+      if not resp.sse:
+        # Endpoint ignored stream:true (or answered with an error body).
+        return self._fallback("(no event stream from the endpoint, HTTP %s; "
+                              "using the blocking request from here on)"
+                              % resp.status_code)
+      for ev in gpt.sse_events(resp):
+        if anim:
+          anim.stop()            # first byte: hand the screen over to the stream
+          if anim.interrupted:
+            self.note_interrupt(True)
+          keys = gpt.KeyWatch(self.vs.v)
+          anim = None
+        if keys.poll() and not self.interrupted:
+          self._end_thinking()   # don't break into the middle of the text
+          self.note_interrupt(True)
+        self._stream_event(ev)
+      self._end_thinking()
+      if self._echoed or self.text_shown:
+        self.vs.write("\n")     # close the last streamed line
+      data = self._stream_result()
+      if data is None:
+        # A truncated stream, or a provider whose events we don't speak. Either
+        # way the blocking path re-asks.
+        return self._fallback("(stream ended without a complete response; "
+                              "using the blocking request from here on)")
+      return data
+    finally:
+      if anim:
+        anim.stop()
+      if keys:
+        keys.release()
+      if resp:
+        resp.close()
+
+  # --- live display bits, shared by both APIs --------------------------------
+
+  def _lead(self):
+    """Start a block on its own line — unless the block before it just closed,
+    which already left the cursor on a fresh line."""
+    if not self._fresh:
+      self.vs.write("\n")
+    self._fresh = False
+
+  def _think(self, text):
+    if not self._thinking:
+      self._lead()
+      self.vs.write("%s[Thinking]%s %s" % (el.bold(), el.bold_off(),
+                                           el.set_font_color(self.THINK_COLOR)))
+      self._thinking = True
+    self.vs.write(text)
+
+  def _end_thinking(self):
+    if self._thinking:
+      # Blank line after the thinking block: it runs long and butts straight up
+      # against whatever the model does next, which is hard to read.
+      self.vs.write(el.reset_font_color() + "\n\n")
+      self._fresh = True
+    self._thinking = False
+
+  def _call_start(self, name):
+    self._end_thinking()
+    self._lead()
+    self.vs.write("%s[Call]%s %s " % (el.bold(), el.bold_off(), name))
+    self._echoed = 0
+
+  def _arg_delta(self, d):
+    """Echo tool arguments as they are drafted, capped: a write_file's content
+    would otherwise fill the screen (the diff shows it properly afterwards)."""
+    if not d or self._echoed >= self.ARG_ECHO_MAX:
+      return
+    self.vs.write(d[:self.ARG_ECHO_MAX - self._echoed])
+    self._echoed += len(d)
+    if self._echoed >= self.ARG_ECHO_MAX:
+      self.vs.write(" ...")
+
+  def _say(self, text):
+    if not text:
+      return
+    self._end_thinking()
+    if not self.text_shown:      # only the first delta opens the block
+      self._lead()
+    self.vs.write(text)
+    self.text_shown = True   # present_response must not print it again
+
+  # --- Responses API event decoding ------------------------------------------
+
+  def _stream_payload(self, payload):
+    p = dict(payload)                      # shallow copy: never mutate caller's
+    p["stream"] = True
+    if not self.no_summary and isinstance(p.get("reasoning"), dict):
+      p["reasoning"] = dict(p["reasoning"])
+      p["reasoning"]["summary"] = "auto"   # otherwise there is nothing to show
+    return p
+
+  def _stream_begin(self):
+    self._data = None
+
+  def _stream_result(self):
+    return self._data
+
+  def _stream_event(self, ev):
+    t = ev.get("type", "")
+    if t == "response.reasoning_summary_text.delta":
+      self._think(ev.get("delta", ""))
+    elif t == "response.reasoning_summary_part.added" and self._thinking:
+      self.vs.write("\n")
+    elif t == "response.output_item.added":
+      item = ev.get("item") or {}
+      if item.get("type") == "function_call":
+        self._call_start(item.get("name", ""))
+    elif t == "response.output_text.delta":
+      self._say(ev.get("delta", ""))
+    elif t == "response.function_call_arguments.delta":
+      self._arg_delta(ev.get("delta", ""))
+    elif t in ("response.completed", "response.incomplete", "response.failed"):
+      self._data = ev.get("response")
+    elif t == "error":
+      self._data = {"error": ev.get("message") or ev}
+
+  def _fallback(self, msg):
+    """Streaming gave up: say why, stop trying, and make sure whatever the
+    blocking request returns is still printed in full."""
+    self.stream_ok = False
+    self.text_shown = False
+    print(msg, file=self.vs)
+    return None
+
   def ask_agent(self, message, references, images, model, instructions, effort,
                 tools, silent=False, max_iters=25):
     """Run one user turn: send the message, resolve any function calls, and
     return the model's final text. Keeps self.prev_response_id updated so the
     next turn (conversation mode) continues the same context."""
+    self._log_turn("User", message)
+    self.interrupted = False
+    self.text_shown = False
     content_items = self._build_content(message, references, images)
     input_list = [{"type": "message", "role": "user", "content": content_items}]
     prev_id = self.prev_response_id
     final_text = None
     in_flight = False  # True once we have answered outputs not yet confirmed delivered
-    pdeck.led(2, 0)  # clear the "result ready" indicator at the start of a turn
+    #pdeck.led(2, 0)  # clear the "result ready" indicator at the start of a turn
 
     # Cap the tool round-trips. On the final allowed round we set
     # tool_choice="none" so the model returns a text answer instead of yet
@@ -634,6 +690,7 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
         "tools": tools,
         "input": input_list,
       }
+      payload.update(self.extra_args)
       if instructions:
         payload["instructions"] = instructions
       if prev_id:
@@ -642,41 +699,55 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
         payload["tool_choice"] = "none"
 
       pdeck.led(1, 40)  # working: waiting for the model's response
-      if not silent:
-        _anim = gpt.ThinkingAnimation(self.vs, "Asking GPT..")
-      try:
-        response = self.post(self.url, ujson.dumps(payload).encode('utf-8'))
-      except BaseException:
-        # post() already retried; a raise here means the network is really
-        # down. Stop the animation (it would keep drawing forever) and drop a
-        # broken chain before letting the caller report the failure.
-        if not silent:
-          _anim.stop()
-        pdeck.led(1, 0)
-        if in_flight:
-          self.prev_response_id = None  # outputs never delivered; chain is broken
-        raise
-      try:
-        data = response.json()
-      except:
-        if not silent:
-          _anim.stop()
-        # If the body read itself died (e.g. connection reset mid-read), the
-        # socket is already closed and .text would raise; keep the real error.
+      data = None
+      streamed = False
+      if not silent and self.stream_ok:
         try:
-          body = response.text[:200]
-        except Exception:
-          body = "(body unavailable)"
-        print("Error: Non-JSON response (%s)" % response.status_code, file=self.vs)
-        print(body, file=self.vs)
+          data = self._stream_round(payload)
+          streamed = data is not None
+        except BaseException as e:
+          # Nothing was consumed on our side, so the blocking path below can
+          # simply re-ask (as post() itself does when a read dies mid-body).
+          data = self._fallback("\n(streaming failed: %r - retrying)" % (e,))
+
+      if data is None:
+        if not silent:
+          _anim = gpt.ThinkingAnimation(self.vs, "Asking GPT.. (ESC to interrupt)",
+                                         "Asking GPT.. (ESC pressed, waiting for AI)")
+        try:
+          response = self.post(self.url, ujson.dumps(payload).encode('utf-8'))
+        except BaseException:
+          # post() already retried; a raise here means the network is really
+          # down. Stop the animation (it would keep drawing forever) and drop a
+          # broken chain before letting the caller report the failure.
+          if not silent:
+            _anim.stop()
+          pdeck.led(1, 0)
+          if in_flight:
+            self.prev_response_id = None  # outputs never delivered; chain is broken
+          raise
+        try:
+          data = response.json()
+        except:
+          if not silent:
+            _anim.stop()
+          # If the body read itself died (e.g. connection reset mid-read), the
+          # socket is already closed and .text would raise; keep the real error.
+          try:
+            body = response.text[:200]
+          except Exception:
+            body = "(body unavailable)"
+          print("Error: Non-JSON response (%s)" % response.status_code, file=self.vs)
+          print(body, file=self.vs)
+          response.close()
+          pdeck.led(1, 0)
+          if in_flight:
+            self.prev_response_id = None  # outputs never delivered; chain is broken
+          return final_text
         response.close()
-        pdeck.led(1, 0)
-        if in_flight:
-          self.prev_response_id = None  # outputs never delivered; chain is broken
-        return final_text
-      response.close()
-      if not silent:
-        _anim.stop()
+        if not silent:
+          _anim.stop()
+          self.note_interrupt(_anim.interrupted)
       pdeck.led(1, 0)  # got the response
 
       if data.get("error"):
@@ -684,6 +755,12 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
         # OpenAI returns {"error": {"message": ...}}; some compatible providers
         # (e.g. xAI) return {"error": "message string"}.
         msg = err.get("message", "Unknown error") if isinstance(err, dict) else err
+        if not self.no_summary and 'summary' in str(msg).lower():
+          # Reasoning summaries need a verified org on some endpoints. Drop them
+          # and re-ask the same round; nothing was consumed.
+          self.no_summary = True
+          print("(reasoning summaries unavailable here; continuing without)", file=self.vs)
+          continue
         print("API Error: %s" % msg, file=self.vs)
         if in_flight:
           self.prev_response_id = None  # outputs never delivered; chain is broken
@@ -714,6 +791,11 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
       if text_out:
         final_text = text_out
 
+      if fn_calls:
+        # Text alongside tool calls is narration, not the answer - the real one
+        # is still coming, so present_response must still print it.
+        self.text_shown = False
+
       if not fn_calls:
         self.prev_response_id = prev_id  # clean response: safe to chain next turn
         break
@@ -733,23 +815,16 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
         name = fc.get("name", "")
         call_id = fc.get("call_id", "")
         arguments = fc.get("arguments", "")
-        print("\n%s[Call]%s %s" % (el.bold(), el.bold_off(), self._call_display(name, arguments)), file=self.vs)
-        # Plan mode: the two effectful tools must be confirmed before they run.
-        # A decline is reported back to the model as the tool output so it can
-        # adjust instead of silently failing.
-        if self.mode == 'plan' and name in ('command_with_return', 'write_file'):
-          approved, feedback = self.confirm_tool(name, arguments)
-          if not approved:
-            result = "User declined to run %s (Plan mode)." % name
-            if feedback:
-              result += " User feedback: " + feedback
-            print("%s[Skipped]%s %s" % (el.bold(), el.bold_off(), result[:200]), file=self.vs)
-            next_input.append({
-              "type": "function_call_output",
-              "call_id": call_id,
-              "output": result
-            })
-            continue
+        if not streamed:   # a streamed round already drew the call as it arrived
+          print("\n%s[Call]%s %s" % (el.bold(), el.bold_off(), self._call_display(name, arguments)), file=self.vs)
+        declined = self.gate_tool(name, arguments)
+        if declined is not None:
+          next_input.append({
+            "type": "function_call_output",
+            "call_id": call_id,
+            "output": declined
+          })
+          continue
         try:
           result = self.execute_function_call(call_id, name, arguments)
         except BaseException as e:
@@ -761,6 +836,8 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
           "call_id": call_id,
           "output": result
         })
+
+      self.interrupted = False  # the ESC interrupt covered this round only
 
       # A capture_screen call leaves a base64 PNG to feed back as a user image.
       if self.pending_image is not None:
@@ -783,6 +860,7 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
       input_list = next_input
       in_flight = True  # these outputs are delivered on the next successful POST
 
+    self._log_turn("AI", final_text)
     return final_text
 
   # --- plan-mode confirmation ------------------------------------------------
@@ -810,6 +888,34 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
     if name == "write_file":
       return "write %d byte(s) to  %s" % (len(a.get("content", "")), a.get("path", ""))
     return "%s %s" % (name, arguments)
+
+  # Set when the user hits ESC during a request: the tool calls that response
+  # asks for are confirmed one by one, whatever the standing mode. Cleared once
+  # that batch is done, so the chain resumes in the mode it was in - press ESC
+  # again to take control of the next round.
+  interrupted = False
+
+  def note_interrupt(self, pressed):
+    if pressed and not self.interrupted:
+      self.interrupted = True
+      print("\n%s[Interrupted]%s confirming the next tool call(s)."
+            % (el.bold(), el.bold_off()), file=self.vs)
+
+  def gate_tool(self, name, arguments):
+    """Confirm a pending call when plan mode (or an ESC interrupt) requires it.
+    Returns None to run it, or the tool-output string reporting the decline —
+    the model sees that and can adjust instead of silently failing."""
+    if not self.interrupted:
+      if self.mode != 'plan' or name not in ('command_with_return', 'write_file'):
+        return None
+    approved, feedback = self.confirm_tool(name, arguments)
+    if approved:
+      return None
+    result = "User declined to run %s (Plan mode)." % name
+    if feedback:
+      result += " User feedback: " + feedback
+    print("%s[Skipped]%s %s" % (el.bold(), el.bold_off(), result[:200]), file=self.vs)
+    return result
 
   def confirm_tool(self, name, arguments):
     """Plan mode: show what the tool will do and ask the user to confirm.
@@ -855,8 +961,9 @@ def present_response(vs, gpt_obj, message, raw_response, args, margs, log_filena
 
   no_format = margs['no_format'] if 'no_format' in margs else args.no_format
   response = raw_response if no_format else gpt.format(raw_response)
-  pdeck.led(2, 130)  # result ready for the user to read
-  print(response, file=vs)
+  #pdeck.led(2, 130)  # result ready for the user to read
+  if not getattr(gpt_obj, 'text_shown', False):
+    print(response, file=vs)   # a streamed answer is already on screen
 
   voice = margs['voice'] if 'voice' in margs else args.voice
   if voice:
@@ -889,10 +996,11 @@ def present_response(vs, gpt_obj, message, raw_response, args, margs, log_filena
       print("Failed to save log: %s" % e, file=vs)
 
   # In conversation mode the turn ends but the app keeps running, so the
-  # "result ready" LED would stay lit until the next turn. Clear it ~2s after
-  # the output instead. (Single-shot turns it off in run_turn's finally.)
+  # "result ready" LED would stay lit until the next turn. Arm a deadline
+  # instead; read_line's idle poll clears it. (Single-shot turns it off in
+  # main()'s finally.)
   if args.chat:
-    gpt_obj.schedule_led2_off(2)
+    _led2_off_at[0] = time.time() + 2
 
 
 # ----------------------------------------------------------------------------
@@ -930,11 +1038,8 @@ DEFAULT_AGENT_REFS = ["/sd/Documents/pd/README.md",
 # Named role presets so users don't have to write a persona from scratch.
 # Maps name -> (role_text, wants_agent). wants_agent=True turns on the tools.
 ROLE_PRESETS = {
-  'plain':     (DEFAULT_ROLE, False),
   'assistant': (DEFAULT_ROLE, False),
   'coder':     (CODER_ROLE, True),
-  'coding':    (CODER_ROLE, True),
-  'code':      (CODER_ROLE, True),
 }
 
 # Users can drop their own role text in /sd/roles/<name>.txt and pass -r <name>.
@@ -943,7 +1048,7 @@ ROLES_DIR = "/sd/roles"
 
 def resolve_role(value):
   """Resolve a -r/role value to (role_text, wants_agent).
-  value may be a preset name (plain, coder), a file path, a name under
+  value may be a preset name (assistant, coder), a file path, a name under
   /sd/roles/<name>.txt, or literal role text. None -> default plain assistant.
   wants_agent is True/False for presets, or None when it should not force tools."""
   if not value:
@@ -961,22 +1066,14 @@ def resolve_role(value):
   return value, None   # literal role text
 
 
-def resolve_model(m):
-  if m in ('m', 'medium'):
-    return 'ngpt-5.4'
-  if m in ('h', 'high'):
-    return 'gpt-5.5'
-  if m in ('f', 'fast'):
-    return 'gpt-5.4-mini'
-  return m
-
-
 def assemble_instructions(role, tts, agent, app_list, my_screen=None, vision=True):
   text = role if role else DEFAULT_ROLE
   if tts:
     text += "\n\n" + TTS_NOTE
   if agent:
-    text += "\n\n" + build_agent_instructions(app_list, my_screen, vision=vision)
+    # The device/tool prose is shared with gpt_rt so the prompts can't drift.
+    text += "\n\n" + gpt_tools.device_instructions(app_list, vision=vision,
+                                                   my_screen=my_screen)
     # Fold in the self-evolving memory (learned in past sessions) in agent mode.
     text += ai_improve.memory_block()
   return text
@@ -1015,21 +1112,10 @@ def load_agent_references(vs, silent=False):
 # Interactive single-line editor (conversation mode)
 # ----------------------------------------------------------------------------
 
-def _wide(cp):
-  # Mirror displayapi.c is_cjk_double_width: which codepoints the terminal draws
-  # as 2 cells. Must match exactly so cursor moves line up with what's on screen.
-  return ((0x1100 <= cp <= 0x115F) or (0x2329 <= cp <= 0x232A) or
-          (0x2E80 <= cp <= 0xA4CF) or (0xAC00 <= cp <= 0xD7A3) or
-          (0xF900 <= cp <= 0xFAFF) or (0xFE10 <= cp <= 0xFE19) or
-          (0xFE30 <= cp <= 0xFE6F) or (0xFF01 <= cp <= 0xFF60) or
-          (0xFFE0 <= cp <= 0xFFE6) or (0x16FE0 <= cp <= 0x18DFF) or
-          (0x1B000 <= cp <= 0x1B2FF) or (0x1F000 <= cp <= 0x1FFFF) or
-          (0x20000 <= cp <= 0x3FFFD))
-
-
 def _vis_cells(s):
-  """Width of `s` in terminal cells, counting CJK glyphs as 2 and skipping any
-  CSI escape sequences (e.g. the SGR markers inside an IME pre-edit)."""
+  """Width of `s` in terminal cells, using the same double-width rule the display
+  applies (pdeck.get_utf8_width) and skipping CSI escape sequences (e.g. the SGR
+  markers inside an IME pre-edit), which take no space on screen."""
   total = 0
   i = 0
   n = len(s)
@@ -1043,27 +1129,9 @@ def _vis_cells(s):
           i += 1
       i += 1                         # consume the final byte (or the char after ESC)
       continue
-    total += 2 if _wide(ord(c)) else 1
+    total += pdeck.get_utf8_width(c)
     i += 1
   return total
-
-
-def _install_pc_skill_completer():
-  """Emulator only: teach readline to Tab-complete /skill names. '/' is a default
-  word delimiter, so `text` is the token typed after the slash. Only completes the
-  command word of a slash line, matching the device editor."""
-  try:
-    import readline
-  except ImportError:
-    return
-  def _completer(text, state):
-    line = readline.get_line_buffer()
-    if not line.startswith('/') or ' ' in line:
-      return None
-    matches = skill_tokens(text)
-    return matches[state] if state < len(matches) else None
-  readline.set_completer(_completer)
-  readline.parse_and_bind('tab: complete')
 
 
 def read_line(vs, prompt, history, on_shift_tab=None, lead="\n",
@@ -1088,7 +1156,6 @@ def read_line(vs, prompt, history, on_shift_tab=None, lead="\n",
     # gives line editing and history (via readline). Ctrl-C cancels the line
     # (return None, like the device); Ctrl-D quits the conversation.
     p = prompt() if callable(prompt) else prompt
-    _install_pc_skill_completer()
     try:
       return input(p)
     except KeyboardInterrupt:
@@ -1139,8 +1206,13 @@ def read_line(vs, prompt, history, on_shift_tab=None, lead="\n",
 
   while True:
     ch = vs.read(1)
-    if not ch:
-      continue
+
+    #if not ch:
+      # Idle: retire the "result ready" LED once its deadline passes.
+    #  if _led2_off_at[0] and time.time() >= _led2_off_at[0]:
+    #    _led2_off_at[0] = 0
+    #    pdeck.led(2, 0)
+    #  continue
     o = ord(ch)
 
     # Route keys to the IME while it is on, except control chars / space when
@@ -1282,7 +1354,7 @@ def main(vs, args_in):
   parser.add_argument('-j', '--jp', action='store_true', help='Answer in Japanese')
   parser.add_argument('-f', '--file', nargs='+', action='store', help='Attach file(s) as reference. file1 file2...')
   parser.add_argument('-i', '--image', nargs='+', action='store', help='Attach image file(s) or image url(s). img1 img2...')
-  parser.add_argument('-m', '--model', action='store', default=None, help='Model to use: a name from /config/gpt.json, a shortcut (f/m/h), or a raw model id. Default: the registry default.')
+  parser.add_argument('-m', '--model', action='store', default=None, help='Model to use: a name from /config/gpt.json, or a raw model id. Default: the registry default.')
   parser.add_argument('--base-url', action='store', default=None, help='Override the endpoint base URL for this run')
   parser.add_argument('-e', '--effort', action='store', default='medium', help='Reasoning effort (low, medium, high) - Responses models only')
   parser.add_argument('-v', '--voice', action='store_true', help='Use voice mode (STT and TTS)')
@@ -1291,6 +1363,7 @@ def main(vs, args_in):
   parser.add_argument('--log-file', action='store', default=None, help='Internal: reuse the same log filename across iterations')
   parser.add_argument('--resume', action='store_true', help='Save this turn\'s response id to the session list so a later call can continue the conversation')
   parser.add_argument('--resume-id', '--resume_id', dest='resume_id', action='store', default=None, help="Continue a prior conversation: a response id, or 'last' for the most recent saved session")
+  parser.add_argument('--stream', action='store_true', help='Stream the reply live: thinking, answer text and tool-call drafts as they arrive (device only). Default off.')
   parser.add_argument('-T', '--training', action='store_true', help='Dump each turn (system/user/tool-calls/results/answer + tool schema) as JSONL to /sd/training_data for fine-tuning. Attachments are excluded. Chat Completions models only.')
   parser.add_argument('content', nargs='*', help='Content to ask')
   parser.add_argument('-q', nargs='+', help='Content to ask, use this when you want to specify content explicitly.')
@@ -1310,6 +1383,7 @@ def main(vs, args_in):
   gpt_obj = init_client(entry, vs, args.plan, registry)
   if gpt_obj is None:
     return
+  gpt_obj.stream_ok = args.stream and not _IS_PC   # raw-socket SSE, device only
 
   # Training-data capture: one JSONL file per run, carried on the client so it
   # survives model/endpoint switches within a conversation.
@@ -1355,7 +1429,7 @@ def main(vs, args_in):
   images = []
 
   if message:
-    message, _, margs = gpt.parse_inline_directives(message, references, images, args, vs)
+    message, margs = gpt.parse_inline_directives(message, references, images, vs)
   else:
     margs = {}
 
@@ -1386,38 +1460,9 @@ def main(vs, args_in):
   if clipboard:
     references.append(pdeck.clipboard_paste().decode("utf-8"))
 
-  if args.image:
-    for img_path in args.image:
-      if img_path.startswith("http://") or img_path.startswith("https://"):
-        images.append(img_path)
-      else:
-        try:
-          with open(img_path, 'rb') as f:
-            images.append(f.read())
-        except Exception:
-          print("Error when opening image %s" % img_path, file=vs)
-          return
+  if args.image and not gpt.load_images(args.image, images, vs):
+    return
 
-  # An inline [[-m ...]] directive can pick a different registry entry; if it
-  # changes the API/endpoint, rebuild the client before the first turn.
-  if 'model' in margs:
-    new_entry = resolve_entry(registry, margs['model'])
-    if args.base_url:
-      new_entry = dict(new_entry); new_entry['base_url'] = args.base_url
-    if (new_entry['api'] != gpt_obj.API or
-        new_entry['base_url'].rstrip('/') != gpt_obj.base_url.rstrip('/')):
-      rebuilt = init_client(new_entry, vs, args.plan, registry)
-      if rebuilt is None:
-        return
-      rebuilt.jp_font_loaded = gpt_obj.jp_font_loaded
-      rebuilt.training_file = training_file
-      gpt_obj = rebuilt
-    else:
-      # Same API/endpoint as the current client, so it wasn't rebuilt above —
-      # but text_only can still differ between two entries on the same
-      # endpoint, so it must be updated explicitly here.
-      gpt_obj.text_only = new_entry.get('text_only', False)
-    entry = new_entry
   model = entry['model']
 
   # Conversation continuity across separate gpt invocations: --resume-id seeds
@@ -1481,6 +1526,64 @@ def main(vs, args_in):
     'tools': gpt_obj.build_tools_for(app_list, agent),
   }
 
+  # Auto-compaction (Chat Completions clients only): 'every' = compact after
+  # this many turns (0 = off); 'since' = turns completed since last compaction.
+  compact_state = {'every': 0, 'since': 0}
+  # Auto-improve: run /improve every this many completed turns to distill the
+  # session into long-term memory. Off by default (it blocks the prompt for a
+  # whole extra model call); turn it on with /auto-improve <num_turns>.
+  improve_state = {'every': 0, 'since': 0}
+
+  def refresh():
+    ctx['instructions'] = assemble_instructions(ctx['role'], ctx['tts'], ctx['agent'], ctx['app_list'], my_screen,
+                                                vision=not gpt_obj.text_only)
+    ctx['tools'] = gpt_obj.build_tools_for(ctx['app_list'], ctx['agent'])
+
+  def switch_model(name):
+    """Switch to registry entry `name`. If the API or endpoint changes, rebuild
+    the client (which resets the conversation context); otherwise just retarget
+    the model id on the current client."""
+    nonlocal gpt_obj
+    new_entry = resolve_entry(registry, name)
+    if args.base_url:
+      new_entry = dict(new_entry); new_entry['base_url'] = args.base_url
+    same = (new_entry['api'] == gpt_obj.API and
+            new_entry['base_url'].rstrip('/') == gpt_obj.base_url.rstrip('/'))
+    if same:
+      ctx['model'] = new_entry['model']
+      ctx['entry'] = new_entry
+      # Two entries can share an API/endpoint but differ on text_only (e.g. a
+      # vision and a text-only model both served by the same local endpoint),
+      # so the tool set/instructions must be rebuilt here too, not just on a
+      # full client rebuild.
+      gpt_obj.text_only = new_entry.get('text_only', False)
+      gpt_obj.extra_args = new_entry.get('extra_args') or {}
+      refresh()
+      print("Model: %s (%s API)." % (new_entry['name'], new_entry['api']), file=vs)
+      return
+    new_obj = init_client(new_entry, vs, gpt_obj.mode == 'plan', registry)
+    if new_obj is None:
+      print("Could not switch to %s (no API key for %s)." %
+            (new_entry['name'], new_entry['base_url']), file=vs)
+      return
+    new_obj.stream_ok = gpt_obj.stream_ok
+    new_obj.jp_ime = gpt_obj.jp_ime
+    new_obj.jp_font_loaded = gpt_obj.jp_font_loaded
+    new_obj.training_file = training_file
+    new_obj.app_list = ctx['app_list']
+    gpt_obj = new_obj
+    ctx['model'] = new_entry['model']
+    ctx['entry'] = new_entry
+    compact_state['since'] = 0
+    improve_state['since'] = 0
+    refresh()
+    print("Switched to %s (%s API); context reset." %
+          (new_entry['name'], new_entry['api']), file=vs)
+
+  # An inline [[-m ...]] directive picks a different registry entry for this run.
+  if 'model' in margs:
+    switch_model(margs['model'])
+
   def run_turn(turn_message, refs, imgs):
     gpt_obj.model = ctx['model']  # so update_memory / self-improve can reach the active model/endpoint
     ctime = time.gmtime(time.time() + pu.timezone * 60 * 15)
@@ -1496,7 +1599,7 @@ def main(vs, args_in):
       run_turn(message, references, images)
     finally:
       pdeck.led(1, 0)
-      pdeck.led(2, 0)
+      #pdeck.led(2, 0)
     # Persist the conversation so a later --resume-id can continue it. Each
     # client saves what it needs (a response id for Responses, the messages list
     # for Chat Completions).
@@ -1507,55 +1610,6 @@ def main(vs, args_in):
   # ---- Conversation mode ----
   history = []
   pending_refs = []   # files queued via /file for the next message
-  # Auto-compaction (Chat Completions clients only): 'every' = compact after
-  # this many turns (0 = off); 'since' = turns completed since last compaction.
-  compact_state = {'every': 0, 'since': 0}
-  # Auto-improve: run /improve every this many completed turns (0 = off) to
-  # distill the session into long-term memory, mirroring gpt_rt's periodic run.
-  improve_state = {'every': 8, 'since': 0}
-
-  def refresh():
-    ctx['instructions'] = assemble_instructions(ctx['role'], ctx['tts'], ctx['agent'], ctx['app_list'], my_screen,
-                                                vision=not gpt_obj.text_only)
-    ctx['tools'] = gpt_obj.build_tools_for(ctx['app_list'], ctx['agent'])
-
-  def switch_model(name):
-    """Switch to registry entry `name`. If the API or endpoint changes, rebuild
-    the client (which resets the conversation context); otherwise just retarget
-    the model id on the current client."""
-    nonlocal gpt_obj
-    new_entry = resolve_entry(registry, name)
-    same = (new_entry['api'] == gpt_obj.API and
-            new_entry['base_url'].rstrip('/') == gpt_obj.base_url.rstrip('/'))
-    if same:
-      ctx['model'] = new_entry['model']
-      ctx['entry'] = new_entry
-      # Two entries can share an API/endpoint but differ on text_only (e.g. a
-      # vision and a text-only model both served by the same local endpoint),
-      # so the tool set/instructions must be rebuilt here too, not just on a
-      # full client rebuild.
-      gpt_obj.text_only = new_entry.get('text_only', False)
-      refresh()
-      print("Model: %s (%s API)." % (new_entry['name'], new_entry['api']), file=vs)
-      return
-    new_obj = init_client(new_entry, vs, gpt_obj.mode == 'plan', registry)
-    if new_obj is None:
-      print("Could not switch to %s (no API key for %s)." %
-            (new_entry['name'], new_entry['base_url']), file=vs)
-      return
-    new_obj.jp_ime = gpt_obj.jp_ime
-    new_obj.jp_font_loaded = gpt_obj.jp_font_loaded
-    new_obj.training_file = training_file
-    new_obj.app_list = ctx['app_list']
-    gpt_obj.led2_gen += 1        # cancel any pending LED timer on the old client
-    gpt_obj = new_obj
-    ctx['model'] = new_entry['model']
-    ctx['entry'] = new_entry
-    compact_state['since'] = 0
-    improve_state['since'] = 0
-    refresh()
-    print("Switched to %s (%s API); context reset." %
-          (new_entry['name'], new_entry['api']), file=vs)
 
   def do_compact(auto=False):
     """Summarize and shrink the conversation (Chat Completions only)."""
@@ -1639,6 +1693,7 @@ def main(vs, args_in):
     lines.append("  /role [name|text]  show/set role: presets 'assistant' or 'coder' (resets context)")
     lines.append("  /tools             toggle function-calling tools (agent) on/off")
     lines.append("  /mode [auto|plan]  show/set execution mode (no arg toggles); also /auto, /plan")
+    lines.append("  /stream [on|off]   show the reply live as it arrives (no arg toggles)")
     lines.append("  /file <path>       attach a file as reference for the next message")
     lines.append("  /history           show recent input history")
     if gpt_obj.CAN_COMPACT:
@@ -1711,6 +1766,17 @@ def main(vs, args_in):
       else:
         print("Role presets: assistant, coder. Current role:\n%s" %
               (ctx['role'] or DEFAULT_ROLE), file=vs)
+    elif cmd == 'stream':
+      if arg in ('on', 'off'):
+        gpt_obj.stream_ok = (arg == 'on')
+      elif not arg:
+        gpt_obj.stream_ok = not gpt_obj.stream_ok
+      else:
+        print("Stream must be on|off.", file=vs)
+      if gpt_obj.stream_ok and _IS_PC:
+        gpt_obj.stream_ok = False
+        print("Streaming needs the device (raw socket SSE).", file=vs)
+      print("Stream: %s" % ("on" if gpt_obj.stream_ok else "off"), file=vs)
     elif cmd in ('mode', 'auto', 'plan'):
       if cmd == 'auto':
         gpt_obj.mode = 'auto'
@@ -1878,8 +1944,7 @@ def main(vs, args_in):
       print_exc(e, vs)
 
   pdeck.led(1, 0)  # leaving conversation: clear status LEDs
-  gpt_obj.led2_gen += 1  # invalidate any pending auto-off timer
-  pdeck.led(2, 0)
+  #pdeck.led(2, 0)
 
 
 # On a PC the device shell isn't there to call main(vs, args); provide an entry

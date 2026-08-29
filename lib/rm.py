@@ -9,23 +9,19 @@ def _is_dir(path):
   except OSError:
     return False
 
-def main(vs,args):
-  if len(args) != 2:
-    print("rm file", file = vs)
-    return
-
+def _rm_one(vs, arg):
   # Guard: a bare directory argument used to expand to "every file inside",
   # silently deleting all of its contents (and `rm .` wiped the cwd).
   # Refuse it; directories are removed with `rmdir`, contents with a wildcard.
-  target = args[1]
+  target = arg
   if len(target) > 1 and target[-1] == '/':
     target = target[:-1]
   if _is_dir(target):
-    print(f"rm: '{args[1]}' is a directory", file=vs)
-    print(f"Use 'rmdir {args[1]}' to remove it, or 'rm {target}/*' to delete its files", file=vs)
-    return
+    print(f"rm: '{arg}' is a directory", file=vs)
+    print(f"Use 'rmdir {arg}' to remove it, or 'rm {target}/*' to delete its files", file=vs)
+    return False
 
-  ret = ls.list_file(args[1])
+  ret = ls.list_file(arg)
   if ret:
     for item in ret[1]:
       fullpath = ret[0] + '/' + item
@@ -35,7 +31,17 @@ def main(vs,args):
         continue
       print(f'{ret[0]}/{item} ', file=vs)
       os.unlink(fullpath)
+  return True
 
+def main(vs,args):
+  if len(args) < 2:
+    print("rm file [file ...]", file = vs)
+    return
+
+  deleted = 0
+  for arg in args[1:]:
+    if _rm_one(vs, arg):
+      deleted += 1
   os.sync()
-  print("Deleted", file = vs)
-
+  if deleted:
+    print("Deleted", file = vs)

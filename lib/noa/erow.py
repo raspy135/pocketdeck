@@ -29,7 +29,6 @@ class erow:
     
     self.tab_size = tab_size
     self.tab_detected = False
-    self.scanned = False
     self.updated = False
     self.hl_mode = None
     self.hl_bytes = {}
@@ -135,7 +134,6 @@ class erow:
     # Build ex_chars (tab-expanded version) if needed
     if tab_found:
       self.tab_detected = True
-      self.scanned = True
       ex_chars = bytearray()
       ex_ap = ex_chars.append
       ex_ext = ex_chars.extend
@@ -183,12 +181,12 @@ class erow:
       
 
   def get_len(self):
-    if not self.updated: #self.scanned:
+    if not self.updated:
       self.update()
     return self.len
  
   def get_ex_chars(self):
-    if not self.updated: #self.scanned:
+    if not self.updated:
       self.update()
     if self.tab_detected:
       return self.ex_chars
@@ -269,27 +267,6 @@ class erow:
     self.chars = self.substr(0,c)
     self.update()
 
-  #Obsoluted
-  def get_expanded_chars(self):
-    if not self.updated:
-      self.update()
-    total = 0
-    out = bytearray()
-    for ch in self.chars:
-      if ch == 0x9:
-        #print("tab detected\n")
-        self.tab_detected = True
-        size = self.tab_size - (total % self.tab_size)
-        total += size
-        while size > 0:
-          out.extend(b' ')
-          size -= 1
-      else:
-        total += 1
-        out.append(ch)
-    return out
-    
-
   def expand(self, start, at):
     if not self.updated:
       self.update()
@@ -328,15 +305,12 @@ class erow:
 
   # from start(file position), count expanded chars to "at" position (expanded position, and return file position of "at".
   def expanded_to_pos(self, start, at):
+    # Deliberately NOT expanded_to_pos_with_d(...)[0]: this runs per wrapped
+    # segment on every render, and the extra call costs ~25% here.
     if not self.updated:
       self.update()
-    # It will return the number with tab-expanded
-    #if not self.tab_detected:
-    #  return start + at
-
     if self.len == 0:
       return 0
-    #print(f"s {start},{at}  {self.len}")
     if start >= len(self.cbmap):
       start = len(self.cbmap) - 1
     d_start = self.bdmap[self.cbmap[start]]
@@ -348,10 +322,11 @@ class erow:
     return self.bcmap[b_end]
 
   def expanded_to_pos_with_d(self, start: int, at: int):
+    # Returns (file position of "at", its display offset from `start`).
     if not self.updated:
       self.update()
-    if int(self.len) == 0:
-      return (0,0)
+    if self.len == 0:
+      return (0, 0)
     #print(f"s {start},{at}  {self.len}")
     if start >= len(self.cbmap):
       start = len(self.cbmap) - 1
@@ -359,7 +334,7 @@ class erow:
     if len(self.dbmap) <= d_start + at:
       return (self.len, self.bdmap[-1]+1-d_start)
     if d_start + at < 0:
-      return None
+      return (0, 0)
     b_end = self.dbmap[d_start + at]
     return (self.bcmap[b_end], b_end)
 
@@ -371,13 +346,10 @@ class erow:
         searched_string = self.substr(c,-1)
     else:
       if c != -1:
-        c+=len(query)
-        searched_string = self.substr(0,c)
+        searched_string = self.substr(0, c + len(query))
       else:
-        c = len(self.chars)
         searched_string = self.chars
-        
-      c = 0 if c == -1 else 0
+      c = 0   # a reverse hit is reported as an absolute offset
     searched_string = searched_string.decode('utf-8')
     searched_string_org = searched_string
     # Case sensitive when query has upper cases

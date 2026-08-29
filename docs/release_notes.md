@@ -1,3 +1,25 @@
+## Release Note, Act 28, 2026
+
+## Application
+
+- gpt: User can interrupt AI work.
+- gpt: stream mode, --stream or /stream. Showing thinking process live.
+
+## Release Note, Act 23, 2026
+
+## Firmware
+
+- Bug fix: Key repeat issue with BLE keyboard when gabarge collection performed.
+
+## Application
+
+- head and tail: Traditional -number option support
+- gpt: parallel_query tool enables parallel query to improve performance.
+- gpt and pem: refactoring to improve performance
+- gpt: text_only property for gpt.json, to disable vision input.
+- grep: -o option (only matches)
+
+
 ## Release Note, July 17, 2026
 
 ## Firmware

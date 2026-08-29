@@ -1,16 +1,9 @@
 import pdeck_utils
 import pdeck
 
-def _parse(arg):
-  # Accept FILE, FILE:LINE, or FILE:LINE:COL (only trailing numeric segments).
-  # Matches the pem_client colon syntax so both share one format.
-  segs = arg.rsplit(':', 2)
-  if len(segs) == 3 and segs[1].isdigit() and segs[2].isdigit():
-    return segs[0], int(segs[1]), int(segs[2])
-  segs = arg.rsplit(':', 1)
-  if len(segs) == 2 and segs[1].isdigit():
-    return segs[0], int(segs[1]), 1
-  return arg, 1, 1
+# One FILE[:LINE[:COL]] parser for both entry points (pem_client is the PC-side
+# twin of this command); it imports socket lazily, so this stays cheap.
+from pem_client import _parse
 
 def main(vs, args):
   # Open a file in an already-running pem editor (emacs-server style). Mirrors
