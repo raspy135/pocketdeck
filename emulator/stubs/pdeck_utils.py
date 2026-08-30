@@ -159,11 +159,34 @@ def run_stages(stages, make_stream=CaptureStream):
     prev_output = cap.getvalue()
   return cap, prev_output
 
-def run_pipeline(command, make_stream=CaptureStream):
-  """Run an 'a | b | c' command line given as a single string (used by the gpt
-  assistants). Splits on top-level '|' with quote handling, then runs the
-  stages via run_stages(). Returns (last_stream, output) on success,
-  (None, error message) on failure."""
+def split_commands(text):
+  """Split a command line on top-level ';' into sequentially-run command
+  strings, ignoring separators inside quotes. Empty commands are dropped."""
+  cmds = []
+  cur = ''
+  in_quote = False
+  quote = ''
+  for ch in text:
+    if in_quote:
+      cur += ch
+      if ch == quote:
+        in_quote = False
+    elif ch in ('"', "'"):
+      in_quote = True
+      quote = ch
+      cur += ch
+    elif ch == ';':
+      cmds.append(cur.strip())
+      cur = ''
+    else:
+      cur += ch
+  cmds.append(cur.strip())
+  return [c for c in cmds if c]
+
+def run_one_pipeline(command, make_stream=CaptureStream):
+  """Run a single 'a | b | c' command line (no ';'). Splits on top-level '|'
+  with quote handling, then runs the stages via run_stages(). Returns
+  (last_stream, output) on success, (None, error message) on failure."""
   stage_strs = split_pipeline(command)
   if not stage_strs:
     return None, "empty command"
@@ -174,6 +197,51 @@ def run_pipeline(command, make_stream=CaptureStream):
       return None, "empty command in pipeline"
     stages.append(parts)
   return run_stages(stages, make_stream)
+
+def find_unsupported(text):
+  """Return the first top-level (outside quotes) '&&' or '||' in a command
+  line, or None."""
+  in_quote = False
+  quote = ''
+  prev = ''
+  for ch in text:
+    if in_quote:
+      if ch == quote:
+        in_quote = False
+      prev = ''
+    elif ch in ('"', "'"):
+      in_quote = True
+      quote = ch
+      prev = ''
+    elif ch in ('&', '|') and ch == prev:
+      return ch + ch
+    else:
+      prev = ch
+  return None
+
+UNSUPPORTED_MSG = ("'%s' is not supported. Use ';' to run commands one after "
+                   "another (each one runs regardless of the previous result).")
+
+def run_pipeline(command, make_stream=CaptureStream):
+  """Run a command line: top-level ';' separates commands run one after
+  another, each a pipeline. Outputs are concatenated."""
+  bad = find_unsupported(command)
+  if bad:
+    return None, UNSUPPORTED_MSG % bad
+  commands = split_commands(command)
+  if not commands:
+    return None, "empty command"
+  if len(commands) == 1:
+    return run_one_pipeline(commands[0], make_stream)
+  cap = None
+  outs = []
+  for c in commands:
+    cap, out = run_one_pipeline(c, make_stream)
+    if cap is None:
+      return None, out
+    if out:
+      outs.append(out if out.endswith('\n') else out + '\n')
+  return cap, ''.join(outs)
 
 # System helpers we don't emulate (autosleep, priority, etc.) become no-ops.
 def __getattr__(name):

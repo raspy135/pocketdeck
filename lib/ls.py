@@ -28,6 +28,22 @@ def _join_path(base, name):
     return name
   return base + '/' + name
 
+_re_meta = '.^$+?()[]{}|\\'
+
+def _glob_to_pat(name):
+  # Only '*' is special as a glob. Everything else that is a regex
+  # metacharacter must be escaped, otherwise names like 'a+b.txt' or
+  # 'x[1].md' can never be matched literally.
+  out = ''
+  for ch in name:
+    if ch == '*':
+      out += '.*'
+    elif ch in _re_meta:
+      out += '\\' + ch
+    else:
+      out += ch
+  return out
+
 def _normalize_query_path(q):
   if q[-1] == '/' and len(q) > 1:
     q = q[:-1]
@@ -51,7 +67,7 @@ def _split_query(q):
     if dirname == '':
       dirname = '/'
 
-  return dirname, '^' + filename.replace('.','\\.').replace('*','.*') + '$', q
+  return dirname, '^' + _glob_to_pat(filename) + '$', q
 
 def _collect_recursive(dirname, pat, out, reverse=False):
   try:
@@ -76,14 +92,18 @@ month_list = ( \
     "May","June", "July", "August","September", \
     "October","November", "December" )
 
-def list_file(q, recursive=False, reverse=False):
+def list_file(q, recursive=False, reverse=False, vs=None):
+  # vs is optional: when given, error messages go to that stream instead of
+  # the default stdout (screen 0). Returning None is the failure signal for
+  # callers such as cat/cp/pem, so nothing is printed when vs is None.
   q = _normalize_query_path(q)
   dirname, filename, original = _split_query(q)
   try:
     if not _is_dir(original):
       os.listdir(dirname)
   except Exception:
-    print("Directory not found")
+    if vs:
+      print("Directory not found", file=vs)
     return
 
   pat = re.compile(filename)
@@ -112,7 +132,7 @@ def list_file(q, recursive=False, reverse=False):
   filelist.sort(reverse=reverse)
   return [ dirname, filelist ]
 
-def _print_group(vs, dirname, filelist, detailed):
+def _print_group(vs, dirname, filelist, detailed, index=0):
   print(f'File in {dirname}:', file=vs)
 
   for i, item in enumerate(filelist):
@@ -120,11 +140,12 @@ def _print_group(vs, dirname, filelist, detailed):
       st = os.stat(_join_path(dirname, item))
       t = time.localtime(st[7]+pu.timezone*15*60)
       dirmark = '[Dir]' if st[0]&0x4000 != 0 else ''
-      print(f'{i}: {dirmark} {item} {st[6]:,} {month_list[t[1]][:3]} {t[2]}, {t[0]} {t[3]:02}:{t[4]:02}:{t[5]:02}', file=vs)
+      print(f'{index+i}: {dirmark} {item} {st[6]:,} {month_list[t[1]][:3]} {t[2]}, {t[0]} {t[3]:02}:{t[4]:02}:{t[5]:02}', file=vs)
     else:
       print(f'{item} ', end='', file=vs)
 
   print('', file=vs)
+  return index + len(filelist)
 
 def main(vs,args_in):
   parser = argparse.ArgumentParser(
@@ -133,48 +154,41 @@ def main(vs,args_in):
   parser.add_argument('-l', '--list',action='store_true', help='list files')
   parser.add_argument('-r', '--reverse', action='store_true', help='reverse sort order')
   parser.add_argument('-R', '--recursive', action='store_true', help='search recursively')
-  parser.add_argument('path',nargs='?', help='Path', default = '.')
+  parser.add_argument('paths',nargs='*', help='Path(s). Default is current dir', default=['.'])
 
   args = parser.parse_args(args_in[1:])
-  q = args.path
+  paths = args.paths
+  if len(paths) == 0:
+    paths = ['.']
 
-  ret = list_file(q, args.recursive, args.reverse)
-  if not ret:
-    print('No matched files', file=vs)
+  groups = []
+  for q in paths:
+    ret = list_file(q, args.recursive, args.reverse)
+    if not ret:
+      print(f'No matched files: {q}', file=vs)
+      continue
+    if args.recursive:
+      groups.extend(ret)
+    else:
+      groups.append(ret)
+
+  if len(groups) == 0:
     return
 
-  if args.recursive:
-    for group in ret:
-      _print_group(vs, group[0], group[1], args.list)
-
-    if is_int(args.clip):
-      file_index = int(args.clip)
-      if file_index != -1000:
-        flat = []
-        for group in ret:
-          dirname = group[0]
-          for item in group[1]:
-            flat.append(_join_path(dirname, item))
-        try:
-          filename = flat[file_index]
-        except IndexError:
-          print(f"Index {file_index} was out of range.", file=vs)
-          return
-        pdeck.clipboard_copy(filename)
-        print(f'{filename} was copied to clipboard', file=vs)
-    return
-
-  filelist = ret[1]
-  _print_group(vs, ret[0], filelist, args.list)
+  flat = []
+  index = 0
+  for dirname, filelist in groups:
+    for item in filelist:
+      flat.append(_join_path(dirname, item))
+    index = _print_group(vs, dirname, filelist, args.list, index)
 
   if is_int(args.clip):
     file_index = int(args.clip)
     if file_index != -1000:
       try:
-        filename = filelist[file_index]
+        filename = flat[file_index]
       except IndexError:
         print(f"Index {file_index} was out of range.", file=vs)
         return
-      filename = _join_path(ret[0], filename)
       pdeck.clipboard_copy(filename)
-      print(f'{filename} was copied to clipboard', file = vs)
+      print(f'{filename} was copied to clipboard', file=vs)

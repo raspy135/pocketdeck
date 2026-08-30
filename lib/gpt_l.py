@@ -8,7 +8,6 @@ if _IS_PC:
 
 import network
 import auto_connect
-import codec_config
 import ujson
 import time
 import math
@@ -17,9 +16,9 @@ import pdeck
 import pdeck_utils as pu
 import esclib as elib
 import argparse
-import audio
-import wav_play
-import recorder
+# audio/wav_play/recorder/codec_config are imported lazily inside the record
+# and play functions below: they are the voice chain and must not slow down
+# text-only chat starts (gpt.py, gpt_c.py and flashcards all import this module).
 import os
 import gc
 
@@ -1058,6 +1057,7 @@ class ThinkingAnimation:
 
 def record_audio(vs, filename, duration_sec=15, silent = False):
   """Records 16kHz mono audio"""
+  import audio, codec_config, recorder  # lazy: voice-only chain
   sample_rate = 16000
   cc = codec_config.codec_config()
   cc.toggle_li(False)
@@ -1084,6 +1084,7 @@ def record_audio(vs, filename, duration_sec=15, silent = False):
 
 def play_audio(vs, filename):
   """Plays audio from file using wav_play"""
+  import audio, wav_play  # lazy: voice-only chain
   wp = wav_play.wav_play()
   wp.open(filename)
   wp.play()
@@ -1097,6 +1098,7 @@ def play_audio(vs, filename):
 
 def play_audio_stream(vs, stream):
   """Plays audio from a stream using wav_play"""
+  import audio, wav_play  # lazy: voice-only chain
   wp = wav_play.wav_play()
   wp.open_stream(stream)
   wp.play()

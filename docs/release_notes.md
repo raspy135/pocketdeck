@@ -1,9 +1,18 @@
+## Release Note, Act 29, 2026
+
+- gpt: stream mode, --stream or /stream. Showing thinking process live
+- ls, rm: Support multiple file list
+- morning_word: new app to show morning journal progress.
+
 ## Release Note, Act 28, 2026
 
 ## Application
 
 - gpt: User can interrupt AI work.
-- gpt: stream mode, --stream or /stream. Showing thinking process live.
+- gpt: stream mode, --stream or /stream. Showing thinking process live
+- gpt: Lazy download
+- ls, rm: Support multiple file list
+- morning_word: new app to show morning journal progress.
 
 ## Release Note, Act 23, 2026
 

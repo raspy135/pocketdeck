@@ -361,7 +361,6 @@ The following example will set 10 minutes to kitchen timer.
 analog_clock_set_timer 10
 ````
 
-
 ### Journal
 
 Journal (`journal`) analizes journal Markdown file and visualizes to chart. Refer [[journal_readme.md]] for detail.
@@ -369,6 +368,17 @@ Journal (`journal`) analizes journal Markdown file and visualizes to chart. Refe
 ```
 journal [file] [file..]
 ```
+
+### morning_word
+
+`morning_word` counts words in journal Markdown file. It assumes the format used in [[journal_readme.md]]. The default filename is /sd/Documents/journal.md.
+
+```
+morning_word [file]
+```
+
+
+
 
 ### Graph
 

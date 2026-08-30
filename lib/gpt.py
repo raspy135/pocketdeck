@@ -28,18 +28,33 @@ import re
 import gc
 import pdeck
 import pdeck_utils as pu
-import setuni
 import auto_connect
 import gpt_l as gpt
 import gpt_tools  # shared tool schema + transport-independent executors
-import ai_improve  # self-evolving long-term memory (/improve, update_memory)
 
 # Optional Japanese IME (romaji -> kana -> kanji), shared with pem. If the
 # module is unavailable the conversation prompt simply stays ASCII-only.
-try:
-  import jp_input
-except ImportError:
-  jp_input = None
+# Imported lazily on the first IME use: its module body builds the romaji
+# table and instantiates the WLAN station (setuni/fontloader likewise stay
+# out of the startup path until a jp session is actually requested).
+jp_input = None
+
+def _load_jp_input():
+  """Import jp_input on first use; return the module or None if unavailable."""
+  global jp_input
+  if jp_input is None:
+    try:
+      import jp_input as _m
+      jp_input = _m
+    except ImportError:
+      return None
+  return jp_input
+
+def _jp_session():
+  """New jp_input session (imports the module on first use).
+  Returns None when the IME is unavailable (prompt stays ASCII)."""
+  m = _load_jp_input()
+  return m.input_session() if m else None
 
 el = gpt.el
 
@@ -1074,8 +1089,12 @@ def assemble_instructions(role, tts, agent, app_list, my_screen=None, vision=Tru
     # The device/tool prose is shared with gpt_rt so the prompts can't drift.
     text += "\n\n" + gpt_tools.device_instructions(app_list, vision=vision,
                                                    my_screen=my_screen)
-    # Fold in the self-evolving memory (learned in past sessions) in agent mode.
-    text += ai_improve.memory_block()
+  # Fold in the self-evolving memory (learned in past sessions) in every mode:
+  # recalling what we know about the user should not depend on /tools.
+  # Imported here (not at module top) so the module body stays out of the
+  # startup path; the file read itself happens on every prompt assembly.
+  import ai_improve
+  text += ai_improve.memory_block()
   return text
 
 
@@ -1170,7 +1189,7 @@ def read_line(vs, prompt, history, on_shift_tab=None, lead="\n",
   hcur = len(history)
   pending = None
   # Active IME session while composing Japanese (None when off/unavailable).
-  im = jp_input.input_session() if (allow_ime and ime_on and jp_input) else None
+  im = _jp_session() if (allow_ime and ime_on) else None
 
   # anchor[0] = cells from the prompt start to the caret, as last rendered. Used
   # to step back to the prompt start before each repaint.
@@ -1233,7 +1252,7 @@ def read_line(vs, prompt, history, on_shift_tab=None, lead="\n",
       c1 = vs.read(1)
       if allow_ime and on_ime_toggle and c1 in ('`', 'j', '~'):  # Alt+`/j: toggle IME
         if on_ime_toggle():
-          im = jp_input.input_session() if jp_input else None
+          im = _jp_session()
         else:
           im = None                                # discards any active pre-edit
         redraw()
@@ -1438,6 +1457,7 @@ def main(vs, args_in):
     # Switch the terminal to the unicode font first so Japanese (and the IME
     # pre-edit) can render. The IME itself stays off until toggled with Alt+`/j.
     try:
+      import setuni  # lazy: font swap is only needed for jp
       setuni.main(vs, ['setuni'])
       gpt_obj.jp_font_loaded = True
     except Exception:
@@ -1635,7 +1655,7 @@ def main(vs, args_in):
     """Distill the session into long-term memory (the /improve action). Auto runs
     stay quiet unless they actually update the memory; manual runs are verbose.
     On success the instructions are refreshed so the freshened memory applies on
-    the next turn (memory is injected in agent mode)."""
+    the next turn (memory is injected in every mode)."""
     improve_state['since'] = 0
     gpt_obj.model = ctx['model']  # route self-improve to the active model/endpoint
     if not auto:
@@ -1651,8 +1671,6 @@ def main(vs, args_in):
         print("[ Auto-improve: %s ]" % msg, file=vs)
     else:
       print(("Memory updated: %s" % msg) if ok else ("Improve skipped: %s" % msg), file=vs)
-      if ok and not ctx['agent']:
-        print("(Tip: memory is loaded into the prompt in agent mode; enable with /tools.)", file=vs)
     return ok
 
   def mode_prompt():
@@ -1668,12 +1686,15 @@ def main(vs, args_in):
   def ensure_jp_font():
     if not gpt_obj.jp_font_loaded:
       try:
+        import setuni  # lazy: font swap is only needed for jp
         setuni.main(vs, ['setuni'])
         gpt_obj.jp_font_loaded = True
       except Exception:
         pass
 
   def toggle_ime():
+    if not gpt_obj.jp_ime and _load_jp_input() is None:
+      return False  # IME module unavailable on this device
     gpt_obj.jp_ime = not gpt_obj.jp_ime
     if gpt_obj.jp_ime:
       ensure_jp_font()
@@ -1884,7 +1905,7 @@ def main(vs, args_in):
       line = message.strip()
     else:
       line = read_line(vs, mode_prompt, history, on_shift_tab=toggle_mode,
-                       allow_ime=(jp_input is not None), ime_on=gpt_obj.jp_ime,
+                       allow_ime=True, ime_on=gpt_obj.jp_ime,
                        on_ime_toggle=toggle_ime)
       if line is None:        # Ctrl-C cancelled this line
         first = False

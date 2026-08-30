@@ -33,8 +33,8 @@ import ujson
 import ubinascii
 import pdeck
 import pdeck_utils as pu
-import pngwriter
-import ai_improve
+# pngwriter and ai_improve are imported lazily at their call sites
+# (capture_screen exec, run_self_improve) to keep this import light.
 
 
 # CaptureStream (bounded stdout capture) and the pipeline machinery now live in
@@ -344,7 +344,7 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False,
   tools.append({
     "type": "function",
     "name": "command_with_return",
-    "description": "Run a device command (or any installed module) and return its captured output for non-graphical apps. GRAPHIC/interactive apps cannot run here (there is no screen to draw on): launch them with launch_app instead, setting reload=true after editing their source — launch_app's reload replaces the 'r' prefix. If a graphic app is run here by mistake it is detected and relaunched via launch_app automatically. This is your primary tool for TESTING AND VERIFYING CODE: after you write a script with write_file, run it here by name and read the output to confirm it works, see errors, and iterate. A runnable script/app is a module exposing main(vs, args); invoke it by its name plus arguments, e.g. 'temp_foo arg1' for /sd/py/temp_foo.py, or any existing app/command. IMPORTANT: if you EDIT a script and run it again, prefix the command with 'r ' to reload it (e.g. 'r temp_foo arg1') — without 'r' the previous, cached version runs instead of your new code. Built-in commands include: ls, cat, head, tail, rm, mv, cp, mkdir, rmdir, grep (search in files), ping, curl. **This not Linux**, available options are limited. See README.md for available options for the commands. Simple pipes ('|') are supported: a stage's output is fed to the next command as stdin, and stdin-aware filters read it when given no file (grep, head, and tail, e.g. 'ls -r /sd/py | grep clock', 'curl -s URL | grep -i error | head -n 5', or 'cat log.txt | tail -n 20'). Other commands ignore piped stdin, so only pipe INTO grep/head/tail. Output redirect to a file is supported on the final stage: '> file' truncates, '>> file' appends (e.g. 'ls -r /sd/py > files.txt' or 'curl -s URL | grep -i error >> log.txt'); the written text is plain (color codes stripped) and capped at ~50KB. This is not Linux otherwise: **No input redirect ('<'), backticks, '&&', command connection ';' or subshells**; use one command per stage.",
+    "description": "Run a device command (or any installed module) and return its captured output for non-graphical apps. GRAPHIC/interactive apps cannot run here (there is no screen to draw on): launch them with launch_app instead, setting reload=true after editing their source — launch_app's reload replaces the 'r' prefix. If a graphic app is run here by mistake it is detected and relaunched via launch_app automatically. This is your primary tool for TESTING AND VERIFYING CODE: after you write a script with write_file, run it here by name and read the output to confirm it works, see errors, and iterate. A runnable script/app is a module exposing main(vs, args); invoke it by its name plus arguments, e.g. 'temp_foo arg1' for /sd/py/temp_foo.py, or any existing app/command. IMPORTANT: if you EDIT a script and run it again, prefix the command with 'r ' to reload it (e.g. 'r temp_foo arg1') — without 'r' the previous, cached version runs instead of your new code. Built-in commands include: ls, cat, head, tail, rm, mv, cp, mkdir, rmdir, grep (search in files), ping, curl. **This not Linux**, available options are limited. See README.md for available options for the commands. Simple pipes ('|') are supported: a stage's output is fed to the next command as stdin, and stdin-aware filters read it when given no file (grep, head, and tail, e.g. 'ls -r /sd/py | grep clock', 'curl -s URL | grep -i error | head -n 5', or 'cat log.txt | tail -n 20'). Other commands ignore piped stdin, so only pipe INTO grep/head/tail. Output redirect to a file is supported on the final stage: '> file' truncates, '>> file' appends (e.g. 'ls -r /sd/py > files.txt' or 'curl -s URL | grep -i error >> log.txt'); the written text is plain (color codes stripped) and capped at ~50KB. '> /dev/null' throws the output away instead (there is no such file on the device). Commands can be chained with ';' to run one after another, left to right, with their outputs concatenated (e.g. 'r temp_foo ; cat out.txt'); a ';' inside quotes is literal. This is not Linux otherwise: **No input redirect ('<'), backticks, '&&', '||' (both are rejected with an error - use ';') or subshells**; use one command per stage.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -912,6 +912,7 @@ class ToolExecBase:
     # Shared by the update_memory tool, gpt_c's /improve command and gpt_rt's
     # periodic auto-run. Analyzes the recent conversation and rewrites the
     # compact memory file. Returns (ok, message).
+    import ai_improve  # lazy: only /improve and update_memory need this
     api_key = getattr(self, 'api_key', '') or ''
     base_url = getattr(self, 'base_url', '') or ''
     if self.SUMMARY_USES_ACTIVE_MODEL:
@@ -1053,18 +1054,24 @@ class ToolExecBase:
     command = args.get("command", "").strip()
     if not command:
       return "Error: no command specified"
-    # Recursion guard: only the first command of the line is checked. Guarded
-    # modules take over the conversation, so they can't meaningfully appear as
-    # a later pipe stage anyway.
-    parts = pu.parse_cmd_string(command)
-    if parts and parts[0] == 'r' and len(parts) > 1:
-      parts.pop(0)
-    if parts and parts[0] in self.RECURSIVE_GUARD:
-      return "Error: refusing to run '%s' recursively from inside the assistant." % parts[0]
-    # Pipeline splitting/execution lives in pdeck_utils.run_pipeline: stages are
-    # split on top-level '|', each stage's captured output feeds the next as
-    # stdin via the pstdin bridge, a trailing '> file'/'>> file' on the final
-    # stage writes output to a file, and bare '2>&1' redirects are dropped.
+    # Recursion guard: the first command of every ';' segment is checked (pipe
+    # stages are not: guarded modules take over the conversation, so they can't
+    # meaningfully appear as a later pipe stage anyway).
+    parts = []
+    for i, seg in enumerate(pu.split_commands(command)):
+      seg_parts = pu.parse_cmd_string(seg)
+      if seg_parts and seg_parts[0] == 'r' and len(seg_parts) > 1:
+        seg_parts.pop(0)
+      if seg_parts and seg_parts[0] in self.RECURSIVE_GUARD:
+        return ("Error: refusing to run '%s' recursively from inside the "
+                "assistant." % seg_parts[0])
+      if i == 0:
+        parts = seg_parts
+    # Pipeline splitting/execution lives in pdeck_utils.run_pipeline: the line
+    # is split on top-level ';' into commands run in sequence, each split on
+    # top-level '|' into stages whose captured output feeds the next as stdin
+    # via the pstdin bridge, a trailing '> file'/'>> file' on the final stage
+    # writes output to a file, and bare '2>&1' redirects are dropped.
     cap, result = pu.run_pipeline(command, AgentCaptureStream)
     if cap is None:
       return "Error: " + result
@@ -1072,7 +1079,8 @@ class ToolExecBase:
     # AgentCaptureStream): relaunch it properly on a real screen. reload=True
     # because the failed run has already cached the module. Pipes are not
     # auto-relaunched — a graphic app makes no sense as a pipe stage.
-    if result and AgentCaptureStream.NEEDS_SCREEN in result and parts and '|' not in command:
+    if (result and AgentCaptureStream.NEEDS_SCREEN in result and parts
+        and '|' not in command and ';' not in command):
       la = self.execute_launch_app(ujson.dumps(
         {"app_name": parts[0], "args": parts[1:], "reload": True}))
       return ("'%s' is a graphic/interactive app; it cannot run under "
@@ -1241,6 +1249,7 @@ class ToolExecBase:
       v = pdeck.vscreen()
       if not v.take_screenshot(0, 0, 400, 240, self.capture_buf):
         return "Error: screenshot timed out (display busy or screen not active)"
+      import pngwriter  # lazy: only capture_screen needs the encoder
       png = pngwriter.encode_mono_xbm(self.capture_buf, 400, 240)
       b64 = ubinascii.b2a_base64(png).decode().strip()
     except Exception as e:
