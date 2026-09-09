@@ -527,6 +527,8 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
   ARG_ECHO_MAX = 200       # cap the echoed tool arguments (write_file is huge)
   text_shown = False       # the answer already reached the screen as it streamed
   THINK_COLOR = 36         # cyan, as in the thinking animation
+  _say_buf = ""            # _flush_say is reachable with no stream round run
+  _say_bold = False
 
   def _stream_round(self, payload):
     """POST with stream:true, echoing the model's thinking and its tool-call
@@ -543,6 +545,8 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
     self._thinking = False   # a [Thinking] block is open
     self._fresh = False      # cursor already sits on a blank fresh line
     self._echoed = 0         # arguments echoed for the call being drafted
+    self._say_buf = ""       # answer text awaiting its "**" pair (see _flush_say)
+    self._say_bold = False   # bold state carried across deltas
     self._stream_begin()
     try:
       resp = self.stream_post(self.url,
@@ -564,6 +568,7 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
           self.note_interrupt(True)
         self._stream_event(ev)
       self._end_thinking()
+      self._flush_say(True)    # release any held-back tail of the answer
       if self._echoed or self.text_shown:
         self.vs.write("\n")     # close the last streamed line
       data = self._stream_result()
@@ -608,6 +613,7 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
 
   def _call_start(self, name):
     self._end_thinking()
+    self._flush_say(True)    # narration ends here: release any held-back "*"
     self._lead()
     self.vs.write("%s[Call]%s %s " % (el.bold(), el.bold_off(), name))
     self._echoed = 0
@@ -628,8 +634,43 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
     self._end_thinking()
     if not self.text_shown:      # only the first delta opens the block
       self._lead()
-    self.vs.write(text)
     self.text_shown = True   # present_response must not print it again
+    # Bold formatting (**text**), same as gpt.format() does on the blocking
+    # path. Deltas can split "**" across chunks, so we buffer and hold back a
+    # trailing lone "*"; the bold state persists across deltas in _say_bold.
+    self._say_buf += text
+    self._flush_say(False)
+
+  def _flush_say(self, final):
+    """Emit formatted answer text; keep any possibly-half "**" for the next
+    delta unless this is the final flush."""
+    buf = self._say_buf
+    if not buf:
+      if final and self._say_bold:   # unclosed "**": close the bold anyway
+        self._say_bold = False
+        self.vs.write(el.bold_off())
+      return
+    out = ""
+    i = 0
+    bold = self._say_bold
+    while True:
+      pos = buf.find("**", i)
+      if pos == -1:
+        break
+      out += buf[i:pos]
+      out += el.bold_off() if bold else el.set_font_color(1)
+      bold = not bold
+      i = pos + 2
+    rest = buf[i:]
+    if not final and rest.endswith("*"):   # may be half of a split "**"
+      self._say_buf = rest[-1:]
+      rest = rest[:-1]
+    else:
+      self._say_buf = ""
+    self._say_bold = bold
+    if bold and final:
+      rest += el.bold_off()
+    self.vs.write(out + rest)
 
   # --- Responses API event decoding ------------------------------------------
 
@@ -671,6 +712,8 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
     blocking request returns is still printed in full."""
     self.stream_ok = False
     self.text_shown = False
+    self._say_buf = ""
+    self._say_bold = False
     print(msg, file=self.vs)
     return None
 
@@ -809,6 +852,7 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
       if fn_calls:
         # Text alongside tool calls is narration, not the answer - the real one
         # is still coming, so present_response must still print it.
+        self._flush_say(True)    # release any held-back tail of the narration
         self.text_shown = False
 
       if not fn_calls:

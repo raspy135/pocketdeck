@@ -1,6 +1,8 @@
 # word_count.py — Morning writing word-count dashboard for journal.md
 # Top: big progress bar for today vs 400-word goal.
-# Bottom: small bars for the last 7 days (including today).
+# Bottom-left: small bars for the last 7 days (including today).
+# Bottom-right: GitHub-style contribution heatmap of the last weeks,
+# shaded with dither levels.
 # Enter = reload data, Backspace / q = quit.
 
 import argparse
@@ -17,6 +19,8 @@ H = 240
 GOAL = 400
 DEFAULT_JOURNAL = '/sd/Documents/journal.md'
 DAY_NAMES = ('Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun')
+MONTH_NAMES = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+               'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
 # Background poll: re-read journal every N ms while idle.
 RELOAD_MS = 3000
 # LED1 celebration when today's count first hits the goal.
@@ -24,6 +28,11 @@ LED_FLASHES = 6
 LED_ON_MS = 120
 LED_OFF_MS = 100
 LED_BRIGHT = 80
+# Heatmap (bottom-right): GitHub-style week columns x 7 weekday rows.
+HEAT_WEEKS = 16          # number of week columns (~4 months back)
+HEAT_CELL = 7            # cell size in px
+HEAT_PITCH = 8           # cell + gap
+HEAT_X0 = 215            # left edge of the heat section (right of week bars)
 
 
 def center_x(v, x, w, text):
@@ -44,6 +53,23 @@ def fit(v, text, max_w):
 
 def clamp01(t):
   return 0.0 if t < 0 else (1.0 if t > 1 else t)
+
+
+# Dither levels for the 4 heat buckets (words > 0); empty days use 1 (faint).
+HEAT_LEVELS = (5, 9, 13, 16)
+
+
+def heat_level(words):
+  if words <= 0:
+    return 1
+  r = words / GOAL if GOAL else 0.0
+  if r < 0.25:
+    return HEAT_LEVELS[0]
+  if r < 0.5:
+    return HEAT_LEVELS[1]
+  if r < 1.0:
+    return HEAT_LEVELS[2]
+  return HEAT_LEVELS[3]
 
 
 def count_words(text):
@@ -73,6 +99,13 @@ def add_days(y, m, d, delta):
   t += delta * 86400
   lt = time.gmtime(int(t))
   return (lt[0], lt[1], lt[2])
+
+
+def weekday_index(y, m, d):
+  t = time.mktime((y, m, d, 12, 0, 0, 0, 0))
+  lt = time.gmtime(int(t))
+  # MicroPython gmtime: tm_wday 0=Mon .. 6=Sun
+  return lt[6]
 
 
 def weekday_name(y, m, d):
@@ -165,6 +198,8 @@ class WordCountApp:
     self.today = today_ymd()
     self.days = []       # list of (ymd_tuple, key, label, words)
     self.today_words = 0
+    self.counts = {}     # full { 'YYYY-MM-DD': words } map (for the heatmap)
+    self.heat = []       # heatmap columns: list of (days, words, is_today)
     self.error = None
     self.last_reload_ms = 0
     # Cached journal stat so idle polls skip a full re-parse when unchanged.
@@ -218,6 +253,7 @@ class WordCountApp:
       changed = days != self.days
       self.days = days
       self.today_words = days[-1][3] if days else 0
+      self.build_heat()
       if changed or animate:
         self.replay()
       return
@@ -229,6 +265,7 @@ class WordCountApp:
       self.error = str(e)
 
     self._file_stat = sig
+    self.counts = counts
 
     days = []
     for i in range(6, -1, -1):
@@ -241,6 +278,7 @@ class WordCountApp:
     changed = days != self.days
     self.days = days
     self.today_words = days[-1][3] if days else 0
+    self.build_heat()
 
     # Fire LED celebration only on the below-goal -> goal transition.
     if self.today_words >= GOAL:
@@ -258,6 +296,29 @@ class WordCountApp:
   def replay(self):
     self.grow.seek(0.0)
     self.dirty = True
+
+  def build_heat(self):
+    """Build HEAT_WEEKS week-columns of word counts, last column has today.
+
+    Each entry is (row_index, words, is_future); row 0 = Mon .. row 6 = Sun.
+    """
+    ty, tm, td = self.today
+    # Monday of the last visible week, then step back HEAT_WEEKS-1 weeks.
+    wday = weekday_index(ty, tm, td)
+    mon_y, mon_m, mon_d = add_days(ty, tm, td, -wday)
+    start = -7 * (HEAT_WEEKS - 1)
+    today_key = ymd_key(ty, tm, td)
+    cols = []
+    for col in range(HEAT_WEEKS):
+      rows = []
+      for row in range(7):
+        y, m, d = add_days(mon_y, mon_m, mon_d, start + col * 7 + row)
+        key = ymd_key(y, m, d)
+        words = self.counts.get(key, 0)
+        is_future = key > today_key
+        rows.append((y, m, d, words, is_future))
+      cols.append(rows)
+    self.heat = cols
 
   def _start_led_flash(self):
     self.led_flash_left = LED_FLASHES
@@ -408,7 +469,7 @@ class WordCountApp:
     if n == 0:
       return
 
-    # Section header + rule
+    # Section header + rule (spans the whole lower half)
     v.set_draw_color(1)
     v.set_dither(16)
     v.draw_h_line(0, 134, W)
@@ -417,12 +478,12 @@ class WordCountApp:
 
     peak = max(GOAL, max((d[3] for d in days), default=0))
     plot_x = 14
-    plot_w = W - plot_x * 2
+    plot_w = HEAT_X0 - plot_x - 22
     plot_top = 158
     plot_bottom = 214
     full_h = plot_bottom - plot_top
     slot = plot_w / n
-    bar_w = int(slot * 0.55)
+    bar_w = int(slot * 0.6)
 
     # Goal reference line across the plot
     goal_y = plot_bottom - int(full_h * (GOAL / peak)) if peak else plot_bottom
@@ -431,7 +492,7 @@ class WordCountApp:
     v.set_dither(16)
     gtxt = str(GOAL)
     v.set_font('u8g2_font_profont15_mf')
-    v.draw_str(right_x(v, W - 6, gtxt), goal_y - 2, gtxt)
+    v.draw_str(right_x(v, plot_x + plot_w + 6, gtxt), goal_y - 2, gtxt)
 
     # Baseline
     v.draw_h_line(plot_x, plot_bottom, plot_w)
@@ -459,13 +520,76 @@ class WordCountApp:
         vs_txt = str(shown_words)
         v.draw_str(center_x(v, bx, bar_w, vs_txt), by - 2, vs_txt)
 
-      # Day label; mark today with a small underline
+      # Day label (one letter, the column is narrow); underline marks today
       v.set_font('u8g2_font_profont15_mf')
-      v.draw_str(center_x(v, slot_x, int(slot), label), plot_bottom + 14, label)
+      ch = label[0]
+      v.draw_str(center_x(v, slot_x, int(slot), ch), plot_bottom + 14, ch)
       if is_today:
-        uw = v.get_utf8_width(label)
-        ux = center_x(v, slot_x, int(slot), label)
+        uw = v.get_utf8_width(ch)
+        ux = center_x(v, slot_x, int(slot), ch)
         v.draw_h_line(ux, plot_bottom + 16, uw)
+    v.set_dither(16)
+
+  def draw_heat(self):
+    """GitHub-style contribution heatmap, dither-shaded, right of the bars."""
+    v = self.v
+    if not self.heat:
+      return
+
+    cell = HEAT_CELL
+    pitch = HEAT_PITCH
+    grid_top = 160
+    reveal = anm.ease_out(clamp01((self.grow.t - 0.30) / 0.60))
+    visible_cols = int(reveal * len(self.heat) + 0.001)
+
+    # Month labels above the grid: mark the first column that enters a new
+    # month, skipping labels that would collide with the previous one.
+    v.set_font('u8g2_font_profont11_mf')
+    v.set_draw_color(1)
+    v.set_dither(16)
+    prev_month = -1
+    label_right = -100
+    for col, rows in enumerate(self.heat):
+      y, m, d = rows[0][0], rows[0][1], rows[0][2]
+      if m == prev_month:
+        continue
+      prev_month = m
+      txt = MONTH_NAMES[m - 1]
+      x = HEAT_X0 + col * pitch
+      if x < label_right + 5:
+        continue
+      v.draw_str(x, grid_top - 3, txt)
+      label_right = x + v.get_utf8_width(txt)
+
+    # Cells
+    today_key = ymd_key(self.today[0], self.today[1], self.today[2])
+    for col in range(visible_cols):
+      rows = self.heat[col]
+      for row in range(7):
+        y, m, d, words, is_future = rows[row]
+        if is_future:
+          continue
+        x = HEAT_X0 + col * pitch
+        yy = grid_top + row * pitch
+        v.set_dither(heat_level(words))
+        v.draw_box(x, yy, cell, cell)
+        if ymd_key(y, m, d) == today_key:
+          v.set_dither(16)
+          v.draw_frame(x - 1, yy - 1, cell + 2, cell + 2)
+    v.set_dither(16)
+
+    # Legend: 4 dither samples under the grid.
+    v.set_font('u8g2_font_profont11_mf')
+    lx = HEAT_X0
+    ly = grid_top + 7 * pitch + 4
+    v.draw_str(lx, ly + 5, 'less')
+    lx += v.get_utf8_width('less') + 6
+    for level in HEAT_LEVELS:
+      v.set_dither(level)
+      v.draw_box(lx, ly - 3, cell, cell)
+      lx += cell + 3
+    v.set_dither(16)
+    v.draw_str(lx + 3, ly + 5, 'more')
 
   def draw_error(self):
     if not self.error:
@@ -482,6 +606,7 @@ class WordCountApp:
     self.draw_header()
     self.draw_today()
     self.draw_week()
+    self.draw_heat()
     self.draw_error()
     v.finished()
 

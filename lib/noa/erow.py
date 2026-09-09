@@ -16,6 +16,82 @@ import pdeck
 from pem import _hl_line
 
 
+# Maps are local to small immutable chunks. Editing a Japanese row replaces
+# only the touched chunks, not every byte/char/display entry in the line.
+_CHUNK_BYTES = 128
+
+
+class _ChunkMap:
+  def __init__(self, row, which, key_axis, value_axis):
+    self.row = row
+    self.which = which
+    self.key_axis = key_axis
+    self.value_axis = value_axis
+
+  def __len__(self):
+    return self.row._chunk_offsets[self.key_axis][-1]
+
+  def __getitem__(self, index):
+    row = self.row
+    offsets = row._chunk_offsets
+    size = offsets[self.key_axis][-1]
+    if index < 0:
+      index += size
+    if index < 0 or index >= size:
+      raise IndexError('row map index')
+    block = row._find_chunk(self.key_axis, index)
+    local = index - offsets[self.key_axis][block]
+    return (row._chunks[block].maps[self.which][local]
+            + offsets[self.value_axis][block])
+
+
+class _RowChunk:
+  def __init__(self, chars, tab_size):
+    # Reuse the reference mapper on a bounded piece. Never recurse through
+    # update(), which is the entry point for chunked whole-row mapping.
+    row = erow(chars, tab_size)
+    if row._is_simple(chars):
+      row._update_simple()
+    else:
+      row._update_full()
+    self.maps = (row.cbmap, row.bcmap, row.bdmap, row.dbmap)
+    self.sizes = (len(chars), row.len, len(row.dbmap))
+
+
+def _split_row_chunks(chars, tab_size):
+  # Keep UTF-8 codepoints and complete ANSI escape sequences in one chunk.
+  # ANSI is used by PEM's Japanese pre-edit underline. An unfinished escape
+  # uses the original full mapper, rather than guessing its inherited state.
+  parts = []
+  start = 0
+  escape = 0
+  n = len(chars)
+  count = max(1, (n + _CHUNK_BYTES - 1) // _CHUNK_BYTES)
+  target = (n + count - 1) // count
+  for i in range(n):
+    ch = chars[i]
+    if ch < 128:
+      if ch == 27:
+        escape = 1
+      elif escape == 1:
+        escape = 2 if ch == 91 else 0
+      elif escape > 1:
+        if 97 <= ch <= 122 or ch == 65:
+          escape = 0
+        else:
+          escape += 1
+    end = i + 1
+    if (end - start >= target and escape == 0
+        and (end == n or chars[end] & 0xc0 != 0x80)):
+      parts.append(_RowChunk(chars[start:end], tab_size))
+      start = end
+  if escape:
+    return None
+  if start < n:
+    parts.append(_RowChunk(chars[start:], tab_size))
+  return parts
+
+
 class erow:
   def __init__(self, str, tab_size, w=200):
     self.chars = str
@@ -31,14 +107,150 @@ class erow:
     self.tab_detected = False
     self.updated = False
     self.hl_mode = None
-    self.hl_bytes = {}
+    self.simple = False
+    self._chunks = None
+    self.invalidate_hl()
     #self.update(True)
 
   def decode(self):
     return self.chars.decode('utf-8')
 
-  def update(self, skip_tab_scan = False):
+  @staticmethod
+  def _is_simple(chars):
+    # Native byte scan; no Python per-column loop or UTF-8 decoding needed.
+    return (not chars or max(chars) < 128) and chars.find(b'\t') < 0 and chars.find(b'\x1b') < 0
+
+  def invalidate_hl(self):
     self.hl_bytes = {}
+    self._hl_w = self.w
+    self._hl_mode = self.hl_mode
+
+  def highlight_segment(self, start, segment):
+    # Only highlight visible wrapped segments. Include layout and mode in the
+    # cache identity; edits invalidate it even when the line length is unchanged.
+    if self._hl_w != self.w or self._hl_mode != self.hl_mode:
+      self.invalidate_hl()
+    if start not in self.hl_bytes:
+      self.hl_bytes[start] = _hl_line(segment, self.hl_mode)
+    return self.hl_bytes[start]
+
+  def _update_simple(self):
+    # ASCII without tabs/escapes: byte == char == display column. range is a
+    # constant-size native indexed sequence, not four allocated mapping arrays.
+    n = len(self.chars)
+    m = range(n)
+    self.cbmap = self.bcmap = self.bdmap = self.dbmap = m
+    self.len = self.ex_len = n
+    self.ex_chars = self.chars
+    self.tab_detected = False
+    self.simple = True
+    self._chunks = None
+    self.updated = True
+    self.invalidate_hl()
+
+  def _find_chunk(self, axis, pos):
+    offsets = self._chunk_offsets[axis]
+    hint = self._chunk_hint[axis]
+    if offsets[hint] <= pos < offsets[hint + 1]:
+      return hint
+    lo, hi = 0, len(self._chunks)
+    while lo < hi:
+      mid = (lo + hi) // 2
+      if offsets[mid + 1] <= pos:
+        lo = mid + 1
+      else:
+        hi = mid
+    self._chunk_hint[axis] = lo
+    return lo
+
+  def _set_chunks(self, chunks):
+    if not chunks:
+      self._update_simple()
+      return
+    self._chunks = chunks
+    bs, cs, ds = [0], [0], [0]
+    b = c = d = 0
+    for chunk in chunks:
+      nb, nc, nd = chunk.sizes
+      b += nb
+      c += nc
+      d += nd
+      bs.append(b)
+      cs.append(c)
+      ds.append(d)
+    self._chunk_offsets = (bs, cs, ds)
+    self._chunk_hint = [0, 0, 0]
+    self.cbmap = _ChunkMap(self, 0, 1, 0)
+    self.bcmap = _ChunkMap(self, 1, 0, 1)
+    self.bdmap = _ChunkMap(self, 2, 0, 2)
+    self.dbmap = _ChunkMap(self, 3, 2, 0)
+    self.len = self.ex_len = c
+    self.ex_chars = self.chars
+    self.tab_detected = False
+    self.simple = False
+    self.updated = True
+    self.invalidate_hl()
+
+  def _update_chunks(self):
+    if self.chars.find(b'\t') >= 0:
+      return False
+    chunks = _split_row_chunks(self.chars, self.tab_size)
+    if chunks is None:
+      return False
+    self._set_chunks(chunks)
+    return True
+
+  def _edit_chunks(self, a, b, inserted, newchars):
+    if self._chunks is None or inserted.find(b'\t') >= 0:
+      return False
+    offsets = self._chunk_offsets[0]
+    last = len(self._chunks) - 1
+    left = self._find_chunk(0, a) if a < offsets[-1] else last
+    right = self._find_chunk(0, b - 1) if b > a else left
+    # Rebalance only an undersized piece. Balanced splitting above prevents
+    # one tiny new chunk per keystroke without remapping neighbors every time.
+    size = offsets[right + 1] - offsets[left] + len(inserted) - (b - a)
+    if size < _CHUNK_BYTES // 2:
+      if right < last:
+        right += 1
+      elif left > 0:
+        left -= 1
+    start = offsets[left]
+    end = offsets[right + 1] + len(inserted) - (b - a)
+    parts = _split_row_chunks(newchars[start:end], self.tab_size)
+    if parts is None:
+      return False
+    chunks = self._chunks[:left] + parts + self._chunks[right + 1:]
+    self.chars = newchars
+    self._set_chunks(chunks)
+    return True
+
+  def with_insert(self, at, text):
+    # Temporary IME row: share immutable maps of the original, then splice
+    # only its underlined pre-edit region. The original text stays untouched.
+    if not self.updated:
+      self.update()
+    if self._chunks is None:
+      self._update_chunks()
+    copy = erow(self.chars, self.tab_size, self.w)
+    copy.hl_mode = self.hl_mode
+    if self._chunks is not None:
+      copy._set_chunks(self._chunks)
+    copy.insert_str(at, text)
+    return copy
+
+  def update(self, skip_tab_scan = False):
+    # Explicit replacement reclassifies the row; normal edits reuse its maps.
+    if self._is_simple(self.chars):
+      self._update_simple()
+    elif not self._update_chunks():
+      self._update_full()
+
+  def _update_full(self):
+    # Reference/fallback mapper for tabs and unfinished escape sequences.
+    self.simple = False
+    self._chunks = None
+    self.invalidate_hl()
     chars = self.chars
     n = len(chars)
     tab_size = self.tab_size
@@ -153,13 +365,15 @@ class erow:
       self.tab_detected = False
 
     self.updated = True
-    self.update_hl_bytes()
-    
+    # Highlighting is deferred until a segment is actually displayed.
+
   def update_hl_bytes(self):
+    # Explicit full prewarm for callers that need it; editing and background
+    # mapping do not use this path. A width/mode change must discard old keys.
     if not self.updated:
       self.update()
-      return
-      
+    self.invalidate_hl()
+
     if self.hl_mode in ('md', 'py', 'c'):
       cur = 0
       while True:
@@ -232,40 +446,83 @@ class erow:
     startat = 0 if start == 0 else self.cbmap[start]
     return self.chars[startat:endat]
     
+  def _byte_at(self, c):
+    if c <= 0:
+      return 0
+    if c >= self.len:
+      return len(self.chars)
+    return self.cbmap[c]
+
   def insert_str(self, at, str):
     if not self.updated:
       self.update()
-    # `str` shadows the builtin here, so the original `type(str) == str` never
-    # matched; check against bytes/bytearray instead so a real str is encoded.
-    # (MicroPython's bytearray.extend tolerates a str; CPython does not.)
     if not isinstance(str, (bytes, bytearray)):
       str = str.encode("utf-8")
-    #print(self.cbmap)
-    newchars = self.substr(0,at)
-    newchars.extend(str)
-    newchars.extend(self.substr(at,-1))
+    if not str:
+      return
+    b = self._byte_at(at)
+    # Copy-on-write is required: undo snapshots retain references to chars.
+    # Slice assignment avoids building both prefix and suffix substrings.
+    newchars = bytearray(self.chars)
+    newchars[b:b] = str
+    if self._edit_chunks(b, b, str, newchars):
+      return
     self.chars = newchars
-    #print(self.chars)
-    #arr = [ self.sub[:at], str, self.chars[at:] ]
-    #print(arr)
-    #self.chars = "".join(arr)
-    self.update()
+    if self.simple and self._is_simple(str):
+      self._update_simple()
+    else:
+      self.updated = False
+      self.update()
 
   def update_str(self, str):
-    if not isinstance(self.chars, bytearray):
-      raise Exception('chars must be bytearray')
-    self.chars = str
+    if not isinstance(str, (bytes, bytearray)):
+      raise Exception('chars must be bytes or bytearray')
+    self.chars = bytearray(str) if isinstance(str, bytes) else str
+    self.updated = False
     self.update()
 
   def delete_str(self, at, length):
-    newchars = self.substr(0,at)
-    newchars.extend(self.substr(at+length, -1))
+    if not self.updated:
+      self.update()
+    if length <= 0:
+      return
+    a = self._byte_at(at)
+    b = self._byte_at(at + length)
+    if a == b:
+      return
+    newchars = bytearray(self.chars)
+    newchars[a:b] = b''
+    if self._edit_chunks(a, b, b'', newchars):
+      return
     self.chars = newchars
-    self.update()
+    if self.simple:
+      self._update_simple()
+    else:
+      self.updated = False
+      self.update()
 
   def erase_to_the_end(self,c):
-    self.chars = self.substr(0,c)
-    self.update()
+    if not self.updated:
+      self.update()
+    self.delete_str(c, self.len - c)
+
+  def _char_display(self, at):
+    if self._chunks is None:
+      return self.bdmap[self.cbmap[at]]
+    if at < 0:
+      at += self.len
+    block = self._find_chunk(1, at)
+    maps = self._chunks[block].maps
+    offsets = self._chunk_offsets
+    return maps[2][maps[0][at - offsets[1][block]]] + offsets[2][block]
+
+  def _display_char(self, at):
+    if self._chunks is None:
+      return self.bcmap[self.dbmap[at]]
+    block = self._find_chunk(2, at)
+    maps = self._chunks[block].maps
+    offsets = self._chunk_offsets
+    return maps[1][maps[3][at - offsets[2][block]]] + offsets[1][block]
 
   def expand(self, start, at):
     if not self.updated:
@@ -276,9 +533,9 @@ class erow:
     if self.len == 0:
       return 0
     if at >= len(self.cbmap):
-      return self.bdmap[-1]+1 - self.bdmap[self.cbmap[start]]
+      return self.bdmap[-1]+1 - self._char_display(start)
       #print(f'expand: out of range {at}, {len(self.cbmap)}')
-    return self.bdmap[self.cbmap[at]] - self.bdmap[self.cbmap[start]]
+    return self._char_display(at) - self._char_display(start)
   
   def dpos_to_cpos(self, at):
     if not self.updated:
@@ -287,7 +544,7 @@ class erow:
       return 0
     if len(self.dbmap) <= at:
       return self.bcmap[-1]
-    return self.bcmap[self.dbmap[at]];
+    return self._display_char(at)
          
   def cpos_to_dpos(self, at, overflow = False):
     if not self.updated:
@@ -301,7 +558,7 @@ class erow:
         return self.bdmap[-1] + 1
       else:
         return self.bdmap[-1]
-    return self.bdmap[self.cbmap[at]];
+    return self._char_display(at)
 
   # from start(file position), count expanded chars to "at" position (expanded position, and return file position of "at".
   def expanded_to_pos(self, start, at):
@@ -313,13 +570,12 @@ class erow:
       return 0
     if start >= len(self.cbmap):
       start = len(self.cbmap) - 1
-    d_start = self.bdmap[self.cbmap[start]]
+    d_start = self._char_display(start)
     if len(self.dbmap) <= d_start + at:
       return self.len
     if d_start + at < 0:
       return 0
-    b_end = self.dbmap[d_start + at]
-    return self.bcmap[b_end]
+    return self._display_char(d_start + at)
 
   def expanded_to_pos_with_d(self, start: int, at: int):
     # Returns (file position of "at", its display offset from `start`).
@@ -330,11 +586,17 @@ class erow:
     #print(f"s {start},{at}  {self.len}")
     if start >= len(self.cbmap):
       start = len(self.cbmap) - 1
-    d_start = self.bdmap[self.cbmap[start]]
+    d_start = self._char_display(start)
     if len(self.dbmap) <= d_start + at:
       return (self.len, self.bdmap[-1]+1-d_start)
     if d_start + at < 0:
       return (0, 0)
+    if self._chunks is not None:
+      block = self._find_chunk(2, d_start + at)
+      offsets = self._chunk_offsets
+      maps = self._chunks[block].maps
+      b_end = maps[3][d_start + at - offsets[2][block]]
+      return (maps[1][b_end] + offsets[1][block], b_end + offsets[0][block])
     b_end = self.dbmap[d_start + at]
     return (self.bcmap[b_end], b_end)
 

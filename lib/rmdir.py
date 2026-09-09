@@ -1,10 +1,13 @@
 import pdeck
 import os
 def main(vs,args):
+  if len(args) != 2:
+    print("usage: rmdir dir_name", file=vs)
+    return
   try:
     os.rmdir(args[1])
-  except FileNotFoundError:
-    v.print("File not found\n")
+  except OSError as e:
+    print("Failed to remove", args[1], e, file=vs)
+    return
   os.sync()
-  print("Directry deleted", file = vs)
-
+  print("Directory deleted", file=vs)

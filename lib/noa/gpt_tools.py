@@ -203,6 +203,49 @@ def _ddg_parse(body, num):
   return items
 
 
+_ESC_MAP = {"e": "\x1b", "n": "\n", "r": "\r", "t": "\t", "b": "\x08",
+            "a": "\x07", "f": "\x0c", "v": "\x0b", "0": "\x00", "\\": "\\"}
+
+
+def _unescape_keys(text):
+  # Models write escape sequences as literal backslash text ("\\x1b[A") because
+  # JSON has no \x escape, so the raw characters reach the app and print.
+  # Translate the common forms back into real control characters.
+  if "\\" not in text:
+    return text
+  out = []
+  i = 0
+  n = len(text)
+  while i < n:
+    c = text[i]
+    if c != "\\" or i + 1 >= n:
+      out.append(c)
+      i += 1
+      continue
+    nx = text[i + 1]
+    if nx == "x" and i + 3 < n:
+      try:
+        out.append(chr(int(text[i + 2:i + 4], 16)))
+        i += 4
+        continue
+      except ValueError:
+        pass
+    if nx == "u" and i + 5 < n:
+      try:
+        out.append(chr(int(text[i + 2:i + 6], 16)))
+        i += 6
+        continue
+      except ValueError:
+        pass
+    if nx in _ESC_MAP:
+      out.append(_ESC_MAP[nx])
+      i += 2
+      continue
+    out.append(c)  # unknown escape (e.g. \\d in a regex): leave it alone
+    i += 1
+  return "".join(out)
+
+
 class AgentCaptureStream(pu.CaptureStream):
   """CaptureStream for command_with_return runs. A graphic/interactive app
   immediately reaches for screen facilities (vs.v, register_module, read_nb,
@@ -344,7 +387,7 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False,
   tools.append({
     "type": "function",
     "name": "command_with_return",
-    "description": "Run a device command (or any installed module) and return its captured output for non-graphical apps. GRAPHIC/interactive apps cannot run here (there is no screen to draw on): launch them with launch_app instead, setting reload=true after editing their source — launch_app's reload replaces the 'r' prefix. If a graphic app is run here by mistake it is detected and relaunched via launch_app automatically. This is your primary tool for TESTING AND VERIFYING CODE: after you write a script with write_file, run it here by name and read the output to confirm it works, see errors, and iterate. A runnable script/app is a module exposing main(vs, args); invoke it by its name plus arguments, e.g. 'temp_foo arg1' for /sd/py/temp_foo.py, or any existing app/command. IMPORTANT: if you EDIT a script and run it again, prefix the command with 'r ' to reload it (e.g. 'r temp_foo arg1') — without 'r' the previous, cached version runs instead of your new code. Built-in commands include: ls, cat, head, tail, rm, mv, cp, mkdir, rmdir, grep (search in files), ping, curl. **This not Linux**, available options are limited. See README.md for available options for the commands. Simple pipes ('|') are supported: a stage's output is fed to the next command as stdin, and stdin-aware filters read it when given no file (grep, head, and tail, e.g. 'ls -r /sd/py | grep clock', 'curl -s URL | grep -i error | head -n 5', or 'cat log.txt | tail -n 20'). Other commands ignore piped stdin, so only pipe INTO grep/head/tail. Output redirect to a file is supported on the final stage: '> file' truncates, '>> file' appends (e.g. 'ls -r /sd/py > files.txt' or 'curl -s URL | grep -i error >> log.txt'); the written text is plain (color codes stripped) and capped at ~50KB. '> /dev/null' throws the output away instead (there is no such file on the device). Commands can be chained with ';' to run one after another, left to right, with their outputs concatenated (e.g. 'r temp_foo ; cat out.txt'); a ';' inside quotes is literal. This is not Linux otherwise: **No input redirect ('<'), backticks, '&&', '||' (both are rejected with an error - use ';') or subshells**; use one command per stage.",
+    "description": "Run one device command and return its output. This is a MicroPython shell, NOT Linux. The ONLY commands that exist: ls, cat, head, tail, grep, curl, ping, mv, rm, cp, mkdir, rmdir, diff, and the other commands described in README.md. Anything else (sed, find, echo, wc, sort, touch, chmod, python...) does not exist - do not guess; write a MicroPython script with write_file and run it by name instead. Syntax: no '<', '&&' or backticks; ';' chains commands; '|' pipes only into grep/head/tail; '> file' or '>> file' saves the output of the last stage. To run a script or app (a module with main(vs, args)), pass its name and arguments, e.g. 'temp_foo arg1' for /sd/py/temp_foo.py. After EDITING it, prefix 'r ' to reload ('r temp_foo'), or the old cached code runs. Graphic/interactive apps cannot run here - use launch_app (reload=true after edits). Note: 'ls -c N' copies the filename at index N to the clipboard (not a Linux sort option). See README.md for options.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -511,7 +554,7 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False,
   tools.append({
     "type": "function",
     "name": "send_keys",
-    "description": "Type text / keystrokes into the foreground app. Use escape sequences for special keys (arrows \\x1b[A/B/C/D, Esc \\x1b, Backspace \\x08, Ctrl-X \\x18). Typical use of this function is sending command to command line shell.",
+    "description": "Type text / keystrokes into the foreground app. Special keys are escape sequences: arrows \\x1b[A (up) \\x1b[B (down) \\x1b[C (right) \\x1b[D (left), Esc \\x1b, Backspace \\x08, Tab \\x09, Ctrl-X \\x18. Backslash escapes (\\xNN, \\e, \\n, \\r, \\t) are decoded, so writing them literally works. Typical use of this function is sending command to command line shell.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -609,7 +652,9 @@ def device_instructions(app_list=None, vision=True, realtime=False, my_screen=No
     "output to you (plain print() goes to the REPL and is NOT captured).\n"
     "Use command_with_return to look up information too (e.g. list files with "
     "'ls /sd/Documents/word*', read a file with 'cat /path', search with grep).\n "
-    "**Pocket Deck is not Linux**: no redirects ('>'), no '&&' or ';', no subshells."
+    "**Pocket Deck is not Linux**: only the commands listed in README.md "
+    "exist. (';' chaining, '|' into grep/head/tail, and '> file' redirect "
+    "ARE supported; '<', '&&' and subshells are not.) "
     "See README.md for full command list.\n"
     "The device keeps an activity log under /sd/elog/, one markdown file per day "
     "named YYYY-MM-DD.md, each line an event: app launches, file opens/saves, and "
@@ -1294,7 +1339,7 @@ class ToolExecBase:
       args = ujson.loads(arguments) if arguments else {}
     except:
       return "Error: invalid arguments"
-    text = args.get("text", "")
+    text = _unescape_keys(args.get("text", ""))
     if args.get("enter"):
       text += "\r"
     if not text:

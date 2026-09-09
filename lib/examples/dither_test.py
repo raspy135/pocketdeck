@@ -126,6 +126,6 @@ def main(vs, args):
   v.print(el.display_mode(False))
   v.callback(obj.update)
   #v.finished()
-  #while v.callback_exists():
-  #  time.sleep_ms(500)
+  while v.callback_exists():
+    time.sleep_ms(500)
 

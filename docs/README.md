@@ -215,7 +215,7 @@ command | summary
 --------|---------
 ls [path] | List files. Supports wildcards (e.g. `ls *.py`). `-l` for detailed view with size and date. `-R` for recursive search, '-r' for reverse order. `-c N` to copy filename at index N to clipboard (-1 for last).
 cp src dst | Copy file(s). Supports wildcards in src. `-r` for recursive copy. dst can be a directory when copying multiple files.
-mv src dst | Move file
+mv src [src ...] dst | Move file(s). Supports wildcards in src. When moving multiple files, dst must be a directory.
 mkdir dir_name | Create a directory
 rmdir dir_name | Delete a directory
 head [-n N \| -c N] file [file...] | Print first lines (-n, default 10) or bytes (-c) of file(s).
@@ -231,6 +231,11 @@ grep pattern [path ...] | Search text in files, Linux-like. The pattern is a **r
 curl [options] url | HTTP client for simple web requests. Supports `http://` and `https://`, `-L` to follow redirects (up to 5), `-m SECONDS` request timeout, `-I` HEAD request (status + headers only), `-o FILE` to save body to file, `-O` to save under the URL's filename, `-X METHOD` to choose request method, `-d DATA` to send request body (`-d @file` reads it from a file), `-A UA` to set the User-Agent, `-u user:password` for HTTP basic auth, `-i` to include response headers, `-s` for silent mode, and `-V` to show version. `-H` for header. The URL goes last.
 diff [options] left right | Compare two text files. Supports unified and side-by-side views, paging, output to file, and configurable context lines.
 qr [text...] | Generate and display a QR code centered on the screen. Supports `-c` to read from the clipboard.
+extract file [max_chars] | Extract readable plain text from an HTML/RSS file (strips tags, CDATA, entities, dedupes).
+dl url out_file [total] [chunk] | Chunked HTTP (http:// only) Range downloader over raw socket. For very large pages curl can't fetch; each chunk is its own connection. Probes size with a 1-byte Range request if `total` is omitted.
+view file [start] [count] | Print numbered lines (1-based `start`, default 1, count default 40) of a file, plus total line count. Good for locating code before an edit.
+find [path] | Search files by name, Linux-like. Options: `-name PATTERN` match the whole base name by shell glob, `-iname` like `-name` case-insensitive, `-type f|d` filter by file type, `-maxdepth N` descend at most N levels (0 = entries directly under the start point), `-mindepth N` skip entries above level N, `-size [+|-]N[c|w|b|k|M|G]` filter files by size (e.g. `+1k` larger, `-500c` smaller), `-count` print number of matches.
+echo [-n] [-e] [text ...] | Print a line of text. `-n` omits the trailing newline; `-e` enables backslash escapes (\n, \t, \r, \0NNN octal, etc.); `-E` disables them (default).
 
 ### diff
 
@@ -298,6 +303,35 @@ grep -F "a+b" notes.txt
 grep -l error /sd/logs
 grep -n -C 2 "import anm" /sd/py/demo.py
 grep -c TODO notes.md tasks.md
+```
+
+### extract
+
+`extract` (`/sd/lib/extract.py`) pulls readable plain text out of an HTML or RSS file — useful after `curl -o page.html` when you need the text, not the markup. It strips tags, CDATA wrappers and HTML entities, and skips duplicate blocks (e.g. RSS content + description).
+
+```
+extract /sd/work/page.html
+extract /sd/work/feed.rss 2000    # max chars per block (default 7000)
+```
+
+For RSS/Atom feeds it extracts each `<content:encoded>`/`<description>` item as one block; otherwise the whole file becomes one block.
+
+### dl
+
+`dl` (`/sd/lib/dl.py`) downloads a large `http://` page in Range chunks over a raw socket, each chunk in its own connection. Use it when `curl` fails or truncates on very large files; a failed chunk can simply be retried. It handles chunked transfer-encoding and probes the total size with a 1-byte Range request when `total` is omitted.
+
+```
+dl http://example.com/bigpage.html /sd/work/big.html
+dl http://example.com/bigpage.html /sd/work/big.html 940952 150000
+```
+
+### view
+
+`view` (`/sd/lib/view.py`) prints numbered lines of a file so you can locate code precisely before editing.
+
+```
+view /sd/py/myapp.py          # first 40 lines
+view /sd/py/myapp.py 120 20   # 20 lines from line 120
 ```
 
 ## SSH/SCP setup guide

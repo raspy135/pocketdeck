@@ -1,10 +1,27 @@
-## Release Note, Act 29, 2026
+## Release Note, September 7, 2026
+
+## Firmware
+
+- Eliminating most of GC freezing, it has Tri-color garbage collection.
+
+## Application
+
+- pem : Performance improvement with long line
+- gpt : Fine-tuning for better tool calls
+- view, dl, extract : new commands to help agentic tasks
+- mv : multiple file support
+- ble_kb : Faster pairing
+- find : New command to search files by name (Linux-like). Supports `-name`/`-iname` shell glob matching, `-type`, `-maxdepth`, `-size`, `-count`.
+- echo : New command. Prints a line of text; supports `-n`, `-e` (backslash escapes), `-E`.
+- morning_word : Heatmap added
+
+## Release Note, August 29, 2026
 
 - gpt: stream mode, --stream or /stream. Showing thinking process live
 - ls, rm: Support multiple file list
 - morning_word: new app to show morning journal progress.
 
-## Release Note, Act 28, 2026
+## Release Note, August 28, 2026
 
 ## Application
 
@@ -14,7 +31,7 @@
 - ls, rm: Support multiple file list
 - morning_word: new app to show morning journal progress.
 
-## Release Note, Act 23, 2026
+## Release Note, August 23, 2026
 
 ## Firmware
 

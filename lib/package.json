@@ -193,8 +193,16 @@
             "diff.py"
         ],
         [
+            "dl.py",
+            "dl.py"
+        ],
+        [
             "docs.py",
             "docs.py"
+        ],
+        [
+            "echo.py",
+            "echo.py"
         ],
         [
             "esclib.py",
@@ -295,6 +303,14 @@
         [
             "examples/texture_example.py",
             "examples/texture_example.py"
+        ],
+        [
+            "extract.py",
+            "extract.py"
+        ],
+        [
+            "find.py",
+            "find.py"
         ],
         [
             "flashcards.py",
@@ -697,6 +713,10 @@
             "update_updater.py"
         ],
         [
+            "view.py",
+            "view.py"
+        ],
+        [
             "voicerecorder.py",
             "voicerecorder.py"
         ],
@@ -768,7 +788,7 @@
         },
         {
             "path": "rmdir.py",
-            "md5": "065ec6d66a46887af19594194b8ca320"
+            "md5": "8959affb8d785f88edaac89b1ed989f2"
         },
         {
             "path": "nudoc.py",
@@ -780,11 +800,15 @@
         },
         {
             "path": "ble_kb.py",
-            "md5": "98ce65afdb1ed2123869aabe21ca14ae"
+            "md5": "c3088ea9aa98c03e8766b6b27af886c4"
         },
         {
             "path": "curl.py",
             "md5": "eeec91fcf8ee780c9b7155c162afe8fd"
+        },
+        {
+            "path": "find.py",
+            "md5": "4480e0fb1221bf188622f08da442a81b"
         },
         {
             "path": "journal.py",
@@ -832,7 +856,7 @@
         },
         {
             "path": "mv.py",
-            "md5": "238690265928f863d00ff12d50a399e2"
+            "md5": "b13c87183ab6a2e69c610b88a8e811ac"
         },
         {
             "path": "gpt_l.py",
@@ -856,11 +880,11 @@
         },
         {
             "path": "gpt.py",
-            "md5": "bedfc5381321d13eba820f2cda93819c"
+            "md5": "e5ac2c78d9fe24236dad5466c85af691"
         },
         {
             "path": "morning_word.py",
-            "md5": "7dc9f395ed28baf2145534dddc659b4b"
+            "md5": "79b295edc9fec680c81c6fda77791f5f"
         },
         {
             "path": "diff.py",
@@ -893,6 +917,10 @@
         {
             "path": "reader.py",
             "md5": "9e515fa3fe1c4c13740bba28008e8c23"
+        },
+        {
+            "path": "view.py",
+            "md5": "a690b9c1287329a16a24cafa140c6862"
         },
         {
             "path": "music.py",
@@ -932,7 +960,7 @@
         },
         {
             "path": "pem.py",
-            "md5": "13f20f483ab8007bb876babd4f0518d7"
+            "md5": "5e543b4ca1333c53bbed4f2db3bfc966"
         },
         {
             "path": "recorder.py",
@@ -941,6 +969,18 @@
         {
             "path": "cat.py",
             "md5": "2dd464abafaca4eb9dfa05153ea965c2"
+        },
+        {
+            "path": "echo.py",
+            "md5": "d9c7e0c7709e4ba1cddf6599dc42eb9f"
+        },
+        {
+            "path": "extract.py",
+            "md5": "6e9d4a9ef810ea4a737248dfb8548777"
+        },
+        {
+            "path": "dl.py",
+            "md5": "e6cedd04c6a7496bafc2192130bed43f"
         },
         {
             "path": "speaker_test.py",
@@ -1080,7 +1120,7 @@
         },
         {
             "path": "noa/gpt_tools.py",
-            "md5": "4a1bb775d1c4b86557d89a1d40bf8dea"
+            "md5": "47d7f2cb1b95729bad02451191730abd"
         },
         {
             "path": "noa/pdeck_complete.py",
@@ -1164,7 +1204,7 @@
         },
         {
             "path": "noa/erow.py",
-            "md5": "393e80cd47d45803e639aefbaa74c9a4"
+            "md5": "2d7296d768a1b600ac2ed91bb2fdeddf"
         },
         {
             "path": "noa/overlay.py",
@@ -1228,7 +1268,7 @@
         },
         {
             "path": "data/apps_db.json",
-            "md5": "62c5a96f0264b0500166ecbd4124788e"
+            "md5": "858f7780498fb6ef175036e731739ef8"
         },
         {
             "path": "data/cat3.xbmr",
@@ -1440,7 +1480,7 @@
         },
         {
             "path": "examples/dither_test.py",
-            "md5": "cd4af4938152a4c1ff85d52d83d761f5"
+            "md5": "fbd63851a900eb1e5f3fd99008a694f0"
         },
         {
             "path": "examples/sphere_test.py",

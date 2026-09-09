@@ -1755,7 +1755,12 @@ class editor:
         if self.file.im_session and len(self.file.im_session.buffer) > 0:
           row = self.file.org_row
           curcol = self.file_col
-          temp_row = erow( row.substr(0,curcol) +  el.set_font_color(4).encode('utf-8') +  self.file.im_session.d_buffer.encode('utf-8') + el.set_font_color(0).encode('utf-8') + row.substr(curcol, -1), self.file.tab_size, self.file.w)
+          # Reuse the original row's immutable map chunks while composing;
+          # rebuilding the entire Japanese line per romanized key is costly.
+          preview = (el.set_font_color(4).encode('utf-8')
+                     + self.file.im_session.d_buffer.encode('utf-8')
+                     + el.set_font_color(0).encode('utf-8'))
+          temp_row = row.with_insert(curcol, preview)
           self.file.rows[self.file_row] = temp_row
           self.update_scroll_for_curmove(self.file.im_session.col)
           
@@ -2368,7 +2373,8 @@ class editor_file:
       for i in range(self.num_updated, self.num_updated+3):
         if i < len(self.rows):
           self.rows[i].w = self.w
-          self.rows[i].update_hl_bytes()
+          # Prepare position maps only; highlight visible segments on demand.
+          self.rows[i].get_len()
       self.num_updated += 3
       #print('update')
       return True
@@ -2596,7 +2602,7 @@ class editor_file:
         row = self.rows[ln[1]]
         if row.w != self.w:
           row.w = self.w
-          row.update_hl_bytes()
+          row.invalidate_hl()
           self.num_updated = 0
         #print(f"exchars: {row.get_ex_chars()}")
 
@@ -2621,14 +2627,11 @@ class editor_file:
             out_line = row.substr(ln[2], expos)
 
           if self.mode in ('md', 'py', 'c'):
-            #if not row.tab_detected and expos >= len(row.cbmap):
-            if self.input_method != IM_JP and ln[1] != filerow:
-              if not ln[2] in row.hl_bytes:
-                # Highlight the visible (tab-expanded) segment that out_line
-                # already holds -- not bytes(row.chars), which kept literal tabs
-                # and highlighted the whole row instead of this wrapped segment.
-                row.hl_bytes[ln[2]] = _hl_line(out_line, self.mode)
-              out_line = row.hl_bytes[ln[2]]
+            if self.input_method != IM_JP:
+              # Edits invalidate the cache, so the current row can use it too.
+              # Never highlight off-screen portions of a long wrapped line.
+              row.hl_mode = self.mode
+              out_line = row.highlight_segment(ln[2], out_line)
             else:
               out_line = _hl_line(out_line, self.mode)
         out_buf.extend(out_line)
