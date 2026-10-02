@@ -197,7 +197,7 @@ class stream_record:
 def main(vs, args_in):
 
   cc = codec_config.codec_config()
-  parser = argparse.ArgumentParser(description='Sound recorder')
+  parser = argparse.ArgumentParser(vs=vs, description='Sound recorder')
   parser.add_argument('-s', '--sample_rate', action='store', default='24000', help='Sample rate')
   parser.add_argument('-l', '--length', action='store', default='3600', help='Length in second, you can also specify by minutes like 100m')
   parser.add_argument('-c', '--channel', action='store', default='2', help='Channel')

@@ -74,7 +74,7 @@ def xbm_to_xbmr(input_path, output_path):
 def main(vs_in, args_in):
     global vs
     vs = vs_in
-    parser = argparse.ArgumentParser(description='Convert standard XBM to XBMR format (flipping bit order).')
+    parser = argparse.ArgumentParser(vs=vs, description='Convert standard XBM to XBMR format (flipping bit order).')
     parser.add_argument('input', help='Input XBM file')
     parser.add_argument('output', help='Output XBMR file')
     

@@ -1795,21 +1795,6 @@ def run_test(vs, root, max_depth=None):
     print('{} {} {}'.format(i, 'R' if n['resolved'] else '?', n['name']), file=vs)
 
 
-class VsArgumentParser(argparse.ArgumentParser):
-  def __init__(self, vs):
-    self._vs = vs
-    argparse.ArgumentParser.__init__(self)
-
-  def _print_message(self, message, file=None):
-    if message:
-      print(message, end='', file=self._vs)
-
-  def exit(self, status=0, message=None):
-    if message:
-      self._print_message(message)
-    raise SystemExit(status)
-
-
 def normalize_cli_args(argv):
   out = []
   for a in argv:
@@ -1828,7 +1813,7 @@ def normalize_cli_args(argv):
 
 
 def main(vs, args):
-  parser = VsArgumentParser(vs)
+  parser = argparse.ArgumentParser(vs=vs)
   parser.add_argument('root', nargs='?', default=None, help='root markdown file')
   parser.add_argument(
     '-n', '--max-nodes',

@@ -4,7 +4,7 @@ import audio
 import pdeck
 
 def main(vs, args_in):
-  parser = argparse.ArgumentParser(
+  parser = argparse.ArgumentParser(vs=vs,
             description='Speech to text, Open AI API' )
   parser.add_argument('filename', nargs='?', default="/sd/work/voice.wav", help='filename to record')
   parser.add_argument('-l', '--length',action='store', default='7200', help='Length in second, you can also specify by minutes like 100m. Default is 2 hours')

@@ -360,7 +360,7 @@ class chatgpt_chat(gpt.chatgpt_agent):
       self._arg_delta(fn["arguments"])
 
   def ask_agent(self, message, references, images, model, instructions,
-                effort=None, tools=None, silent=False, max_iters=25):
+                effort=None, tools=None, silent=False, max_iters=100):
     """Run one user turn over Chat Completions: append the user message, resolve
     any tool calls, and return the model's final text. self.messages carries the
     whole conversation so the next turn (conversation mode) continues it. `effort`
@@ -517,9 +517,8 @@ class chatgpt_chat(gpt.chatgpt_agent):
 
       # An ask_user call ends the turn: the next round is text-only so the
       # model states its question and control returns to the user.
-      if self.user_question is not None:
+      if self.take_question():
         ask_stop = True
-        self.user_question = None
 
     # A turn that produced nothing (hard failure) is rolled back so it doesn't
     # leave an orphan user message that would confuse the next turn.

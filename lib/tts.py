@@ -127,7 +127,7 @@ def save_chunks_and_fix_header(gpt, chunks, voice, filename, vs):
 
 
 def main(vs, args_in):
-  parser = argparse.ArgumentParser(
+  parser = argparse.ArgumentParser(vs=vs,
             description='Text to Speech')
   parser.add_argument('input', nargs='?', action='store', default=None,
                       help='Text file to read')

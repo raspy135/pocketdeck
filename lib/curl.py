@@ -366,8 +366,8 @@ def _request_once(url, method, data_b, header_lines, user_agent,
 
   return status, resp_headers, body
 
-def build_parser():
-  parser = argparse.ArgumentParser(
+def build_parser(vs):
+  parser = argparse.ArgumentParser(vs=vs,
     description="Tiny curl clone for Pocket Deck"
   )
   #parser.add_argument("url", nargs="?", help="URL to request, http:// or https://")
@@ -419,7 +419,7 @@ def _write_body_to_vs(vs, body, truncate=None):
       vs.write("\n")
 
 def main(vs, args_in):
-  parser = build_parser()
+  parser = build_parser(vs)
   try:
     # The URL can appear anywhere: prefer the last token with a '://' scheme
     # (like real curl), falling back to a bare last argument. It is removed

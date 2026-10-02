@@ -1,3 +1,19 @@
+## Release Note, September 22, 2026
+
+## Firmware
+
+- Minor tune up of incremantal GC
+- Bug fix: draw_image() and draw_xbm() can accept negative X.
+- Bug fix: Native and Viper code won't be GCed.
+
+## Applications
+
+- grep: support wildcard filenames
+- gpt: /speak command is added to speak last response from AI.
+- gpt: now conversation and agent mode (-Ca) options are default.
+- flashcards : now reverse mode is default, and it records score (success/failure).
+- New application: tripplan
+
 ## Release Note, September 7, 2026
 
 ## Firmware

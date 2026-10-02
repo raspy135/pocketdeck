@@ -148,7 +148,7 @@ def _print_group(vs, dirname, filelist, detailed, index=0):
   return index + len(filelist)
 
 def main(vs,args_in):
-  parser = argparse.ArgumentParser(
+  parser = argparse.ArgumentParser(vs=vs,
             description='list file')
   parser.add_argument('-c', '--clip',action='store',help='Copy specified index filename to clipboard. -1 means the last one', default='-1000')
   parser.add_argument('-l', '--list',action='store_true', help='list files')

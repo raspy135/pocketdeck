@@ -3,6 +3,7 @@ import math
 import random
 import array
 import os
+import re
 import argparse
 import pdeck
 import esclib as elib
@@ -56,23 +57,133 @@ def clamp(v, a, b):
   return v
 
 
+SCORE_RE = re.compile(r'^(.+?)\s*\((\d+)\s*/\s*(\d+)\)$')
+
+
+def parse_score(text):
+  """Split a card word that may carry a score suffix, e.g. 'critique (3/6)',
+  into (word, success, failed). Missing score gives (word, 0, 0). The second
+  number is the number of failures, not the number of attempts."""
+  m = SCORE_RE.match(text.strip())
+  if m:
+    return m.group(1).strip(), int(m.group(2)), int(m.group(3))
+  return text.strip(), 0, 0
+
+
+def split_card_line(s):
+  """Parse one '- word [(s/f)] : meaning' line. Returns
+  (prefix, word, meaning, succ, fail) or None when it is not a card line.
+  prefix is the original indentation plus the '- ' bullet, so the line can
+  be written back exactly as it was (marker included)."""
+  stripped = s.lstrip()
+  if not stripped.startswith('- '):
+    return None
+  prefix = s[:len(s) - len(stripped)] + '- '
+  body = stripped[2:]
+  pos = body.find(':')
+  if pos <= 0:
+    return None
+  word, succ, fail = parse_score(body[:pos])
+  meaning = body[pos + 1:].strip()
+  if not word or not meaning:
+    return None
+  return prefix, word, meaning, succ, fail
+
+
 def parse_flashcards(filename):
+  # Each card is [word, meaning, success_count, fail_count].
   cards = []
   with open(filename, 'r') as f:
     for line in f:
-      s = line.strip()
-      if not s:
-        continue
-      if s.startswith('- '):
-        body = s[2:]
-        pos = body.find(':')
-        if pos <= 0:
-          continue
-        word = body[:pos].strip()
-        meaning = body[pos + 1:].strip()
-        if word and meaning:
-          cards.append((word, meaning))
+      parsed = split_card_line(line)
+      if parsed:
+        prefix, word, meaning, succ, fail = parsed
+        cards.append([word, meaning, succ, fail])
   return cards
+
+
+def format_card_line(prefix, word, succ, fail, meaning, newline):
+  if succ > 0 or fail > 0:
+    text = "{}{} ({}/{})".format(prefix, word, succ, fail)
+  else:
+    text = "{}{}".format(prefix, word)
+  return "{} : {}{}".format(text, meaning, newline)
+
+
+def save_flashcard_scores(filename, log):
+  """Rewrite the card lines of filename, applying the score updates recorded
+  in log (list of [word, success_delta, fail_delta]). A card's '- word (s/f) :'
+  line becomes '- word (new_s/new_f) :' with the totals accumulated. Only card
+  lines are touched; every other line (headings, blanks, notes) is written
+  back unchanged. Missing scores on disk are added from the totals.
+
+  The whole new content is built in memory first and only then swapped in
+  via a temp file, so an error can never leave the word file truncated.
+
+  Returns the number of card lines updated, or None on failure."""
+  if not log:
+    return 0
+  try:
+    with open(filename, 'r') as f:
+      lines = f.readlines()
+  except Exception as e:
+    print("flashcards score read error:", e)
+    return None
+
+  out = []
+  updated = 0
+  for line in lines:
+    parsed = split_card_line(line)
+    if not parsed:
+      out.append(line)
+      continue
+    prefix, word, meaning, succ, fail = parsed
+    i = 0
+    while i < len(log):
+      if log[i][0] == word:
+        succ += log[i][1]
+        fail += log[i][2]
+        updated += 1
+        break
+      i += 1
+    newline = "\n" if line.endswith("\n") else ""
+    out.append(format_card_line(prefix, word, succ, fail, meaning, newline))
+
+  tmp = filename + ".tmp"
+  try:
+    with open(tmp, 'w') as f:
+      for line in out:
+        f.write(line)
+  except Exception as e:
+    print("flashcards score write error:", e)
+    try:
+      os.remove(tmp)
+    except OSError:
+      pass
+    return None
+
+  # Keep the previous version around in case the user wants it back.
+  try:
+    with open(filename + ".bak", 'w') as f:
+      for line in lines:
+        f.write(line)
+  except Exception as e:
+    print("flashcards score backup error:", e)
+
+  try:
+    try:
+      os.remove(filename)
+    except OSError:
+      pass
+    os.rename(tmp, filename)
+  except Exception as e:
+    print("flashcards score replace error:", e)
+    try:
+      os.remove(tmp)
+    except OSError:
+      pass
+    return None
+  return updated
 
 
 def make_square_wave(table_size=256):
@@ -155,7 +266,7 @@ def wrap_text_lines(v, text, max_width, max_lines, font):
 
 
 class FlashcardsApp:
-  def __init__(self, vs, filename, reverse_mode=False, novoice = False, model_name = None):
+  def __init__(self, vs, filename, reverse_mode=True, novoice = False, model_name = None):
     self.vs = vs
     self.novoice = novoice
     self.model_name = model_name    # -m: LLM registry entry for example sentences
@@ -169,6 +280,17 @@ class FlashcardsApp:
     self.total = 0
     self.correct = 0
     self.wrong = 0
+
+    # Score bookkeeping. score_log holds the [word, success, fail] deltas
+    # earned during the current round, so a round can be written back to the
+    # word file in one pass. attempt_recorded guards against counting the same
+    # card twice (e.g. checking an example and then also submitting an answer).
+    self.score_log = []
+    self.round_succ = 0
+    self.round_fail = 0
+    self.saved_cards = 0
+    self.attempt_recorded = False
+    self.score_saved = True
 
     self.status = STATUS_LOADING
     self.error_message = ""
@@ -369,6 +491,12 @@ class FlashcardsApp:
     self.total = len(self.cards)
     self.correct = 0
     self.wrong = 0
+    self.score_log = []
+    self.round_succ = 0
+    self.round_fail = 0
+    self.saved_cards = 0
+    self.attempt_recorded = False
+    self.score_saved = True
     self.transition_old = None
     self.transition_new = None
     self.close_dialog()
@@ -382,6 +510,48 @@ class FlashcardsApp:
       return None
     return self.cards[idx]
 
+  def card_word(self, card):
+    if not card:
+      return ""
+    return card[0]
+
+  def card_meaning(self, card):
+    if not card:
+      return ""
+    return card[1]
+
+  def card_score(self, card):
+    """(success, fail) for a card, counting this round's pending deltas."""
+    if not card:
+      return 0, 0
+    succ = card[2]
+    fail = card[3]
+    i = 0
+    while i < len(self.score_log):
+      if self.score_log[i][0] == card[0]:
+        succ += self.score_log[i][1]
+        fail += self.score_log[i][2]
+        break
+      i += 1
+    return succ, fail
+
+  def record_attempt(self, success):
+    """Count the current card as one attempt: a success or a failure. An
+    example / read-aloud counts as a failure (the user did not remember it);
+    a plain reveal counts as success."""
+    if self.attempt_recorded:
+      return
+    card = self.get_card()
+    if not card:
+      return
+    self.attempt_recorded = True
+    if success:
+      self.round_succ += 1
+    else:
+      self.round_fail += 1
+    self.score_log.append([card[0], 1 if success else 0, 0 if success else 1])
+    self.score_saved = False
+
   def start_question_anim(self):
     self.state = STATE_QUESTION
     card = self.get_card()
@@ -393,6 +563,7 @@ class FlashcardsApp:
       self.answer = ""
     self.submitted_correct = False
     self.show_answer = False
+    self.attempt_recorded = False
     self.anim_mode = 'question_in'
     self.card_anim = anm_object(
         duration_ms = 200,
@@ -405,6 +576,8 @@ class FlashcardsApp:
     if next_idx >= self.total:
       self.status = STATUS_DONE
       self.anim_mode = 'idle'
+      # One full round is over: persist the success/try scores to the word file.
+      self.save_round_scores()
       return
     self.transition_old = self.get_card(self.index)
     self.transition_new = self.get_card(next_idx)
@@ -433,6 +606,7 @@ class FlashcardsApp:
       self.answer = ""
     self.submitted_correct = False
     self.show_answer = False
+    self.attempt_recorded = False
     self.anim_mode = 'idle'
     self.card_x = self.card_to_x
     if 'card' in self.anim_seq.anms:
@@ -443,9 +617,11 @@ class FlashcardsApp:
     return s.strip().lower()
 
   def toggle_reverse_mode(self):
+    was_recorded = self.attempt_recorded
     self.reverse_mode = not self.reverse_mode
     if self.status == STATUS_READY:
       self.start_question_anim()
+      self.attempt_recorded = was_recorded
 
   def submit_answer(self):
     card = self.get_card()
@@ -453,6 +629,10 @@ class FlashcardsApp:
       return
 
     if self.reverse_mode:
+      # Reverse mode: hitting Enter only reveals the meaning. It counts as
+      # a success only if the user did not ask for an example / read-aloud
+      # first (those mean the word was not remembered).
+      self.record_attempt(True)
       self.state = STATE_REVEAL
       self.submitted_correct = False
       self.show_answer = True
@@ -462,15 +642,46 @@ class FlashcardsApp:
     if self.normalize_word(self.answer) == self.normalize_word(word):
       self.submitted_correct = True
       self.correct += 1
+      self.record_attempt(True)
       self.beep_ok()
     else:
       self.submitted_correct = False
       self.wrong += 1
+      self.record_attempt(False)
       self.show_answer = True
     self.state = STATE_REVEAL
 
   def next_after_reveal(self):
     self.start_transition()
+
+  def save_round_scores(self):
+    """Write this round's success/fail counts back into the word file."""
+    if self.score_saved or not self.score_log:
+      self.score_saved = True
+      return True
+    n = save_flashcard_scores(self.filename, self.score_log)
+    if n is None:
+      return False
+    self.score_saved = True
+    self.saved_cards = n
+    # Re-read the file so the in-memory cards carry the accumulated totals
+    # (not just this round's deltas) on the next round.
+    try:
+      totals = {}
+      for c in parse_flashcards(self.filename):
+        totals[c[0]] = (c[2], c[3])
+      i = 0
+      while i < len(self.cards):
+        t = totals.get(self.cards[i][0])
+        if t:
+          self.cards[i][2] = t[0]
+          self.cards[i][3] = t[1]
+        i += 1
+    except Exception as e:
+      print("flashcards score refresh error:", e)
+    # The deltas are baked into the file and into self.cards now.
+    self.score_log = []
+    return True
 
   def read_key(self):
     ret = self.v.read_nb(8)
@@ -585,6 +796,9 @@ class FlashcardsApp:
     word = self.current_word()
     if not word:
       return
+    # Checking an example or hearing the word read aloud means the user did
+    # not remember it, so the card counts as a failed try.
+    self.record_attempt(False)
     if self.menu_index == 1:
       self.speak_tts(word)
       return
@@ -801,6 +1015,13 @@ class FlashcardsApp:
           line_w = aw + 16
         self.v.draw_h_line(x + CARD_W // 2 - line_w // 2, answer_y + 6 , line_w)
 
+    if reveal_answer and self.state == STATE_REVEAL:
+      # Definition is showing: report the card's score (this round included)
+      # instead of the help line.
+      succ, fail = self.card_score(card)
+      self.v.set_draw_color(1)
+      self.draw_centered_text(222, "score  {}/{}".format(succ, fail), "u8g2_font_profont22_mf")
+
     self.v.set_draw_color(1)
 
   def draw_header(self):
@@ -810,14 +1031,18 @@ class FlashcardsApp:
     self.v.set_font("u8g2_font_profont15_mf")
     if self.status == STATUS_READY:
       if self.reverse_mode:
-        txt = " Flashcards [Reverse]  {}/{}".format(self.index + 1, self.total)
+        txt = " Flashcards [Reverse]  {}/{}  OK:{}  NG:{}".format(self.index + 1, self.total, self.round_succ, self.round_fail)
       else:
         txt = " Flashcards  {}/{}  OK:{}  NG:{}".format(self.index + 1, self.total, self.correct, self.wrong)
     elif self.status == STATUS_DONE:
-      if self.reverse_mode:
-        txt = " Flashcards [Reverse] finished"
+      if self.score_saved and self.saved_cards > 0:
+        extra = "  saved:{}".format(self.saved_cards)
       else:
-        txt = " Flashcards finished  OK:{}  NG:{}".format(self.correct, self.wrong)
+        extra = ""
+      if self.reverse_mode:
+        txt = " Flashcards [Reverse] finished  OK:{}  NG:{}{}".format(self.round_succ, self.round_fail, extra)
+      else:
+        txt = " Flashcards finished  OK:{}  NG:{}{}".format(self.correct, self.wrong, extra)
     elif self.status == STATUS_ERROR:
       txt = " Flashcards error"
     else:
@@ -829,19 +1054,13 @@ class FlashcardsApp:
     self.v.set_font("u8g2_font_profont15_mf")
     self.v.set_draw_color(1)
     if self.status == STATUS_READY:
-      if self.reverse_mode:
-        if self.state == STATE_QUESTION:
-          self.draw_centered_text(220, "Enter reveal meaning, Up toggle, Down menu, Esc/L quit", "u8g2_font_profont15_mf")
-        elif self.state == STATE_REVEAL:
-          self.draw_centered_text(220, "Enter next, Up toggle, Down menu", "u8g2_font_profont15_mf")
+      if self.state == STATE_REVEAL:
+        # The score line under the card replaces the help message here.
+        pass
+      elif self.reverse_mode:
+        self.draw_centered_text(220, "Enter reveal meaning, Up toggle, Down menu, Esc/L quit", "u8g2_font_profont15_mf")
       else:
-        if self.state == STATE_QUESTION:
-          self.draw_centered_text(220, "Enter submit, Up reverse, Down menu, Esc/L quit", "u8g2_font_profont15_mf")
-        elif self.state == STATE_REVEAL:
-          if self.submitted_correct:
-            self.draw_centered_text(220, "Correct! Enter next, Up reverse, Down menu", "u8g2_font_profont15_mf")
-          else:
-            self.draw_centered_text(220, "Wrong. Enter next, Up reverse, Down menu", "u8g2_font_profont15_mf")
+        self.draw_centered_text(220, "Enter submit, Up reverse, Down menu, Esc/L quit", "u8g2_font_profont15_mf")
     elif self.status == STATUS_DONE:
       self.draw_centered_text(210, "All cards done.", "u8g2_font_profont22_mf")
       if self.reverse_mode:
@@ -864,17 +1083,13 @@ class FlashcardsApp:
       new_x = int(self.card_anim.new_x) if self.card_anim and hasattr(self.card_anim, 'new_x') else 30
 
       if self.transition_old:
-        self.draw_card(old_x, self.transition_old, self.answer, self.show_answer, STATE_REVEAL)
+        self.draw_card(old_x, self.transition_old, "", True, STATE_REVEAL)
       if self.transition_new:
         self.draw_card(new_x, self.transition_new, "", False, STATE_QUESTION)
       return
 
-    reveal = self.state == STATE_REVEAL and (self.reverse_mode or (not self.submitted_correct))
-    shown_answer = self.answer
-    if (not self.reverse_mode) and self.state == STATE_REVEAL and self.submitted_correct:
-      shown_answer = card[0]
-
-    self.draw_card(self.card_x, card, shown_answer, reveal, self.state)
+    reveal = self.state == STATE_REVEAL
+    self.draw_card(self.card_x, card, self.answer, reveal, self.state)
 
   def get_dialog_y(self, target_y):
     if not self.dialog_anim and (not self.dialog_anim_obj or self.dialog_anim_obj.get_time() >= 1.0):
@@ -1004,25 +1219,39 @@ def main(vs, args):
   v = vs.v
   el = elib.esclib()
 
-  v.print(el.erase_screen())
-  v.print(el.home())
-  v.print(el.display_mode(False))
-
+  # Parse arguments BEFORE touching the display: --help and argument errors
+  # print plain text and call sys.exit(), so we must not be in graphics mode yet.
   parser = argparse.ArgumentParser(
-            description='flashcards')
-  parser.add_argument('-r', '--reverse', action='store_true', help='start in reverse mode')
+            description='flashcards', vs=vs)
+  parser.add_argument('-r', '--reverse', action='store_true', help='start in reverse mode (default)')
+  parser.add_argument('-f', '--forward', action='store_true', help='start in forward mode (word shown, type the meaning)')
   parser.add_argument('-v', '--novoice', action='store_true', help='Turn off reading aloud the example sentence')
   parser.add_argument('-m', '--model', default=None, help='LLM for example sentences: a name from /config/gpt.json (default: registry default)')
   parser.add_argument('filename', nargs='?', help='flashcard file')
-  pargs = parser.parse_args(args[1:])
-
-  if not pargs.filename:
-    print("Usage: flashcards [-r] [filename]", file=vs)
-    v.print(el.display_mode(True))
+  try:
+    pargs = parser.parse_args(args[1:])
+  except SystemExit:
+    # argparse already printed --help / the usage error to vs.
+    # Nothing to draw, and the display must stay in text mode.
     return
 
-  app = FlashcardsApp(vs, pargs.filename, pargs.reverse, pargs.novoice, pargs.model)
-  app.loop()
+  if not pargs.filename:
+    print("Usage: flashcards [-f] [filename]", file=vs)
+    return
 
-  v.print(el.display_mode(True))
+  # Reverse mode (meaning -> word) is the default now.
+  reverse = True
+  if pargs.forward:
+    reverse = False
+
+  v.print(el.erase_screen())
+  v.print(el.home())
+  v.print(el.display_mode(False))
+  try:
+    app = FlashcardsApp(vs, pargs.filename, reverse, pargs.novoice, pargs.model)
+    app.loop()
+  finally:
+    # Always restore text drawing, even if the app exits with an error.
+    v.print(el.display_mode(True))
+
   print("Finished.", file=vs)

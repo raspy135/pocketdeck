@@ -52,6 +52,31 @@ r test
 
 `r` ensures reloading module, so it's useful for development. See `Reload Python module` section for detail.
 
+## Command-line arguments — argparse
+
+Pocket Deck ships a minimal `argparse` (`noa/argparse.py`). Pass your app's `vs`
+so usage text (`-h`) and parse errors land on the app's own screen instead of
+the default one:
+
+```python
+import argparse
+
+def main(vs, args):
+  parser = argparse.ArgumentParser(vs=vs, description='my app')
+  parser.add_argument('path', nargs='?', help='file to open')
+  parser.add_argument('-n', '--lines', type=int, default=10)
+  try:
+    ns = parser.parse_args(args[1:])   # args[0] is the command name
+  except SystemExit:
+    return                             # -h or a bad option already printed
+```
+
+`vs` is keyword-only, and so is `description`. If you build the parser in a
+helper function, thread `vs` through to it.
+
+Note `parse_args()` calls `sys.exit()` on `-h` or an error, so wrap it in
+`try/except SystemExit` if your app has cleanup to do.
+
 ## Pdeck Micropython module
 
 To interact with Pdeck graphical screen, use Pdeck module. Through Pdeck module, you have an access to Keyboard status, and virtual screen status. The graphic engine is u8g2.

@@ -9,7 +9,7 @@ def main(vs, args_in):
     print("Set OpenAI key in /config/openai_api_key", file=vs)
     return
 
-  parser = argparse.ArgumentParser(
+  parser = argparse.ArgumentParser(vs=vs,
             description='Speech to Text' )
   parser.add_argument('input',nargs='?', action='store', default=None, help='WAV File to read')
   parser.add_argument('-s','--silent', action='store_true', help='No extra output messages. Record start immediate.')

@@ -177,6 +177,10 @@
             "data/square.wav"
         ],
         [
+            "data/trips/malibu.md",
+            "data/trips/malibu.md"
+        ],
+        [
             "data/wifi-icon-disabled.xbm",
             "data/wifi-icon-disabled.xbm"
         ],
@@ -357,6 +361,10 @@
             "font/u8g2_wedge.fnt"
         ],
         [
+            "gcprof.py",
+            "gcprof.py"
+        ],
+        [
             "gdrive.py",
             "gdrive.py"
         ],
@@ -435,6 +443,10 @@
         [
             "noa/anm.py",
             "noa/anm.py"
+        ],
+        [
+            "noa/argparse.py",
+            "noa/argparse.py"
         ],
         [
             "noa/auto_connect.py",
@@ -677,6 +689,10 @@
             "skills/dashboard_design.md"
         ],
         [
+            "skills/tripplan.md",
+            "skills/tripplan.md"
+        ],
+        [
             "sound.py",
             "sound.py"
         ],
@@ -699,6 +715,18 @@
         [
             "tasks.py",
             "tasks.py"
+        ],
+        [
+            "tripgeo.py",
+            "tripgeo.py"
+        ],
+        [
+            "tripmap.py",
+            "tripmap.py"
+        ],
+        [
+            "tripplan.py",
+            "tripplan.py"
         ],
         [
             "tts.py",
@@ -756,11 +784,15 @@
         },
         {
             "path": "tts.py",
-            "md5": "30692baf555bf33ca5276f699a524a61"
+            "md5": "f0b87a9911cbe8ca3dc9360001ece416"
+        },
+        {
+            "path": "gcprof.py",
+            "md5": "a534b5a92cb9f79fed11361ff81f354f"
         },
         {
             "path": "rm.py",
-            "md5": "fa62cbd7a94c6457362707a3d7037782"
+            "md5": "cfcf4d81fdb6ed41edce1c822f020208"
         },
         {
             "path": "setuni.py",
@@ -772,7 +804,7 @@
         },
         {
             "path": "head.py",
-            "md5": "68438d3aac2783f1299117a8a7e75217"
+            "md5": "53a0b7b5eb1fb72b4b78e20b663fcbe6"
         },
         {
             "path": "tasks.py",
@@ -792,11 +824,11 @@
         },
         {
             "path": "nudoc.py",
-            "md5": "d7d79391e0c55a02cdb7fc1b2f040eaf"
+            "md5": "72a8dfd42cca17b8dc5ded81dba39d52"
         },
         {
             "path": "gdrive.py",
-            "md5": "557095e4dd376ecaff5c9240f339aba4"
+            "md5": "2fdf1c9a06bef56309b1465d41815b1e"
         },
         {
             "path": "ble_kb.py",
@@ -804,11 +836,11 @@
         },
         {
             "path": "curl.py",
-            "md5": "eeec91fcf8ee780c9b7155c162afe8fd"
+            "md5": "715dd156af67cc688b44706768a7493f"
         },
         {
             "path": "find.py",
-            "md5": "4480e0fb1221bf188622f08da442a81b"
+            "md5": "e1b7e5fed99cdf40040c37c06ae6a4d9"
         },
         {
             "path": "journal.py",
@@ -831,6 +863,10 @@
             "md5": "9e8d4c76d3ec640d1337f8ec2fb358e5"
         },
         {
+            "path": "tripgeo.py",
+            "md5": "8eecfacae30cef1640236cabd424d031"
+        },
+        {
             "path": "pem_client.py",
             "md5": "6acb5aee0ff0a6d76f3c542d55e2fcb2"
         },
@@ -848,11 +884,11 @@
         },
         {
             "path": "voicerecorder.py",
-            "md5": "4fb152f2b7c6908b849fcfacb1e6a153"
+            "md5": "737ca55344203cabd9d66e268df18b8d"
         },
         {
             "path": "flashcards.py",
-            "md5": "99117a72ed281cb342505816c377e3f4"
+            "md5": "1675e5139d927267a7b0cd2588199c4b"
         },
         {
             "path": "mv.py",
@@ -860,7 +896,7 @@
         },
         {
             "path": "gpt_l.py",
-            "md5": "8e8b2014ce564ff95c631dde117c1021"
+            "md5": "cb4b13d776836b93cad737f315cab9fd"
         },
         {
             "path": "esclib.py",
@@ -868,7 +904,7 @@
         },
         {
             "path": "gpt_rt.py",
-            "md5": "f690bd4c194b36bdc96d910733e0d6fa"
+            "md5": "d867545ee34ab773bce916661bd084d6"
         },
         {
             "path": "clip.py",
@@ -880,19 +916,19 @@
         },
         {
             "path": "gpt.py",
-            "md5": "e5ac2c78d9fe24236dad5466c85af691"
+            "md5": "95e552667b65fdcc3cd80b1acf89580c"
         },
         {
             "path": "morning_word.py",
-            "md5": "79b295edc9fec680c81c6fda77791f5f"
+            "md5": "2ba92916bcb987b3dd2593e1dbcfd7cc"
         },
         {
             "path": "diff.py",
-            "md5": "5f98defe6d17515ef79b5b5e61adaec0"
+            "md5": "d549ab3d8621752d0c6292ee1e964cb5"
         },
         {
             "path": "ls.py",
-            "md5": "7a1bc32f11f534097044e8b7d7238a93"
+            "md5": "45ad487f3a466c3be9aa558fdf667190"
         },
         {
             "path": "cd.py",
@@ -900,7 +936,7 @@
         },
         {
             "path": "tail.py",
-            "md5": "0bd11f20059b8478fda932969a258ff7"
+            "md5": "2172e43bf09c40a6ea0fe0cc02e74427"
         },
         {
             "path": "wavtest.py",
@@ -912,11 +948,11 @@
         },
         {
             "path": "stt.py",
-            "md5": "7fbba3848d155170dad59c4e8c44a57d"
+            "md5": "e0391aeeba71a38577746120e501f7a2"
         },
         {
             "path": "reader.py",
-            "md5": "9e515fa3fe1c4c13740bba28008e8c23"
+            "md5": "fbe78eb32434fccf9e49d4885d4b6783"
         },
         {
             "path": "view.py",
@@ -928,11 +964,11 @@
         },
         {
             "path": "docs.py",
-            "md5": "f6cc7e025c314b1754a08a66421d9603"
+            "md5": "27ad86cb1cc3fc61714662fa2b6484fd"
         },
         {
             "path": "xbm2xbmr.py",
-            "md5": "e8d28f7e255ac66d3f19163226b1595f"
+            "md5": "76a8ac576b9e2f82d0f9afaca3d74b7f"
         },
         {
             "path": "analog_clock_set_timer.py",
@@ -940,7 +976,7 @@
         },
         {
             "path": "screenrec.py",
-            "md5": "90fc23565470990ddc11003df0fdff7e"
+            "md5": "3d11e03899c4f930dcb497a33885a3ce"
         },
         {
             "path": "setup.py",
@@ -948,11 +984,11 @@
         },
         {
             "path": "qr.py",
-            "md5": "acdb5bb85da5cea3f5d000685ec48bc7"
+            "md5": "ad98d9cc96c66a5742e15b878e248571"
         },
         {
             "path": "gpt_c.py",
-            "md5": "5eb31a559b711a3e1b1528a3ac3b9706"
+            "md5": "3f0af4038f53e40fd2ad7a886cc30f2c"
         },
         {
             "path": "update_updater.py",
@@ -960,11 +996,11 @@
         },
         {
             "path": "pem.py",
-            "md5": "5e543b4ca1333c53bbed4f2db3bfc966"
+            "md5": "dca41e1510722833743b61defc284b8e"
         },
         {
             "path": "recorder.py",
-            "md5": "c25dff6fac20b2edb80499ac25cf1e10"
+            "md5": "386ba230e56f823a1dc4b988e51501af"
         },
         {
             "path": "cat.py",
@@ -972,15 +1008,19 @@
         },
         {
             "path": "echo.py",
-            "md5": "d9c7e0c7709e4ba1cddf6599dc42eb9f"
+            "md5": "9e3fcf81b6726247495557bd85c3c363"
         },
         {
             "path": "extract.py",
-            "md5": "6e9d4a9ef810ea4a737248dfb8548777"
+            "md5": "dee700279e24b9236abe5ab3ed67003d"
         },
         {
             "path": "dl.py",
             "md5": "e6cedd04c6a7496bafc2192130bed43f"
+        },
+        {
+            "path": "tripmap.py",
+            "md5": "cb3e64cc8a702431b7e74d9c32b77d44"
         },
         {
             "path": "speaker_test.py",
@@ -996,7 +1036,7 @@
         },
         {
             "path": "cp.py",
-            "md5": "c76309fa6fff679694b511e011add14b"
+            "md5": "f3a454627fa25ed1a51ff89e85bacdbf"
         },
         {
             "path": "types.mpy",
@@ -1004,11 +1044,11 @@
         },
         {
             "path": "dic.py",
-            "md5": "d25730d654db7300ec710a432ac1f1e6"
+            "md5": "b68ec97c7ba85bcd1a2d337dda1d5984"
         },
         {
             "path": "grep.py",
-            "md5": "969e6b83f8d2d2e4d9a3d60bb273bdd9"
+            "md5": "30af0aecf6bbabab31f22b0976648ccf"
         },
         {
             "path": "sync.py",
@@ -1019,8 +1059,12 @@
             "md5": "86415e513b8c89c82f46db048eb24c1b"
         },
         {
+            "path": "tripplan.py",
+            "md5": "ffdbdb25266f277535c9742590e32b31"
+        },
+        {
             "path": "graph.py",
-            "md5": "bd3f8d316897d725c3440ff8d34b41c8"
+            "md5": "031e01483a4bacc1be076877f4adaec7"
         },
         {
             "path": "font/miranda-bolditalic.g3df",
@@ -1061,6 +1105,10 @@
         {
             "path": "font/u8g2_font_ncenR10_te.fnt",
             "md5": "5d2ecd665cf6ce71a181cc4728b00d4e"
+        },
+        {
+            "path": "skills/tripplan.md",
+            "md5": "b635f797e2dd5f8c658d6c42bd990a83"
         },
         {
             "path": "skills/dashboard_design.md",
@@ -1120,7 +1168,7 @@
         },
         {
             "path": "noa/gpt_tools.py",
-            "md5": "47d7f2cb1b95729bad02451191730abd"
+            "md5": "e8908a7db9d84cc633ee7a86a814f917"
         },
         {
             "path": "noa/pdeck_complete.py",
@@ -1157,6 +1205,10 @@
         {
             "path": "noa/pngreader.py",
             "md5": "e47d614b69a0f54ebddaddd6df0939ff"
+        },
+        {
+            "path": "noa/argparse.py",
+            "md5": "a252e355c0fca50e114129d08f671c6d"
         },
         {
             "path": "noa/fontloader.py",
@@ -1268,7 +1320,7 @@
         },
         {
             "path": "data/apps_db.json",
-            "md5": "858f7780498fb6ef175036e731739ef8"
+            "md5": "4cb8e324c6322de4bc3bd33d953ec0a4"
         },
         {
             "path": "data/cat3.xbmr",
@@ -1385,6 +1437,10 @@
         {
             "path": "data/cat1.xbmr",
             "md5": "1d997bc6705cab21dc2f60021894e510"
+        },
+        {
+            "path": "data/trips/malibu.md",
+            "md5": "88cf3ba8904182b3ac974ba84589f2a7"
         },
         {
             "path": "py_backup/home.py",

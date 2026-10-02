@@ -2,7 +2,7 @@ import gpt
 import argparse
 import os
 def main(vs, args_in):
-  parser = argparse.ArgumentParser(
+  parser = argparse.ArgumentParser(vs=vs,
             description='Pocket Deck documentation AI search' )
   parser.add_argument('-j', '--jp',action='store_true',help='Answer in Japanese')
   parser.add_argument('-j', '--jp',action='store_true',help='Answer in Japanese')

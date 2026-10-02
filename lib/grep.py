@@ -9,9 +9,16 @@ el = elib.esclib()
 def print_vs():
   pass
 
+def _norm(path):
+  # os.stat() rejects a trailing slash ("pd/" is not a valid path), but the
+  # shell and glob expansion happily produce one. Drop it (never for "/").
+  while len(path) > 1 and path.endswith("/"):
+    path = path[:-1]
+  return path
+
 def _is_dir(path):
   try:
-    st = os.stat(path)[0]
+    st = os.stat(_norm(path))[0]
     return (st & 0x4000) != 0
   except Exception:
     return False
@@ -25,6 +32,105 @@ def _iter_dir(path):
     else:
       full = path + "/" + name
     yield full, name
+
+# --- path glob expansion (the shell does not expand wildcards for us) ---
+_glob_chars = '*?['
+_re_meta = '.^$+?()[]{}|\\'
+
+def _has_glob(text):
+  for c in text:
+    if c in _glob_chars:
+      return True
+  return False
+
+def _join(base, name):
+  if base == "/" or base.endswith("/"):
+    return base + name
+  if base == "" or base == ".":
+    return name
+  return base + "/" + name
+
+def _glob_to_pat(name, classes=True):
+  # Turn one path component into an anchored regex: '*' -> any run,
+  # '?' -> any single char, '[abc]' -> a set. '/' is never crossed, like a
+  # shell glob. All other regex metacharacters stay literal, so names with
+  # '+' or '.' match exactly.
+  out = "^"
+  i = 0
+  n = len(name)
+  while i < n:
+    c = name[i]
+    if c == "*":
+      out += "[^/]*"
+    elif c == "?":
+      out += "[^/]"
+    elif c == "[" and classes:
+      close = name.find("]", i + 1)
+      if close < 0:
+        out += "\\["
+        i += 1
+        continue
+      out += name[i:close + 1]
+      i = close + 1
+      continue
+    elif c in _re_meta:
+      out += "\\" + c
+    else:
+      out += c
+    i += 1
+  out += "$"
+  return re.compile(out)
+
+def _glob_list(dirpath, comp):
+  try:
+    names = os.listdir(dirpath)
+  except Exception:
+    return []
+  try:
+    rx = _glob_to_pat(comp)
+  except Exception:
+    # Malformed class (e.g. "[a-"): treat [ and ] literally too.
+    rx = _glob_to_pat(comp, classes=False)
+  hits = []
+  for name in names:
+    if rx.match(name):
+      hits.append(_join(dirpath, name))
+  return sorted(hits)
+
+def _expand_glob(pattern):
+  # Expand '*', '?' and '[...]' in any component of a path. Fixed leading
+  # components are kept as-is; a component matching nothing yields no paths.
+  if not _has_glob(pattern):
+    return [pattern]
+  if len(pattern) > 1 and pattern.endswith("/"):
+    # 'dir*/' matches only the directories, like the shell; the trailing
+    # slash is dropped again by walk()/_is_dir() on the way in.
+    return [h + "/" for h in _expand_glob(pattern[:-1]) if _is_dir(h)]
+  parts = pattern.split("/")
+  lead = pattern.startswith("/")
+  i = 1 if lead else 0
+  fixed = []
+  while i < len(parts) and not _has_glob(parts[i]):
+    fixed.append(parts[i])
+    i += 1
+  prefix = "/".join(fixed)
+  if lead:
+    prefix = "/" + prefix
+  if prefix == "":
+    prefix = "."
+  if i >= len(parts):
+    return [prefix]
+  dirs = [prefix]
+  while True:
+    found = []
+    for d in dirs:
+      found.extend(_glob_list(d, parts[i]))
+    i += 1
+    if i >= len(parts):
+      return found
+    dirs = [f for f in found if _is_dir(f)]
+    if not dirs:
+      return []
 
 def _bre_compat(pattern):
   # GNU grep's default dialect (BRE) writes alternation/groups as \| \( \).
@@ -93,7 +199,7 @@ def _line_matches(s, pat, use_regex, ignore_case):
 
 def _file_size(path):
   try:
-    return os.stat(path)[6]
+    return os.stat(_norm(path))[6]
   except Exception:
     return None
 
@@ -237,6 +343,9 @@ def grep_path(pattern, path=".", recursive=False, show_line_numbers=False,
       return False
 
   def walk(p):
+    # os.listdir()/open() reject a trailing slash, so drop it for the root
+    # the caller passed (children built by _iter_dir never have one).
+    p = _norm(p)
     if _is_dir(p):
       for full, _name in _iter_dir(p):
         if _is_dir(full):
@@ -256,8 +365,8 @@ def grep_path(pattern, path=".", recursive=False, show_line_numbers=False,
 
   walk(path)
 
-def build_parser():
-  parser = argparse.ArgumentParser(
+def build_parser(vs):
+  parser = argparse.ArgumentParser(vs=vs,
     description="Simple grep implementation for MicroPython"
   )
   parser.add_argument("pattern", help="Search pattern")
@@ -302,7 +411,7 @@ def build_parser():
   return parser
 
 def main(vs, argv):
-  parser = build_parser()
+  parser = build_parser(vs)
 
   try:
     args = parser.parse_args(argv[1:])
@@ -343,7 +452,20 @@ def main(vs, argv):
       return 0
 
   paths = paths if paths else ["."]
+  # The shell hands wildcards over literally, so expand them here (the way
+  # `ls` does). A pattern matching nothing warns instead of silently doing
+  # a literal-path search.
+  expanded = []
   for p in paths:
+    if _has_glob(p):
+      hits = _expand_glob(p)
+      if not hits:
+        out = vs if vs is not None else sys.stdout
+        out.write("grep: {}: No such file or directory\n".format(p))
+      expanded.extend(hits)
+    else:
+      expanded.append(p)
+  for p in expanded:
     grep_path(
       args.pattern,
       path=p,

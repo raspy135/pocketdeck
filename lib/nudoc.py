@@ -1422,7 +1422,7 @@ class NudocGame:
 
 
 def main(vs, args):
-  parser = argparse.ArgumentParser(description='Nudoc Sudoku game and resolver')
+  parser = argparse.ArgumentParser(vs=vs, description='Nudoc Sudoku game and resolver')
   parser.add_argument('-r', '--resolver', action='store_true', help='Resolver mode: count solutions without launching GUI')
   parser.add_argument('board_file', nargs='?', help='Board file or difficulty (easy/medium/hard)')
 

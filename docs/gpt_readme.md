@@ -1,7 +1,7 @@
 
 # gpt
 
-`gpt` is an LLM frontend for Pocket Deck. It supports text queries, voice input/output, file and image attachments, and an **agent mode** in which the model uses native function calling (tools) to write files, run and debug code, and even see and drive other apps on the device. **conversation mode** keeps context across turns.
+`gpt` is an LLM frontend for Pocket Deck. It supports text queries, voice input/output, file and image attachments, and a **conversation mode** which keeps context across turns and gives the model native function calling (tools) to write files, run and debug code, and even see and drive other apps on the device.
 
 OpenAI and the other models are supported. OpenAI models are the easiest option.
 
@@ -15,9 +15,11 @@ To use other LLM models, edit /config/gpt.json.
 gpt [options] [question]
 ```
 
-With no question argument, an interactive prompt opens for multi-line input
-(single-shot). In conversation mode (`-C`) a prompt opens that keeps talking to
-you turn after turn.
+With no question argument, `gpt` opens a **conversation** (`-C`): an interactive
+prompt that keeps talking to you turn after turn, with the model able to run
+commands, edit files and drive the device. A question passed as an argument is
+asked once (single-shot). `gpt -C <question>` starts a conversation with that
+question as its first message.
 
 **Quick examples:**
 
@@ -25,9 +27,8 @@ you turn after turn.
 gpt what is the capital of France
 gpt -f notes.txt notes2.txt -q summarize this
 gpt -v
-gpt -a write a temp script that prints the first 10 primes and run it
-gpt -C -a  # Conversation mode with agent mode
-gpt -Ca -r coder -f pd/app_development.md         # Set role as coder, agent mode, and let AI read development documentation
+gpt                                  # e.g. then type: write a script that prints the first 10 primes, and run it
+gpt -C -r coder -f pd/app_development.md   # coder role, let AI read development documentation
 ```
 
 ## Options
@@ -36,8 +37,9 @@ Option | Description
 -------|------------
 `-q text or file` | Explicit question. If a single filename is given, its content is used as the question.
 `content` | Positional question text (alternative to `-q`).
-`-a` | Agent mode — turn on the function-calling tools. See [Agent Mode](#agent-mode-a).
-`-C` | Conversation mode — keep context across turns. See [Conversation Mode](#conversation-mode-c).
+`-a` | Enable the agent tools (function calling) — device control, file and web tools. Already the default in conversation mode. See [Tools in agent mode](#tools-in-agent-mode).
+`-na` | Disable the agent tools — plain chat, even in conversation mode.
+`-C` | Conversation mode — keep context across turns, with the agent tools on. See [Conversation Mode](#conversation-mode-c).
 `-P` | Start in Plan mode (confirm each `command_with_return` / `write_file` before it runs). Default is Auto.
 `-r name|text` | Role / persona. Presets: `assistant` (default) or `coder` (also turns tools on). Or a `/sd/roles/<name>.txt` file, or literal role text.
 `-f file [file...]` | Attach one or more files as reference context. Also accepts URLs.
@@ -103,8 +105,8 @@ below).
 
 ## Prompt file syntax
 
-You can give a file as a prompt, `gpt -q prompt.md`. It is useful with agent
-mode `-a`. In the file you can use the following syntax:
+You can give a file as a prompt, `gpt -q prompt.md`. It is useful with the agent
+tools. In the file you can use the following syntax:
 
 ### File reference
 
@@ -129,7 +131,7 @@ Modify hello.py so it prints hello in multiple languages, then run it.
 To run such a prompt in agent mode:
 
 ```
-gpt -a -q prompt.md
+gpt -C -q prompt.md
 ```
 
 ## Log Files
@@ -141,9 +143,9 @@ filename is copied to the clipboard after each session. Use `-n` to skip saving.
 
 File attachment (-f) is one of the powerful option in gpt command. By attaching files, you can teach extra instruction or knowledge to AI. You can specify multiple files to AI.
 
-## Agent Mode (`-a`)
+## Agent Mode
 
-Agent mode gives the AI model to read/write file, check status and make an application on the fly.
+Agent mode gives the AI model to read/write file, check status and make an application on the fly. It is part of conversation mode; toggle the tools with `/tools`.
 
 In agent mode, the AI knows what Pocket Deck is and how to operate the device. In coder role (-r coder), it also knows how to code.
 
@@ -231,10 +233,12 @@ else you typed while waiting is kept, not swallowed.
 
 ## Conversation Mode (`-C`)
 
-`gpt -C` opens an interactive session that keeps context across turns, so you can
-have a back-and-forth without re-sending history (Responses models keep it
-server-side via `previous_response_id`; Chat Completions models keep it locally).
-Combine with `-a`/`-r coder` for an interactive coding assistant.
+Running `gpt` with no question argument opens an interactive session that keeps
+context across turns, so you can have a back-and-forth without re-sending
+history (Responses models keep it server-side via `previous_response_id`; Chat
+Completions models keep it locally). The model has its agent tools — `-na`
+starts without them, `/tools` toggles them mid-session, `/role coder` switches
+to the coding persona.
 
 Line editing: arrows move the cursor, Up/Down browse history, Ctrl-A/E jump to
 start/end, Ctrl-K/U kill to end/start, Ctrl-C cancels the current line.

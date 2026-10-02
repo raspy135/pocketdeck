@@ -227,7 +227,7 @@ lock [pin] | Lock the device. `lock 0912` sets the PIN to `0912` and locks; `loc
 netserver | launch network server to serve services. It provide screencast and clipboard sharing. See [[netserver/GETTING_STARTED]] for detail.
 setuni | Change terminal font to CJK Unicode font,.
 setjpf | Change terminal font to Japanese. It's lighter than setuni.
-grep pattern [path ...] | Search text in files, Linux-like. The pattern is a **regex by default** (MicroPython's limited `re`; unsupported patterns fall back to literal match). `-F` literal/fixed-string match, `-o` only matching, `-v` invert match, `-r` recursive, `-n` line numbers, `-i` ignore case, `-l` filenames only, `-A/-B/-C N` context lines, `-c` count only, `-m N` stop after N matches, `--no-filename` hide the filename prefix, `--include .py,.md` filter by extension, `--max N` skip files larger than N bytes. (`-e`/`-E` accepted but redundant since regex is the default.)
+grep pattern [path ...] | Search text in files, Linux-like. Paths support **wildcards** (e.g. `grep test journal*.md`). The pattern is a **regex by default** (MicroPython's limited `re`; unsupported patterns fall back to literal match). `-F` literal/fixed-string match, `-o` only matching, `-v` invert match, `-r` recursive, `-n` line numbers, `-i` ignore case, `-l` filenames only, `-A/-B/-C N` context lines, `-c` count only, `-m N` stop after N matches, `--no-filename` hide the filename prefix, `--include .py,.md` filter by extension, `--max N` skip files larger than N bytes. (`-e`/`-E` accepted but redundant since regex is the default.)
 curl [options] url | HTTP client for simple web requests. Supports `http://` and `https://`, `-L` to follow redirects (up to 5), `-m SECONDS` request timeout, `-I` HEAD request (status + headers only), `-o FILE` to save body to file, `-O` to save under the URL's filename, `-X METHOD` to choose request method, `-d DATA` to send request body (`-d @file` reads it from a file), `-A UA` to set the User-Agent, `-u user:password` for HTTP basic auth, `-i` to include response headers, `-s` for silent mode, and `-V` to show version. `-H` for header. The URL goes last.
 diff [options] left right | Compare two text files. Supports unified and side-by-side views, paging, output to file, and configurable context lines.
 qr [text...] | Generate and display a QR code centered on the screen. Supports `-c` to read from the clipboard.
@@ -276,6 +276,19 @@ grep [options] pattern [path ...]
 ```
 
 If `path` is omitted the current working directory is searched; several files or directories can be given. A directory is searched only at its top level unless `-r` is given. Matches are printed as `file: line`, with the filename highlighted.
+
+#### Wildcard paths
+
+The shell does not expand wildcards itself, so grep does it: each `path` argument may contain `*`, `?` and `[...]` in **any** component, not just the file name.
+
+```
+grep test journal*.md              # all journal files in the cwd
+grep -l TODO /sd/Doc*/pd/*.md      # wildcards in the middle too
+grep -c . journal_202?07*.md       # ? and * combined
+grep -rl "Pocket Deck" pd*/ --include .md   # a directory glob
+```
+
+Rules: `*` never crosses a `/` (same as shell globbing); other characters such as `+` and `.` are matched literally; `dir*/` expands to matching **directories** only. If an argument matches nothing, grep warns `grep: pattern: No such file or directory` and continues with the rest, like GNU grep. (`[...]` classes are handed to MicroPython's limited `re`, so exotic sets degrade to literal `[`/`]` rather than erroring.)
 
 Options:
 
@@ -411,7 +424,61 @@ journal [file] [file..]
 morning_word [file]
 ```
 
+### tripplan
 
+`tripplan` browses a day-trip plan as a scrolling map, one stop at a time. The map is real: stops sit where they actually are, and the picture pans and zooms between them like a navigation app.
+
+```
+tripplan [name]
+```
+
+Pass a plan name, or a path to a plan file. Plans are Markdown files kept in
+/sd/Documents/trips, so `tripplan malibu` opens /sd/Documents/trips/malibu.md.
+A plan holds the places in order with a time, a note and a tip for each one.
+
+To see what you have:
+
+```
+tripplan --list
+```
+
+'malibu' is a demo plan you can try.
+
+#### Making a plan
+
+1. You need AI to make a plan. You can still write a plan by yourself but it needs latitude and longtitude). Ask the AI assistant to write one ("plan a Saturday in LA for me"), and ask AI to write down to Markdown file. Adjust your plan. 
+
+2. Use "/tripplan" skill to convert the Markdown format to app-readable Markdown file. AI will save the final Markdown file under /sd/Documents/trip. 
+
+3. Open the plan in the app. You can edit the plan manually by opening the plan file.
+
+#### Operation
+
+| key | action |
+|-----|--------|
+| Right / Up / n | next stop |
+| Left / Down / p | previous stop |
+| h / e | first / last stop |
+| + / - | zoom in / out (overrides the scale of this stop only) |
+| r | replay the pan into the current stop |
+| i | invert the map (light lines on dark) |
+| d | change the map's shading |
+| g | retry any part of the map that has not appeared |
+| q or B | quit |
+
+The header shows where you are in the day (like 5/11), and its top bar can carry facts you will actually use outside - tide times, sunset, opening hours. From the second stop on, each one says how far it is from the previous: as a driving distance, or a straight-line one if the road data has not arrived yet. Stops at the same place say so instead.
+
+The map zooms itself to fit each stop. A manual `+` / `-` only changes the scale of
+the stop you are on.
+
+Tips:
+
+- The first time you open a plan it needs WiFi to fetch the map. Afterwards the
+  map is kept on the SD card, so you can browse the same trip offline at the
+  trailhead or the beach.
+- Stops you have not paged to show as small dots along the route. A stretch of
+  the journey marked as a drive shows as a plain tick, since it is a point on
+  the road rather than a place to visit.
 
 
 ### Graph
@@ -523,14 +590,27 @@ Custom board file syntax is simple text file:
 `flashcards` is a flash card app to learn words.
 Example-sentence generation uses an LLM (OpenAI by default, or any model in `/config/gpt.json`); read-aloud uses OpenAI TTS and needs `/config/openai_api_key`.
 
+
 Options:
-- `-r` : Reverse the answer and the question.
+- `-f` : Forward mode (enter answer)
 - `-v` : No voice
 - `-m name` : LLM for example sentences — a `name` from `/config/gpt.json` (e.g. a local/third-party Chat model). Default: the registry default. See the gpt doc's [Model configuration](gpt_readme.md).
 
 - Up : Reverse mode
 - Down : Open menu
 - Enter : See answer, go next word
+- BS : Quick mark the card as a failure (works in question and reveal state)
+
+Pressing BS before revealing the answer reveals it and marks the card as a
+failure. Opening the **Down** menu after the answer was revealed also marks
+the card as a failure (you clearly did not remember it); BS in the question
+state does the same. BS inside the menu / while an example message is shown
+marks the failure too, and just closes the popup.
+
+There is no "marked as failure" popup — the OK/NG counters and the score
+under the card update, plus an error beep. Only one attempt per card is
+ever counted: pressing BS after a success (typed correctly or revealed)
+downgrades that attempt to a failure instead of adding a second one.
 
 #### Word file syntax
 

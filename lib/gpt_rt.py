@@ -1697,7 +1697,7 @@ class RealtimeAgent(gpt_tools.ToolExecBase):
     self.ws.close()
 
 def main(vs, args_in):
-  parser = argparse.ArgumentParser(description='OpenAI Realtime Voice Agent PoC')
+  parser = argparse.ArgumentParser(vs=vs, description='OpenAI Realtime Voice Agent PoC')
   parser.add_argument('-m', '--model', action='store', default=None, help='Realtime backend: a name from /config/gpt.json (api:"realtime", e.g. grok-voice), or a raw OpenAI realtime model id. Default: OpenAI gpt-realtime-2.')
   parser.add_argument('-f', '--file', nargs='+', action='store', help='Attach file(s) as reference')
   parser.add_argument('-a', '--agent', action='store_true', help='Enable agent mode (function calling)')

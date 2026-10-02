@@ -399,7 +399,7 @@ def main(vs_arg, args_in):
   global vs
   vs = vs_arg
 
-  parser = argparse.ArgumentParser(description="Google drive")
+  parser = argparse.ArgumentParser(vs=vs, description="Google drive")
   parser.add_argument('-l', '--list', action='store_true', help='list', default=False)
   parser.add_argument('--download', help='download by file id', default=None)
   parser.add_argument('--download-name', help='download by exact file name', default=None)

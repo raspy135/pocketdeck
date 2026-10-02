@@ -33,6 +33,9 @@ import ujson
 import ubinascii
 import pdeck
 import pdeck_utils as pu
+import gpt_l  # already loaded by every frontend; only for the shared esclib
+
+el = gpt_l.el
 # pngwriter and ai_improve are imported lazily at their call sites
 # (capture_screen exec, run_self_improve) to keep this import light.
 
@@ -451,7 +454,7 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False,
     tools.append({
       "type": "function",
       "name": "ask_user",
-      "description": "Stop working and hand control back to the user. Call this when you are stuck: an approach failed twice, you need a decision, permission, or information only the user has, or continuing would just repeat the same failing attempts. Retrying in circles is worse than asking. After this call, do not call more tools: your next reply should be a short text message stating what you tried, what went wrong, and what you need from the user.",
+      "description": "Stop working and hand control back to the user. Call this when you want to clarify specification, it works like grill-me skill. It is encoraged to use this call rather than guessing.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -657,8 +660,7 @@ def device_instructions(app_list=None, vision=True, realtime=False, my_screen=No
     "ARE supported; '<', '&&' and subshells are not.) "
     "See README.md for full command list.\n"
     "The device keeps an activity log under /sd/elog/, one markdown file per day "
-    "named YYYY-MM-DD.md, each line an event: app launches, file opens/saves, and "
-    "shell commands the user ran. Read the current day's file as needed.\n"
+    "named YYYY-MM-DD.md.\n"
     "The user keeps SKILLS at /sd/Documents/skills/ — one markdown file per "
     "skill: a named, reusable procedure you can perform (a routine with steps "
     "and timings, a recurring workflow like a morning writing setup, a document "
@@ -686,8 +688,7 @@ def device_instructions(app_list=None, vision=True, realtime=False, my_screen=No
        "read_console_log instead.") +
     "Use send_keys to type into the app in the "
     "foreground; set enter=true to press Enter, and use escape sequences for "
-    "special keys (Up=\\x1b[A, Down=\\x1b[B, Right=\\x1b[C, Left=\\x1b[D, Esc=\\x1b, "
-    "Backspace=\\x08, Ctrl-X=\\x18). "
+    "special keys (Up=\\x1b[A, Down=\\x1b[B, and so on). "
     + ("After acting, capture_screen again to confirm the result before continuing.\n"
        if vision else
        "After acting, read_console_log to confirm the result before continuing.\n") +
@@ -1390,9 +1391,15 @@ class ToolExecBase:
       args = {}
     q = args.get("question", "") if isinstance(args, dict) else ""
     self.user_question = q or "(the assistant is stuck and needs your input)"
-    return ("Question delivered. STOP now: no more tool calls. Reply with a "
-            "short text message for the user — what you tried, what went "
-            "wrong, and the question — then wait for their answer.")
+    return ("Question delivered.")
+
+  def take_question(self):
+    if self.user_question is None:
+      return False
+    print("\n%s[Question]%s %s" % (el.bold(), el.bold_off(), self.user_question),
+          file=self.vs)
+    self.user_question = None
+    return True
 
   def execute_launch_app(self, arguments):
     try:

@@ -63,13 +63,13 @@ _INLINE_DESTS = ('model', 'effort', 'jp', 'clipboard', 'no_format', 'nosave',
                  'voice', 'voice_type')
 _inline_p = None
 
-def inline_parser():
+def inline_parser(vs):
   """Parser for a [[...]] option block. Every default is None so the caller can
   tell "set inline" from "left alone"; built once (ArgumentParser opens a screen
   stream) and reused."""
   global _inline_p
   if _inline_p is None:
-    p = argparse.ArgumentParser(description='inline options')
+    p = argparse.ArgumentParser(vs=vs, description='inline options')
     p.add_argument('-m', '--model', default=None)
     p.add_argument('-e', '--effort', default=None)
     p.add_argument('-j', '--jp', action='store_true', default=None)
@@ -80,6 +80,7 @@ def inline_parser():
     p.add_argument('-vt', '--voice-type', default=None)
     p.add_argument('-i', '--image', nargs='+', default=None)
     _inline_p = p
+  _inline_p.vs = vs   # cached parser, but errors go to the current app's screen
   return _inline_p
 
 def load_images(paths, images, vs):
@@ -124,7 +125,7 @@ def parse_inline_directives(message, references, images, vs):
 
     if block[:1] == '-':
       try:
-        ns, unknown = inline_parser().parse_known_args(block.split())
+        ns, unknown = inline_parser(vs).parse_known_args(block.split())
       except BaseException:
         # argparse reports a missing value itself, then exits; keep the turn.
         print("Inline option error in [[%s]]; ignored." % block, file=vs)

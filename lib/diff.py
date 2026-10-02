@@ -385,8 +385,8 @@ def _render_side_by_side(writer, ops, width, style):
     writer.line(left_cell + ' | ' + right_cell)
 
 
-def _build_parser():
-  parser = argparse.ArgumentParser(description='compare two text files')
+def _build_parser(vs):
+  parser = argparse.ArgumentParser(vs=vs, description='compare two text files')
   parser.add_argument('-a', '--all', action='store_true', help='show all unchanged lines in one unified hunk')
   parser.add_argument('-c', '--context', type=int, default=2, help='context lines around changes')
   parser.add_argument('-y', '--side-by-side', action='store_true', help='show side by side view')
@@ -402,7 +402,7 @@ def _build_parser():
 
 
 def main(vs, args_in):
-  parser = _build_parser()
+  parser = _build_parser(vs)
   try:
     args = parser.parse_args(args_in[1:])
   except SystemExit:

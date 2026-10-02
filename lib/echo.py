@@ -46,7 +46,7 @@ def _unescape(s):
   return ''.join(out)
 
 def main(vs, args_in):
-  parser = argparse.ArgumentParser(
+  parser = argparse.ArgumentParser(vs=vs,
             description='display a line of text')
   parser.add_argument('-n', action='store_true', help='do not output the trailing newline')
   parser.add_argument('-e', action='store_true', help='enable interpretation of backslash escapes')

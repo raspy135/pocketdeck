@@ -105,7 +105,7 @@ def _do_find(root, args, depth, out):
       _do_find(full, args, depth + 1, out)
 
 def main(vs, args_in):
-  parser = argparse.ArgumentParser(
+  parser = argparse.ArgumentParser(vs=vs,
             description='search for files in a directory hierarchy')
   parser.add_argument('path', nargs='?', default='.', help='directory to search (default: current)')
   parser.add_argument('-name', metavar='PATTERN', help='base name matches PATTERN (shell glob)')

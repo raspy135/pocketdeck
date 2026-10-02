@@ -65,7 +65,7 @@ class QRCodeApp:
     self.v.finished()
 
 def main(vs, args_in):
-  parser = argparse.ArgumentParser(
+  parser = argparse.ArgumentParser(vs=vs,
             description='ChatGPT query' )
   parser.add_argument('content', nargs='*',help='Text for QR code')
   parser.add_argument('-c', '--clipboard', action='store_true', help='Generate QR code from clipboard')

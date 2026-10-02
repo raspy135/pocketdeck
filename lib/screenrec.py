@@ -52,7 +52,7 @@ def default_filename():
 
 
 def main(vs, args_in):
-  parser = argparse.ArgumentParser(description="Record the screen to SD as .pdsr (convert on a PC with utils/pdsr2gif.py)")
+  parser = argparse.ArgumentParser(vs=vs, description="Record the screen to SD as .pdsr (convert on a PC with utils/pdsr2gif.py)")
   parser.add_argument("out", nargs="?", default=None, help="Output file (default /sd/rec/recMMDD_HHMMSS.pdsr)")
   parser.add_argument("-f", "--fps", type=float, default=5.0, help="Frames per second (default 5)")
   parser.add_argument("-t", "--time", type=float, default=30.0, help="Duration in seconds; 0 = record until a key is pressed (default 30)")

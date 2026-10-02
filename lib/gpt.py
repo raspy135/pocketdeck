@@ -8,8 +8,11 @@
 #     write_file, launch_app, list_running_apps, switch_screen, capture_screen,
 #     send_keys)
 #   - a function-calling loop over the Responses API
-#   - an optional conversation mode (-C) that keeps the context across turns
-#     using previous_response_id (server-side state).
+#   - conversation mode (-C), the default when no prompt is passed as an
+#     argument: it keeps context across turns using previous_response_id
+#     (server-side state). Agent tools (-a) are on by default there too.
+#     A prompt passed as an argument (or -v voice) keeps the classic
+#     single-turn one-shot behavior.
 
 import sys
 # On a PC (CPython) install stand-ins for the device-only modules below before
@@ -718,7 +721,7 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
     return None
 
   def ask_agent(self, message, references, images, model, instructions, effort,
-                tools, silent=False, max_iters=25):
+                tools, silent=False, max_iters=100):
     """Run one user turn: send the message, resolve any function calls, and
     return the model's final text. Keeps self.prev_response_id updated so the
     next turn (conversation mode) continues the same context."""
@@ -828,6 +831,13 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
       prev_id = data.get("id")
       in_flight = False
 
+      if data.get("status") == "incomplete":
+        # Truncated by the endpoint (usually reason "max_output_tokens"): a
+        # reasoning model can burn the whole budget thinking and return no text
+        # at all, which on screen just looks like it stopped mid-thought.
+        why = (data.get("incomplete_details") or {}).get("reason", "unknown")
+        print("(response incomplete: %s)" % why, file=self.vs)
+
       fn_calls = []
       text_out = None
       for item in data.get("output", []):
@@ -912,9 +922,8 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
 
       # An ask_user call ends the turn: the next round is text-only so the
       # model states its question and control returns to the user.
-      if self.user_question is not None:
+      if self.take_question():
         ask_stop = True
-        self.user_question = None
 
       input_list = next_input
       in_flight = True  # these outputs are delivered on the next successful POST
@@ -1014,7 +1023,8 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
 # Output (format / print / voice / save) - shared by single-shot and chat turns
 # ----------------------------------------------------------------------------
 
-def present_response(vs, gpt_obj, message, raw_response, args, margs, log_filename):
+def present_response(vs, gpt_obj, message, raw_response, args, margs, log_filename,
+                     chat=False):
   if not raw_response:
     return
 
@@ -1058,8 +1068,53 @@ def present_response(vs, gpt_obj, message, raw_response, args, margs, log_filena
   # "result ready" LED would stay lit until the next turn. Arm a deadline
   # instead; read_line's idle poll clears it. (Single-shot turns it off in
   # main()'s finally.)
-  if args.chat:
+  if chat:
     _led2_off_at[0] = time.time() + 2
+
+
+def speak_response(vs, gpt_obj, text, voice=None):
+  """Say an AI reply out loud with the TTS engine bound in /config/gpt.json
+  (the api:"audio" entry init_client already applied to gpt_obj) — the
+  conversation-mode twin of the -v branch in present_response and of the
+  speaker button in the AI harness. Long replies are split to stay under the
+  endpoint's character cap; a key press stops playback."""
+  if _IS_PC:
+    print("Audio playback needs the device.", file=vs)
+    return
+  import tts  # lazy: pulls in the device audio playback chain
+  # Same cleanup as present_response's voice path: markdown links -> "[", and
+  # bare URLs stripped so the engine doesn't read them out.
+  text = tts.strip_urls(re.sub(r'\]\(ht.+?\)', ']', text))
+  chunks = tts.split_text(text)
+  print("Speaking (%d part(s)).. press any key to stop" % len(chunks), file=vs)
+  for i, chunk in enumerate(chunks):
+    if len(chunks) > 1:
+      print("Generating part %d/%d..." % (i + 1, len(chunks)), file=vs)
+    try:
+      res = gpt_obj.tts_stream(chunk, voice=voice)
+    except Exception as e:
+      print("TTS request failed: %r" % (e,), file=vs)
+      return
+    if not res or res.status_code != 200:
+      print("TTS failed on part %d (is the audio backend configured?)"
+            % (i + 1), file=vs)
+      try:
+        if res:
+          res.close()
+      except Exception:
+        pass
+      return
+    try:
+      stream = getattr(res, "raw", getattr(res, "s", res))
+      interrupted = tts.play_stream(vs, stream)
+    except Exception as e:
+      print("Playback failed: %s" % e, file=vs)
+      interrupted = False
+    finally:
+      res.close()
+    if interrupted:
+      print("(stopped)", file=vs)
+      return
 
 
 # ----------------------------------------------------------------------------
@@ -1125,7 +1180,8 @@ def resolve_role(value):
   return value, None   # literal role text
 
 
-def assemble_instructions(role, tts, agent, app_list, my_screen=None, vision=True):
+def assemble_instructions(role, tts, agent, app_list, my_screen=None, vision=True,
+                          memory=True):
   text = role if role else DEFAULT_ROLE
   if tts:
     text += "\n\n" + TTS_NOTE
@@ -1133,12 +1189,15 @@ def assemble_instructions(role, tts, agent, app_list, my_screen=None, vision=Tru
     # The device/tool prose is shared with gpt_rt so the prompts can't drift.
     text += "\n\n" + gpt_tools.device_instructions(app_list, vision=vision,
                                                    my_screen=my_screen)
-  # Fold in the self-evolving memory (learned in past sessions) in every mode:
-  # recalling what we know about the user should not depend on /tools.
+  # Fold in the self-evolving memory (learned in past sessions) in every
+  # conversation mode: recalling what we know about the user should not depend
+  # on /tools. One-shot calls (gpt "hi", and the gpt.main() callers like dic/docs)
+  # skip it - a single question doesn't need 2 KB of persona history.
   # Imported here (not at module top) so the module body stays out of the
   # startup path; the file read itself happens on every prompt assembly.
-  import ai_improve
-  text += ai_improve.memory_block()
+  if memory:
+    import ai_improve
+    text += ai_improve.memory_block()
   return text
 
 
@@ -1406,9 +1465,10 @@ def read_line(vs, prompt, history, on_shift_tab=None, lead="\n",
 # ----------------------------------------------------------------------------
 
 def main(vs, args_in):
-  parser = argparse.ArgumentParser(description='ChatGPT query with function calling')
-  parser.add_argument('-a', '--agent', action='store_true', help='Enable function-calling tools')
-  parser.add_argument('-C', '--chat', action='store_true', help='Conversation mode (keep context across turns)')
+  parser = argparse.ArgumentParser(vs=vs, description='ChatGPT query with function calling')
+  parser.add_argument('-a', '--agent', action='store_true', help='Enable function-calling tools (already the default in conversation mode)')
+  parser.add_argument('-na', '--no-agent', action='store_true', help='Disable function-calling tools (plain chat, even in conversation mode)')
+  parser.add_argument('-C', '--chat', action='store_true', help='Conversation mode (keep context across turns). Default unless a prompt is passed as an argument (or -v); then -C forces conversation with the prompt as the first message.')
   parser.add_argument('-P', '--plan', action='store_true', help='Start in Plan mode (confirm before running command_with_return / write_file). Default is Auto.')
   parser.add_argument('-n', '--nosave', action='store_true', help='do not save the result')
   parser.add_argument('-s', '--silent', action='store_true', help='Suppress progress output')
@@ -1459,6 +1519,13 @@ def main(vs, args_in):
             "the %s API, so nothing will be written. Switch to a chat model "
             "(/model or -m)." % gpt_obj.API, file=vs)
 
+  # Mode defaults: conversation (-C) with agent tools (-a) on. A prompt passed
+  # as arguments (content or -q), or a voice one-shot (-v with no prompt),
+  # keeps the classic single-turn behavior. An explicit -C forces conversation
+  # even with a prompt (the prompt then becomes the chat's first message).
+  # (A local `chat`, not args.chat: the device's argparse Namespace is immutable.)
+  chat = bool(args.chat) or not (args.content or args.q or args.voice)
+
   message = ""
   tts_response = False
 
@@ -1473,8 +1540,7 @@ def main(vs, args_in):
     print("You (STT): %s" % message, file=vs)
     tts_response = True
   elif not args.content and not args.q:
-    if not args.chat:
-      message = gpt.get_message(vs)
+    pass  # conversation mode with no startup prompt: the chat loop reads input
   else:
     if args.content:
       message += ' '.join(args.content)
@@ -1485,7 +1551,7 @@ def main(vs, args_in):
       else:
         message += ' '.join(args.q)
 
-  if len(message) == 0 and not args.chat:
+  if len(message) == 0 and not chat:
     return
 
   references = []
@@ -1549,12 +1615,17 @@ def main(vs, args_in):
   # coder), a /sd/roles/<name>.txt file, or literal text. The coder preset also
   # turns the tools on.
   role, role_wants_agent = resolve_role(args.role)
-  agent = args.agent or (role_wants_agent is True)
+  # Agent tools are on by default in conversation mode (and when -a or a
+  # tools-implying role preset like 'coder' is given); -na turns them off.
+  agent = not args.no_agent and (args.agent or (role_wants_agent is True) or chat)
 
   # Agent tools drive the device (run modules, screens, apps) and don't exist on
-  # a PC, so plain chat is the only supported PC mode.
+  # a PC, so plain chat is the only supported PC mode. With tools now the
+  # conversation default, drop them silently on PC; only say something when
+  # they were explicitly asked for.
   if _IS_PC and agent:
-    print("Agent mode is unavailable on PC; continuing as plain chat.", file=vs)
+    if args.agent:
+      print("Agent mode is unavailable on PC; continuing as plain chat.", file=vs)
     agent = False
 
   # The assistant's own screen, so we can tell the agent to switch the foreground back
@@ -1586,7 +1657,7 @@ def main(vs, args_in):
     'agent': agent,
     'app_list': app_list,
     'instructions': assemble_instructions(role, tts_response, agent, app_list, my_screen,
-                                          vision=not gpt_obj.text_only),
+                                          vision=not gpt_obj.text_only, memory=chat),
     'tools': gpt_obj.build_tools_for(app_list, agent),
   }
 
@@ -1600,7 +1671,7 @@ def main(vs, args_in):
 
   def refresh():
     ctx['instructions'] = assemble_instructions(ctx['role'], ctx['tts'], ctx['agent'], ctx['app_list'], my_screen,
-                                                vision=not gpt_obj.text_only)
+                                                vision=not gpt_obj.text_only, memory=chat)
     ctx['tools'] = gpt_obj.build_tools_for(ctx['app_list'], ctx['agent'])
 
   def switch_model(name):
@@ -1648,17 +1719,26 @@ def main(vs, args_in):
   if 'model' in margs:
     switch_model(margs['model'])
 
+  # Most recent raw AI reply, kept for the /speak command.
+  last_answer = [None]
+
+  # Stamped once per session, not per turn: a constant prefix keeps the turn
+  # text stable for prompt caching. ponytail: a long conversation then shows the
+  # start time; move this back into run_turn if the drift ever matters.
+  ctime = time.gmtime(time.time() + pu.timezone * 60 * 15)
+  time_str = "[User current time: %04d-%02d-%02d %02d:%02d]\n" % (ctime[0], ctime[1], ctime[2], ctime[3], ctime[4])
+
   def run_turn(turn_message, refs, imgs):
     gpt_obj.model = ctx['model']  # so update_memory / self-improve can reach the active model/endpoint
-    ctime = time.gmtime(time.time() + pu.timezone * 60 * 15)
-    time_str = "[User current time: %04d-%02d-%02d %02d:%02d]\n" % (ctime[0], ctime[1], ctime[2], ctime[3], ctime[4])
     full = time_str + turn_message + jp_suffix
     raw = gpt_obj.ask_agent(full, refs, imgs, ctx['model'], ctx['instructions'],
                             ctx['effort'], ctx['tools'], silent=args.silent)
-    present_response(vs, gpt_obj, full, raw, args, margs, log_filename)
+    if raw:
+      last_answer[0] = raw
+    present_response(vs, gpt_obj, full, raw, args, margs, log_filename, chat)
     return raw
 
-  if not args.chat:
+  if not chat:
     try:
       run_turn(message, references, images)
     finally:
@@ -1759,6 +1839,7 @@ def main(vs, args_in):
     lines.append("  /tools             toggle function-calling tools (agent) on/off")
     lines.append("  /mode [auto|plan]  show/set execution mode (no arg toggles); also /auto, /plan")
     lines.append("  /stream [on|off]   show the reply live as it arrives (no arg toggles)")
+    lines.append("  /speak [text]      say the last reply aloud (TTS engine from /config/gpt.json)")
     lines.append("  /file <path>       attach a file as reference for the next message")
     lines.append("  /history           show recent input history")
     if gpt_obj.CAN_COMPACT:
@@ -1862,6 +1943,12 @@ def main(vs, args_in):
         gpt_obj.app_list = ctx['app_list']
       refresh()
       print("Tools %s." % ("on" if ctx['agent'] else "off"), file=vs)
+    elif cmd == 'speak':
+      text = arg or last_answer[0]
+      if not text:
+        print("Nothing to speak yet (no AI reply this session).", file=vs)
+      else:
+        speak_response(vs, gpt_obj, text, args.voice_type)
     elif cmd == 'file':
       if not arg:
         print("Usage: /file <path>", file=vs)

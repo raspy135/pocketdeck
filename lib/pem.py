@@ -3134,7 +3134,7 @@ def main(vs, args_in):
   v = screen_interface(vs)
   if not pdeck_enabled:
     _start_open_server()
-  parser = argparse.ArgumentParser( description = "pem")
+  parser = argparse.ArgumentParser(vs=vs, description = "pem")
   parser.add_argument('-j','--japanese', action='store_true',help='Set Japansese font at launching') 
   parser.add_argument('-n','--new-file', action='store_true',help='Do not open the last edited file') 
   

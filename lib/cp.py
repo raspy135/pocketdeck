@@ -87,7 +87,7 @@ def _collect_sources(src, recursive):
   return out
 
 def main(vs, args_in):
-  parser = argparse.ArgumentParser(
+  parser = argparse.ArgumentParser(vs=vs,
             description='copy file')
   parser.add_argument('-r', '--recursive', action='store_true', help='search recursively')
   parser.add_argument('src', help='Source path')

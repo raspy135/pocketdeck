@@ -53,7 +53,7 @@ def _head_file(vs, path, n, nbytes):
 
 
 def main(vs, args_in):
-  parser = argparse.ArgumentParser(description='print first lines of files')
+  parser = argparse.ArgumentParser(vs=vs, description='print first lines of files')
   parser.add_argument('-n', type=int, default=10, help='number of lines')
   parser.add_argument('-c', type=int, default=None, help='number of bytes')
   parser.add_argument('files', nargs='*', help='file paths')

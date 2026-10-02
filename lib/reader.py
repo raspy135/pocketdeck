@@ -1148,7 +1148,7 @@ def main(vs, args_in):
   v = vs.v
   el = elib.esclib()
 
-  parser = argparse.ArgumentParser(
+  parser = argparse.ArgumentParser(vs=vs,
             description='Book Reader')
   parser.add_argument('-v', '--vertical', action='store_true', help='Japanese vertical style')
   parser.add_argument('-j', '--japanese', action='store_true', help='Japanese horizontal (character-by-character wrap, no hyphenation)')

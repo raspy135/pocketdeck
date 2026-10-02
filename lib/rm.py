@@ -81,7 +81,7 @@ def main(vs, args_in):
     _usage(vs)
     return
 
-  parser = argparse.ArgumentParser(description='remove files')
+  parser = argparse.ArgumentParser(vs=vs, description='remove files')
   parser.add_argument('-r', '--recursive', action='store_true',
       help='match files in subdirectories too (directories themselves are never removed)')
   parser.add_argument('-n', '--dry-run', action='store_true',

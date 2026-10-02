@@ -663,7 +663,7 @@ class WordCountApp:
 def main(vs, args):
   global GOAL
 
-  parser = argparse.ArgumentParser()
+  parser = argparse.ArgumentParser(vs=vs)
   parser.add_argument('-g', '--goal', type=int, default=GOAL,
                        help='Daily word count goal (default: %d)' % GOAL)
   parser.add_argument('filename', nargs='?', default=DEFAULT_JOURNAL,
