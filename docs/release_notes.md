@@ -1,9 +1,11 @@
-## Release Note, October 9, 2026
+## Release Note, October 14, 2026
 
 ## Applications
 
 - gpt: "question" function call fix. 
 - gpt: added gemini voice protocol support for TTS.
+- gpt: ESC to insert message during chain tool call
+- reader: now it has menu to select book under /sd/book
 
 
 ## Release Note, September 22, 2026
