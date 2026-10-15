@@ -454,7 +454,7 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False,
     tools.append({
       "type": "function",
       "name": "ask_user",
-      "description": "Stop working and hand control back to the user. Call this when you want to clarify specification, it works like grill-me skill. It is encoraged to use this call rather than guessing.",
+      "description": "Ask the user a question and wait for the answer, which is returned as this call's result. Use it to clarify the specification, get a decision or permission, or when stuck; asking is encouraged over guessing.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -566,6 +566,21 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False,
         "enter": {"type": "boolean", "description": "If true, press Enter (carriage return) after the text"}
       },
       "required": ["text"]
+    }
+  })
+
+  tools.append({
+    "type": "function",
+    "name": "app_call",
+    "description": "Call a remote-control method (named pub_*) on a running app to read or change its state through method call; it works even while the app is in the background and returns the result as text, you can use them as a debug probe if the app has the methods. Call app_call with only 'screen' first to list them, then call again with 'method' and 'arguments' (a JSON object of keyword args; arguments are app-specific, see the app's source in /sd/lib or /sd/py). Errors are returned as text. PEM is the exception: use its dedicated pem_* tools, not app_call.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "screen": {"type": "integer", "description": "0-based screen number the app is on (see list_running_apps)."},
+        "method": {"type": "string", "description": "Name of the pub_* method to call. Omit to list the methods this screen's app exposes."},
+        "arguments": {"type": "string", "description": "JSON object of keyword arguments to pass, e.g. {\"line_from\": 3, \"line_to\": 5, \"content\": \"x\"}. Omit or '{}' for none."}
+      },
+      "required": ["screen"]
     }
   })
 
@@ -695,6 +710,11 @@ def device_instructions(app_list=None, vision=True, realtime=False, my_screen=No
     "To read TEXT a command-line app printed (e.g. to diagnose an error the user "
     "asks about), prefer read_console_log over a screenshot — it returns the "
     "recent console text directly and cheaply.\n"
+    "Some apps expose remote-control methods named pub_* (registered with "
+    "vs.register_module()). For those, prefer app_call over send_keys: it works "
+    "on a background screen, is deterministic, and returns a value. Call app_call "
+    "with only a screen to list the pub_* methods it exposes, then again with "
+    "'method' and a JSON 'arguments' object (arguments are app-specific).\n"
   )
   if realtime:
     text += (
@@ -708,8 +728,8 @@ def device_instructions(app_list=None, vision=True, realtime=False, my_screen=No
     text += (
       "You do not have to solve everything alone. If the same approach has failed "
       "twice, or you need a decision, permission, or information only the user has, "
-      "call ask_user with a short question instead of retrying in circles — then "
-      "stop and wait for the answer. Asking early beats a long stretch of failing "
+      "call ask_user with a short question instead of retrying in circles; the "
+      "user's answer comes back as its result. Asking early beats a long stretch of failing "
       "tool calls.\n")
   if my_screen is not None:
     text += ("\nIMPORTANT: your own screen — where your typed answers are shown — "
@@ -741,10 +761,6 @@ class ToolExecBase:
   # nested session would re-enter the whole loop (networking + JSON) on the
   # already-deep 8KB command stack and overflow.
   RECURSIVE_GUARD = ('gpt', 'gpt_l', 'gpt_rt', 'gpt_c', 'gptn', 'gpt_tools')
-
-  # Set by execute_ask_user; the frontend loop reads and clears it, then
-  # forces the next round to be text-only so the turn ends with the question.
-  user_question = None
 
   # Linux-only commands that don't exist here. Not pre-blocked (a user-installed
   # /sd/py/find.py must still run): only used to append a teaching hint when one
@@ -804,6 +820,8 @@ class ToolExecBase:
       return self.execute_launch_app(arguments)
     if name == "ask_user":
       return self.execute_ask_user(arguments)
+    if name == "app_call":
+      return self.execute_app_call(arguments)
     if name == "pem_get_status":
       return self.execute_pem_get_status(arguments)
     if name == "pem_edit_block":
@@ -1242,6 +1260,74 @@ class ToolExecBase:
                               (" (backup: %s)" % backup_path) if backup_path else "",
                               indent_hint(path, content))
 
+  def _app_entry(self, scnum):
+    # Find the app object registered via vs.register_module() on a screen.
+    # pu.app_list maps screen -> entry; the object is under 'obj'.
+    try:
+      entry = pu.app_list.get(scnum)
+    except Exception:
+      entry = None
+    if isinstance(entry, dict):
+      return entry.get('obj')
+    return None
+
+  def _pub_methods(self, obj):
+    if obj is None:
+      return []
+    out = []
+    for name in dir(obj):
+      if name.startswith('pub_') and callable(getattr(obj, name, None)):
+        out.append(name)
+    out.sort()
+    return out
+
+  def execute_app_call(self, arguments):
+    try:
+      args = ujson.loads(arguments) if arguments else {}
+    except:
+      return "Error: invalid arguments"
+    try:
+      scnum = int(args.get("screen"))
+    except:
+      return "Error: 'screen' (an integer) is required"
+    obj = self._app_entry(scnum)
+    if obj is None:
+      return ("No app registered on screen %d. Apps must call vs.register_module() "
+              "to be callable. Use list_running_apps to see what is running." % scnum)
+    methods = self._pub_methods(obj)
+    method = args.get("method")
+    if not method:
+      if not methods:
+        return "App on screen %d exposes no pub_* methods." % scnum
+      return "Screen %d app exposes: %s" % (scnum, ", ".join(methods))
+    if not method.startswith("pub_"):
+      return ("Error: method '%s' is not public. Only pub_* methods may be "
+              "called (available: %s)." % (method, ", ".join(methods) or "none"))
+    if method not in methods:
+      return ("Error: app on screen %d has no method '%s'. Available: %s"
+              % (scnum, method, ", ".join(methods) or "none"))
+    raw = args.get("arguments")
+    if raw is None or raw == "":
+      kwargs = {}
+    elif isinstance(raw, dict):
+      kwargs = raw
+    else:
+      try:
+        kwargs = ujson.loads(raw)
+      except:
+        return "Error: 'arguments' must be a JSON object"
+      if not isinstance(kwargs, dict):
+        return "Error: 'arguments' must be a JSON object"
+    try:
+      result = getattr(obj, method)(**kwargs)
+    except TypeError as e:
+      return "Error calling %s: bad arguments (%s)" % (method, str(e))
+    except Exception as e:
+      return "Error in %s: %s" % (method, str(e))
+    if result is None:
+      return "%s() ok (no return value)" % method
+    return str(result)
+
   def execute_list_running_apps(self, arguments):
     lines = ["screen 0: Python REPL"]
     try:
@@ -1383,23 +1469,6 @@ class ToolExecBase:
       scnum += 1
       if scnum == 10:
         return -1
-
-  def execute_ask_user(self, arguments):
-    try:
-      args = ujson.loads(arguments) if arguments else {}
-    except:
-      args = {}
-    q = args.get("question", "") if isinstance(args, dict) else ""
-    self.user_question = q or "(the assistant is stuck and needs your input)"
-    return ("Question delivered.")
-
-  def take_question(self):
-    if self.user_question is None:
-      return False
-    print("\n%s[Question]%s %s" % (el.bold(), el.bold_off(), self.user_question),
-          file=self.vs)
-    self.user_question = None
-    return True
 
   def execute_launch_app(self, arguments):
     try:

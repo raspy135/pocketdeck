@@ -585,6 +585,10 @@
             "noa/re_findall.py"
         ],
         [
+            "noa/reader_menu.py",
+            "noa/reader_menu.py"
+        ],
+        [
             "noa/remote_python_call.py",
             "noa/remote_python_call.py"
         ],
@@ -896,7 +900,7 @@
         },
         {
             "path": "gpt_l.py",
-            "md5": "cb4b13d776836b93cad737f315cab9fd"
+            "md5": "98b1862c6d5603dcd9402c1a9880ba71"
         },
         {
             "path": "esclib.py",
@@ -916,7 +920,7 @@
         },
         {
             "path": "gpt.py",
-            "md5": "95e552667b65fdcc3cd80b1acf89580c"
+            "md5": "858c0e52a0b355565e83504a81730e15"
         },
         {
             "path": "morning_word.py",
@@ -952,7 +956,7 @@
         },
         {
             "path": "reader.py",
-            "md5": "fbe78eb32434fccf9e49d4885d4b6783"
+            "md5": "14bc3bcc842595f1f953f66fdc007730"
         },
         {
             "path": "view.py",
@@ -988,7 +992,7 @@
         },
         {
             "path": "gpt_c.py",
-            "md5": "3f0af4038f53e40fd2ad7a886cc30f2c"
+            "md5": "7bccad47f4f4aa279302e216396f9762"
         },
         {
             "path": "update_updater.py",
@@ -1123,6 +1127,10 @@
             "md5": "fca81a158c0fc8fdde9593d7c3a2639a"
         },
         {
+            "path": "noa/reader_menu.py",
+            "md5": "b23b62fc8b89ee4dda81de778db7498a"
+        },
+        {
             "path": "noa/wav_play.py",
             "md5": "14b175658f8c6bbfea2d36f77731c9c8"
         },
@@ -1168,7 +1176,7 @@
         },
         {
             "path": "noa/gpt_tools.py",
-            "md5": "e8908a7db9d84cc633ee7a86a814f917"
+            "md5": "fff464f0f3c175b249036d153c54e28f"
         },
         {
             "path": "noa/pdeck_complete.py",
@@ -1276,7 +1284,7 @@
         },
         {
             "path": "noa/menu_ui.py",
-            "md5": "3742798d1e667965e994999327105aa9"
+            "md5": "dbf182c812feac98b9e25131a961c0fc"
         },
         {
             "path": "noa/remote_python_call.py",
@@ -1320,7 +1328,7 @@
         },
         {
             "path": "data/apps_db.json",
-            "md5": "4cb8e324c6322de4bc3bd33d953ec0a4"
+            "md5": "5ec1bb7dd36306afe6e1b3015bc3d766"
         },
         {
             "path": "data/cat3.xbmr",

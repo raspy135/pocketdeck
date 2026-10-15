@@ -233,21 +233,28 @@ class chatgpt_chat(gpt.chatgpt_agent):
       content.append({"type": "image_url", "image_url": {"url": url}})
     return content
 
-  def _prune_old_images(self):
-    """Drop image_url parts from prior messages so a long conversation full of
-    screenshots doesn't exhaust the heap (Chat Completions resends everything
-    each round). Images only need to live for the turn they're used in."""
-    for m in self.messages:
+  MAX_IMAGES = 5  # some models reject requests carrying more images than this
+
+  def _prune_old_images(self, keep=0):
+    """Drop image_url parts from history, keeping only the newest `keep`, so a
+    long conversation full of screenshots doesn't exhaust the heap (Chat
+    Completions resends everything each round) or exceed a model's per-request
+    image limit. Images only need to live for the turn they're used in."""
+    seen = 0
+    for m in reversed(self.messages):
       c = m.get("content")
       if not isinstance(c, list):
         continue
       kept = []
       dropped = False
-      for it in c:
+      for it in reversed(c):
         if isinstance(it, dict) and it.get("type") == "image_url":
-          dropped = True
-          continue
+          seen += 1
+          if seen > keep:
+            dropped = True
+            continue
         kept.append(it)
+      kept.reverse()
       if not dropped:
         continue
       if not kept:
@@ -378,9 +385,9 @@ class chatgpt_chat(gpt.chatgpt_agent):
     got_assistant = False
     pdeck.led(2, 0)  # clear the "result ready" indicator at the start of a turn
 
-    ask_stop = False  # set when the model calls ask_user: next round is text-only
     for i in range(max_iters + 1):
-      force_final = (i == max_iters) or ask_stop
+      force_final = (i == max_iters)
+      self._prune_old_images(self.MAX_IMAGES)  # screenshots pile up across rounds
       gc.collect()  # large JSON/base64 each round-trip fragments the small heap
       payload = {
         "model": model,
@@ -500,8 +507,6 @@ class chatgpt_chat(gpt.chatgpt_agent):
         print("%s[Result]%s %s" % (el.bold(), el.bold_off(), result[:200]), file=self.vs)
         self.messages.append({"role": "tool", "tool_call_id": call_id, "content": result})
 
-      self.interrupted = False  # the ESC interrupt covered this round only
-
       # A capture_screen call leaves a base64 PNG to feed back as a user image.
       # It must come AFTER every tool result (each tool_call needs its answer
       # first), as a fresh user turn.
@@ -515,10 +520,12 @@ class chatgpt_chat(gpt.chatgpt_agent):
         })
         self.pending_image = None
 
-      # An ask_user call ends the turn: the next round is text-only so the
-      # model states its question and control returns to the user.
-      if self.take_question():
-        ask_stop = True
+      # An ESC during the request no longer confirms the tool calls (those ran
+      # above); it now pauses for one free-form instruction to steer the model
+      # before it continues. Cleared inside interrupted_input.
+      steer = self.interrupted_input()
+      if steer:
+        self.messages.append({"role": "user", "content": steer})
 
     # A turn that produced nothing (hard failure) is rolled back so it doesn't
     # leave an orphan user message that would confuse the next turn.

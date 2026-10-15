@@ -406,6 +406,9 @@ class menu_ui:
 
   def _enter_normal_item(self):
     item = self.get_current_item()[1]
+    if callable(item):
+      ret = item()
+      return True if ret is None else ret
     if isinstance(item, dict):
       if not self.delegate:
         return False

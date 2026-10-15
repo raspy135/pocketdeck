@@ -1,3 +1,11 @@
+## Release Note, October 9, 2026
+
+## Applications
+
+- gpt: "question" function call fix. 
+- gpt: added gemini voice protocol support for TTS.
+
+
 ## Release Note, September 22, 2026
 
 ## Firmware

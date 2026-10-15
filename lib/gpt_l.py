@@ -190,6 +190,8 @@ def read_api_key():
 # from /config/gpt.json without importing the heavy gpt module.
 # ----------------------------------------------------------------------------
 OPENAI_BASE = "https://api.openai.com/v1"
+GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
+GEMINI_TTS_RATE = 24000   # Gemini streams headerless 16-bit mono PCM at this rate
 
 def registry_path():
   """The model registry file (/config/gpt.json on the device)."""
@@ -219,11 +221,14 @@ def load_registry_ro():
 def _normalize_audio(entry):
   """Fill an audio entry with defaults so every field is present."""
   e = entry or {}
-  return {"base_url": e.get("base_url") or OPENAI_BASE,
+  tts_api = (e.get("tts_api") or "openai").lower()
+  g = tts_api == "gemini"
+  return {"base_url": e.get("base_url") or (GEMINI_BASE if g else OPENAI_BASE),
           "key": e.get("key"),          # None distinguishes 'unset' from '' (keyless)
-          "tts_model": e.get("tts_model") or DEFAULT_AUDIO["tts_model"],
+          "tts_api": tts_api,
+          "tts_model": e.get("tts_model") or ("gemini-3.8-flash-tts" if g else DEFAULT_AUDIO["tts_model"]),
           "stt_model": e.get("stt_model") or DEFAULT_AUDIO["stt_model"],
-          "voice": e.get("voice") or DEFAULT_AUDIO["voice"],
+          "voice": e.get("voice") or ("Kore" if g else DEFAULT_AUDIO["voice"]),
           "format": e.get("format") or DEFAULT_AUDIO["format"]}
 
 
@@ -260,6 +265,9 @@ def apply_audio_config(obj, audio):
   base = audio["base_url"].rstrip("/")
   obj.stt_url = base + "/audio/transcriptions"
   obj.tts_url = base + "/audio/speech"
+  obj.tts_api = audio["tts_api"]
+  if obj.tts_api == "gemini":
+    obj.tts_url = base + "/interactions"
   obj.tts_model = audio["tts_model"]
   obj.stt_model = audio["stt_model"]
   obj.voice = audio["voice"]
@@ -565,6 +573,100 @@ class AudioResponse:
       pass
 
 
+class GeminiPCMStream:
+  """Turns Gemini's streamed TTS (SSE events whose delta.data is base64 PCM)
+  into a readable WAV stream: a synthesized 44-byte header with an open-ended
+  length, then the decoded PCM. wav_play and tts.py consume it like the OpenAI
+  WAV body.
+
+  It runs inside wav_play's refill callback, so it must stay cheap: Gemini packs
+  100 KB+ of base64 into one event, and assembling that line + ujson.loads held
+  the GIL long enough for the DMA to replay stale audio (heard as repeats - the
+  same failure gpt_rt hit with Grok). So no JSON parse: scan the raw bytes for
+  the "data" string and decode it in small 4-char-aligned pieces as it arrives."""
+  KEY = b'"data":'
+  BLOCK = 2048
+
+  def __init__(self, raw, rate):
+    import struct, ubinascii
+    self._b64 = ubinascii.a2b_base64
+    self.raw = raw
+    self.state = 0        # 0 seek key, 1 seek opening quote, 2 inside base64
+    self.carry = b''      # undecoded tail: partial key or < 4 base64 chars
+    self.eof = False
+    self.buf = struct.pack('<4sI4s4sIHHIIHH4sI', b'RIFF', 0xFFFFFFFF, b'WAVE',
+                           b'fmt ', 16, 1, 1, rate, rate * 2, 2, 16,
+                           b'data', 0xFFFFFFFF)
+
+  def _scan(self, data):
+    """Advance the scanner over `data`; return the PCM decoded from it."""
+    out = []
+    while data:
+      if self.state == 0:
+        i = data.find(self.KEY)
+        if i < 0:
+          self.carry = data[-(len(self.KEY) - 1):]
+          break
+        data = data[i + len(self.KEY):]
+        self.state = 1
+      elif self.state == 1:
+        data = data.lstrip()
+        if data:
+          # "data": followed by a non-string isn't audio; keep seeking.
+          self.state = 2 if data[0] == 0x22 else 0
+          if self.state == 2:
+            data = data[1:]
+      else:
+        j = data.find(b'"')
+        seg = data if j < 0 else data[:j]
+        k = len(seg) if j >= 0 else len(seg) & ~3
+        if k:
+          out.append(self._b64(seg[:k]))
+        if j < 0:
+          self.carry = seg[k:]
+          break
+        data = data[j + 1:]
+        self.state = 0
+    return b''.join(out)
+
+  def _fill(self):
+    while not self.buf and not self.eof:
+      try:
+        d = self.raw.read(self.BLOCK)
+      except Exception:
+        d = b''
+      if not d:
+        self.eof = True
+        return
+      data, self.carry = self.carry + d, b''
+      self.buf = self._scan(data)
+
+  def read(self, n=-1):
+    self._fill()
+    if n is None or n < 0:
+      n = len(self.buf)
+    out, self.buf = self.buf[:n], self.buf[n:]
+    return out
+
+  def readinto(self, buf):
+    # Fill the whole buffer: wav_play treats a short read as end-of-stream.
+    mv = memoryview(buf)
+    total = 0
+    while total < len(buf):
+      d = self.read(len(buf) - total)
+      if not d:
+        break
+      mv[total:total + len(d)] = d
+      total += len(d)
+    return total
+
+  def close(self):
+    try:
+      self.raw.close()
+    except Exception:
+      pass
+
+
 def sse_events(resp):
   """Yield the JSON payload of each `data:` line of an SSE body as a dict.
 
@@ -609,6 +711,7 @@ class chatgpt_util:
     # audio_key is None until set: the methods then fall back to api_key, so a
     # plain OpenAI setup keeps working unchanged.
     self.audio_key = None
+    self.tts_api = "openai"   # or "gemini" (Gemini interactions API)
     self.tts_model = "tts-1-hd"
     self.stt_model = "gpt-4o-mini-transcribe"
     self.voice = "coral"
@@ -852,6 +955,8 @@ class chatgpt_util:
     """Converts text to speech and returns a response object with a raw stream.
     Model / voice / format come from the configured audio backend; `voice` (when
     given) overrides the backend default for this call."""
+    if self.tts_api == "gemini":
+      return self._gemini_tts_stream(text, voice)
     payload = ujson.dumps({
         "model": self.tts_model,
         "input": text,
@@ -869,6 +974,26 @@ class chatgpt_util:
       return requests.post(self.tts_url, headers=headers, data=payload)
     return self._audio_post(self.tts_url, payload)
 
+  def _gemini_tts_stream(self, text, voice=None):
+    """Gemini TTS (interactions API, stream:true). The reply is SSE carrying
+    base64 headerless PCM; .raw is wrapped so callers read a plain WAV stream,
+    exactly like the OpenAI path."""
+    payload = ujson.dumps({
+        "model": self.tts_model,
+        "input": [{"type": "user_input",
+                   "content": [{"type": "text", "text": text}]}],
+        "response_format": {"type": "audio", "mime_type": "audio/l16",
+                            "sample_rate": GEMINI_TTS_RATE},
+        "generation_config": {"speech_config": [{"voice": voice or self.voice}]},
+        "stream": True,
+    }).encode('utf-8')
+    # ponytail: device raw-socket only; the PC shim has no streaming body.
+    res = self._raw_post(self.tts_url, payload, "text/event-stream", None,
+                         extra="x-goog-api-key: %s\r\n" % self._audio_auth())
+    if res.status_code == 200:
+      res.raw = GeminiPCMStream(res.raw, GEMINI_TTS_RATE)
+    return res
+
   def _audio_post(self, url, payload):
     """Raw-socket POST for the audio endpoints (like stt()), returning an
     AudioResponse whose .raw streams the body. urequests doesn't de-chunk when
@@ -877,7 +1002,7 @@ class chatgpt_util:
     the chunking, letting the WAV player see clean audio bytes."""
     return self._raw_post(url, payload, "audio/wav", self._audio_auth())
 
-  def _raw_post(self, url, payload, accept, auth, timeout=REQUEST_TIMEOUT):
+  def _raw_post(self, url, payload, accept, auth, timeout=REQUEST_TIMEOUT, extra=""):
     """The socket half of _audio_post, shared with the SSE stream: connect,
     send the request, parse the status line and headers, and hand back a
     de-chunked readable body."""
@@ -905,7 +1030,7 @@ class chatgpt_util:
            "Content-Length: %d\r\n" % (path, host, accept, len(payload)))
     if auth:
       req += "Authorization: Bearer %s\r\n" % auth
-    req += "\r\n"
+    req += extra + "\r\n"
     s.write(req.encode('utf-8'))
     s.write(payload)
 

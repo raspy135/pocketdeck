@@ -159,6 +159,7 @@ AI can do the following things in agent mode.
 - **Web search** — a `web_search` tool returns ranked results (title, URL, snippet) so the model gets current information without scraping search pages with `curl`. On genuine OpenAI models this uses OpenAI's hosted web search; on every other endpoint (local/Chat-Completions models, non-OpenAI providers, the voice agent) it runs on-device against DuckDuckGo, keyless. Drop a [Tavily](https://www.tavily.com) key at `/config/tavily_api_key` to upgrade the device-side search to Tavily's LLM-native results (free tier available).
 - PEM file editing. AI can read the editor status and edit the currently open file.
 - Read / write files. The old files are copied to /sd/backup.
+- **Ask you a question** (`ask_user`) — when the spec is unclear, it needs a decision or permission, or it is stuck, the model asks instead of guessing. The question is shown as `[Question] ...` with an `Answer:` prompt; your reply goes straight back to the model as the tool result and it carries on in the same turn. Ctrl-C cancels (the model is told you didn't answer). Text agents only — the voice agent just asks out loud.
 - Launch application
 - Take screenshot
 - Send keycode
@@ -355,6 +356,7 @@ Field | Meaning
 ------|--------
 `name` | The label other entries reference via their `audio` field.
 `api` | Must be `audio`.
+`tts_api` | TTS protocol: `openai` (default) or `gemini` (see below).
 `base_url` | Speech endpoint base (`http://` allowed for local servers). Default: `https://api.openai.com/v1`.
 `key` | Bearer token for the speech server. Omit for a keyless local server; on an OpenAI `base_url` it falls back to `/config/openai_api_key`.
 `tts_model` | TTS model id. Default: `tts-1-hd`.
@@ -392,6 +394,50 @@ Two ways to select the audio backend:
 Here `-m local` uses the `kokoro` speech server; any other model with no `audio`
 field falls back to `openai-voice` (the registry default). An `audio` entry is
 never selectable with `-m` — it's only referenced by name.
+
+#### Gemini TTS
+
+Set `"tts_api": "gemini"` to speak with Google's
+[Gemini speech generation](https://ai.google.dev/gemini-api/docs/speech-generation)
+(interactions API, streamed). `key` is your Gemini API key (sent as
+`x-goog-api-key`). Defaults: `base_url` `https://generativelanguage.googleapis.com/v1beta`,
+`tts_model` `gemini-3.8-flash-tts` (or the faster, cheaper `gemini-3.8-flash-lite-tts`),
+`voice` `Kore`. The 24 kHz PCM stream is wrapped as WAV on the device, so `format`
+is ignored; playback starts while the audio is still arriving. This is TTS only: Gemini has no
+`/audio/transcriptions`, so `-v` recording (STT) won't work with this entry. Use it for
+`/speak`, `tts.py` and reading replies aloud. Device only; the PC shim can't stream it.
+
+```json
+{ "name": "gemini-voice", "api": "audio", "tts_api": "gemini",
+  "key": "AIza...", "voice": "Kore" }
+```
+
+Voices (set `voice`, or `-vt` per run):
+
+Style | Voices
+------|-------
+Bright | Zephyr, Autonoe
+Upbeat | Puck, Laomedeia
+Firm | Kore, Orus, Alnilam
+Informative | Charon, Rasalgethi
+Easy-going | Callirrhoe, Umbriel
+Smooth | Algieba, Despina
+Clear | Iapetus, Erinome
+Excitable | Fenrir
+Youthful | Leda
+Breezy | Aoede
+Breathy | Enceladus
+Gravelly | Algenib
+Soft | Achernar
+Even | Schedar
+Mature | Gacrux
+Forward | Pulcherrima
+Friendly | Achird
+Casual | Zubenelgenubi
+Gentle | Vindemiatrix
+Lively | Sadachbia
+Knowledgeable | Sadaltager
+Warm | Sulafat
 
 ### Realtime backend (`gpt_rt`)
 

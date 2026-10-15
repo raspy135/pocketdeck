@@ -3,7 +3,13 @@
 # - Remembers read position per file
 # - Markdown style **bold** support via fake bold rendering
 #
-# Keys:
+# Launched with no file it opens the book list menu (/sd/book): each title shows
+# an inline reading-progress bar, and the highlighted book's font / vertical
+# settings can be changed there (f = cycle font, v = toggle vertical). Those
+# settings are remembered per book. Closing a book opened from the menu returns
+# to the menu.
+#
+# Keys (book view):
 #   Up/Down : scroll
 #   Left/Right : page up/down
 #   PageUp/PageDown : page up/down
@@ -34,6 +40,16 @@ KEY_ENTER = b'\r'
 KEY_BS = b'\b'
 KEY_PAGE_UP = b'\x1b[5~'
 KEY_PAGE_DOWN = b'\x1b[6~'
+
+# The right 1/3 of the screen is a "properties" section for the selected
+# file (see /sd/lib/skills/dashboard_design.md). The page text uses the left
+# 2/3 so nothing is hidden behind the panel.
+PANEL_W = 133
+PANEL_X = 400 - PANEL_W
+
+
+def clamp01(t):
+  return 0.0 if t < 0 else (1.0 if t > 1 else t)
 
 
 def _read_text_file(path):
@@ -661,7 +677,7 @@ def _wrap_line(v, line, height, max_width, vertical, pre, font, japanese=False, 
 
 
 class Reader:
-  def __init__(self, v, vs, paths, isvertical, font, japanese=False):
+  def __init__(self, v, vs, paths, isvertical, font, japanese=False, start_index=0):
     self.v = v
     self.vertical = isvertical
     self.pre = 20
@@ -673,7 +689,7 @@ class Reader:
     self.seq.register('scroll',self.scroll_anm)
     
     self.paths = paths if paths else []
-    self.file_index = 0
+    self.file_index = start_index
     self.state = _load_state()
     self.scroll_px = 0
     self.op_scroll_px = 0
@@ -833,9 +849,22 @@ class Reader:
   def save_position(self):
     if not self.current_key:
       return
+    try:
+      pos_line = self._find_start_line(int(self.scroll_px))
+    except:
+      pos_line = 0
+    # Remember the reading position AND this book's properties (font, vertical
+    # flag). The menu reads these back to show progress and to reopen the book
+    # the way the reader left it.
     self.state[self.current_key] = {
       "scroll_px": int(self.scroll_px),
+      "pos_line": int(pos_line),
+      "lines": len(self.wrapped_lines),
+      "font": self.fontname,
+      "vertical": bool(self.vertical),
     }
+    self.state["_font"] = self.fontname
+    self.state["_vertical"] = bool(self.vertical)
     _save_state(self.state)
 
   def next_file(self):
@@ -1152,10 +1181,13 @@ def main(vs, args_in):
             description='Book Reader')
   parser.add_argument('-v', '--vertical', action='store_true', help='Japanese vertical style')
   parser.add_argument('-j', '--japanese', action='store_true', help='Japanese horizontal (character-by-character wrap, no hyphenation)')
-  parser.add_argument('-f', '--font', action='store', default='cen1', help='Specify font. Options are : uni (unicode), t15(monospace), lub1, lub2, cen1, cen2')
-  parser.add_argument('filename', args='*', help='filename to read')
+  parser.add_argument('-f', '--font', action='store', default=None, help='Specify font. Options are : uni (unicode), t15(monospace), lub1, lub2, cen1, cen2')
+  parser.add_argument('filename', nargs='*', help='filename to read')
 
-  args = parser.parse_args(args_in[1:])
+  try:
+    args = parser.parse_args(args_in[1:])
+  except SystemExit:
+    return
 
   v.print(el.erase_screen())
   v.print(el.home())
@@ -1166,7 +1198,21 @@ def main(vs, args_in):
   else:
     paths = args.filename
 
-  reader = Reader(v, vs, paths, args.vertical, args.font, args.japanese)
+  if not paths:
+    # No file given: open the book list menu (reader_readme).
+    import reader_menu
+    reader_menu.BookMenu(vs).run()
+    v.print(el.display_mode(True))
+    print("finished.", file=vs)
+    return
+
+  # A book was named on the command line: read it directly. Font/vertical
+  # default to whatever that book was last read with (per-book state).
+  state = _load_state()
+  book = state.get(paths[0], {})
+  font = args.font if args.font else book.get("font", state.get("_font", "cen1"))
+  vertical = args.vertical or bool(book.get("vertical", state.get("_vertical", False)))
+  reader = Reader(v, vs, paths, vertical, font, args.japanese)
   v.callback(reader.update)
   reader.load_file(paths[0])
   reader.loop()

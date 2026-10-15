@@ -741,9 +741,8 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
     # function_call_outputs, so self.prev_response_id never ends up pointing at a
     # response with an unanswered function call — which would otherwise make the
     # *next* turn fail with "no tool output found for function call ...".
-    ask_stop = False  # set when the model calls ask_user: next round is text-only
     for i in range(max_iters + 1):
-      force_final = (i == max_iters) or ask_stop
+      force_final = (i == max_iters)
       gc.collect()  # large JSON/base64 each round-trip fragments the small heap
       payload = {
         "model": model,
@@ -906,8 +905,6 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
           "output": result
         })
 
-      self.interrupted = False  # the ESC interrupt covered this round only
-
       # A capture_screen call leaves a base64 PNG to feed back as a user image.
       if self.pending_image is not None:
         next_input.append({
@@ -920,10 +917,16 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
         })
         self.pending_image = None
 
-      # An ask_user call ends the turn: the next round is text-only so the
-      # model states its question and control returns to the user.
-      if self.take_question():
-        ask_stop = True
+      # An ESC during the request no longer confirms the tool calls (those ran
+      # above); it now pauses for one free-form instruction to steer the model
+      # before it continues. Cleared inside interrupted_input.
+      steer = self.interrupted_input()
+      if steer:
+        next_input.append({
+          "type": "message",
+          "role": "user",
+          "content": [{"type": "input_text", "text": steer}],
+        })
 
       input_list = next_input
       in_flight = True  # these outputs are delivered on the next successful POST
@@ -958,24 +961,41 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
     return "%s %s" % (name, arguments)
 
   # Set when the user hits ESC during a request: the tool calls that response
-  # asks for are confirmed one by one, whatever the standing mode. Cleared once
-  # that batch is done, so the chain resumes in the mode it was in - press ESC
-  # again to take control of the next round.
+  # asks for run as usual, then the turn pauses for one free-form instruction
+  # so the user can steer the model before it continues. Cleared once that
+  # pause has happened - press ESC again to take control of the next round.
   interrupted = False
 
   def note_interrupt(self, pressed):
     if pressed and not self.interrupted:
       self.interrupted = True
-      print("\n%s[Interrupted]%s confirming the next tool call(s)."
+      print("\n%s[Interrupted]%s will pause for your input after the tool call(s)."
             % (el.bold(), el.bold_off()), file=self.vs)
 
-  def gate_tool(self, name, arguments):
-    """Confirm a pending call when plan mode (or an ESC interrupt) requires it.
-    Returns None to run it, or the tool-output string reporting the decline —
-    the model sees that and can adjust instead of silently failing."""
+  def interrupted_input(self):
+    """After a batch of tool calls, if the user hit ESC during the request, run
+    them anyway (no confirmation) and pause for one free-form instruction to
+    steer the model before it continues. Returns the typed text, or None when
+    there was no interrupt, the line was cancelled, or it was empty."""
     if not self.interrupted:
-      if self.mode != 'plan' or name not in ('command_with_return', 'write_file'):
-        return None
+      return None
+    self.interrupted = False
+    prompt = ("%s[Interrupted]%s Add a message for the AI (Enter to continue): "
+              % (el.bold(), el.bold_off()))
+    text = read_line(self.vs, prompt, [], lead="\n")
+    if text and text.strip():
+      text = text.strip()
+      print("You: %s" % text, file=self.vs)
+      self._log_turn("User", text)
+      return text
+    return None
+
+  def gate_tool(self, name, arguments):
+    """Confirm a pending call when plan mode requires it. Returns None to run
+    it, or the tool-output string reporting the decline - the model sees that
+    and can adjust instead of silently failing."""
+    if self.mode != 'plan' or name not in ('command_with_return', 'write_file'):
+      return None
     approved, feedback = self.confirm_tool(name, arguments)
     if approved:
       return None
@@ -999,6 +1019,20 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
     if low in ("n", "no"):
       return False, ""
     return False, r
+
+  def execute_ask_user(self, arguments):
+    """Show the model's question, read the user's reply and hand it back as the
+    call's output, so the model continues the same turn with the answer."""
+    try:
+      a = ujson.loads(arguments) if arguments else {}
+    except:
+      a = {}
+    q = a.get("question", "") if isinstance(a, dict) else ""
+    print("%s[Question]%s %s" % (el.bold(), el.bold_off(), q), file=self.vs)
+    ans = read_line(self.vs, "Answer: ", [], lead="")
+    if ans is None:
+      return "User cancelled without answering."
+    return ans.strip() or "(empty answer)"
 
   # --- tool implementations: the transport-independent ones come from
   # gpt_tools.ToolExecBase. Only _show_write (needs a screen) is overridden here.

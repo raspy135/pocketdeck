@@ -639,6 +639,19 @@ Options:
 - `-f font` : Font. t15, uni, lub1, lub2, cen1 or cen2.
 - `-j` : for Horizontal Japanese text
 
+Run `reader` with no filename to open the **book list menu** instead. It browses
+`/sd/book` and lets you pick a file; sub-directories are listed as folders you
+can enter (and a `..` row goes back up — browsing never leaves `/sd/book`). From
+there the footer keys let you set the font and toggle vertical layout, and
+**A** (or Enter) opens the selected book (or enters a folder). When a book is
+closed you come back to the menu. The chosen font and vertical setting, and the
+reading position of each book, are remembered in
+`/config/reader_state.json` and reused the next time.
+
+Menu keys: Up/Down = move selection, Left/Right = move between the row and its
+properties, `f` = cycle font, `v` = toggle vertical, A/Enter = open the book /
+enter the folder, `q` = quit.
+
 For Japanese text, Adding `-v -f uni` options is recommended.
 
 
