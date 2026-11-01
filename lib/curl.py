@@ -110,7 +110,11 @@ def _read_until_headers(sock):
       return bytes(buf[:hpos]), bytes(buf[hpos + hlen:])
   return bytes(buf), b""
 
-def _read_all(sock, chunk_size=1024, max_bytes=200000):
+MAX_BODY = 2000000  # hard ceiling for a single response body (bytes)
+
+def _read_all(sock, chunk_size=1024, max_bytes=None):
+  if max_bytes is None:
+    max_bytes = MAX_BODY
   parts = []
   total = 0
   while total < max_bytes:
@@ -353,7 +357,7 @@ def _request_once(url, method, data_b, header_lines, user_agent,
           break
         body += chunk
         remaining -= len(chunk)
-        if len(body) >= 200000:
+        if len(body) >= MAX_BODY:
           break
     else:
       body = leftover + _read_all(s)

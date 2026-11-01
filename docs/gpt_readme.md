@@ -156,6 +156,7 @@ When the model invokes a tool you'll see a `[Call]` line and a `[Result]` line.
 AI can do the following things in agent mode.
 
 - Command execution
+- **Python one-liners** (`run_python`) — runs a short MicroPython snippet on the device and returns what it prints (plus the value if the snippet is a single expression), so the model can compute something, inspect a file, poke a device API or test a function of a module it is editing without writing a script first. `print()` output is captured, exceptions come back as text with a traceback, and the snippet can use `reload('mod')` to re-import a module it just edited. Like `command_with_return`, it is confirmed first in Plan mode.
 - **Web search** — a `web_search` tool returns ranked results (title, URL, snippet) so the model gets current information without scraping search pages with `curl`. On genuine OpenAI models this uses OpenAI's hosted web search; on every other endpoint (local/Chat-Completions models, non-OpenAI providers, the voice agent) it runs on-device against DuckDuckGo, keyless. Drop a [Tavily](https://www.tavily.com) key at `/config/tavily_api_key` to upgrade the device-side search to Tavily's LLM-native results (free tier available).
 - PEM file editing. AI can read the editor status and edit the currently open file.
 - Read / write files. The old files are copied to /sd/backup.
@@ -176,14 +177,14 @@ In the voice agent (`gpt_rt -a`), press **`u`** for a quick "what's up?" — it 
 
 ### Auto vs Plan mode
 
-Two execution modes control the effectful tools (`command_with_return` and
-`write_file`):
+Two execution modes control the effectful tools (`command_with_return`,
+`run_python` and `write_file`):
 
 - **Auto** (default) — tools run without asking.
 - **Plan** (`-P`, or toggle at runtime) — each `command_with_return` /
-  `write_file` is shown and you confirm it first. Press Enter / `y` to run, `n`
-  to skip, or type a reason to decline (the reason is sent back to the model as
-  feedback). Other tools (screen/app inspection) always run.
+  `run_python` / `write_file` is shown and you confirm it first. Press Enter /
+  `y` to run, `n` to skip, or type a reason to decline (the reason is sent back
+  to the model as feedback). Other tools (screen/app inspection) always run.
 
 In conversation mode, **Shift-Tab** toggles Auto/Plan, or use `/mode`,
 `/auto`, `/plan`.

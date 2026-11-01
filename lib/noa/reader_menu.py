@@ -51,6 +51,7 @@ def _is_readable(name):
 
 
 FONT_C = 'u8g2_font_profont15_mf'
+FONT_M = 'u8g2_font_t0_15_me'
 FONT_T = 'u8g2_font_profont22_mf'
 
 # The font names the reader understands, in the order the font chip cycles them.
@@ -434,7 +435,7 @@ class BookMenu:
       # the selection is easy to see.
       v.draw_box(2, y + 4, 3, ROW_H - 12)
       v.draw_frame(0, y + 1, LIST_W - 2, ROW_H - 5)
-    v.set_font(FONT_C)
+    v.set_font(FONT_M)
     if row['kind'] == 'file':
       name = fit(v, row['title'], LIST_W - 20)
       v.draw_str(10, y + 17, name)
@@ -512,7 +513,7 @@ class BookMenu:
 
   def _draw_label(self, x, y, text):
     v = self.v
-    v.set_font(FONT_C)
+    v.set_font(FONT_M)
     v.draw_str(x, y, text)
 
   def _draw_value(self, x, y, text):

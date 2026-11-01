@@ -855,14 +855,22 @@ class Reader:
       pos_line = 0
     # Remember the reading position AND this book's properties (font, vertical
     # flag). The menu reads these back to show progress and to reopen the book
-    # the way the reader left it.
-    self.state[self.current_key] = {
+    # the way the reader left it. Keep any keys we do not own (e.g. last_read,
+    # which the menu uses to order the list by recency) instead of dropping
+    # them, otherwise every book falls back to alphabetical order.
+    entry = {
       "scroll_px": int(self.scroll_px),
       "pos_line": int(pos_line),
       "lines": len(self.wrapped_lines),
       "font": self.fontname,
       "vertical": bool(self.vertical),
     }
+    old = self.state.get(self.current_key)
+    if isinstance(old, dict):
+      for k in old:
+        if k not in entry:
+          entry[k] = old[k]
+    self.state[self.current_key] = entry
     self.state["_font"] = self.fontname
     self.state["_vertical"] = bool(self.vertical)
     _save_state(self.state)

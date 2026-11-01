@@ -32,9 +32,21 @@ _SEC = "/config/ble_secrets.json"
 # Real lightsleep-away gaps are much longer.
 _RESUME_GAP_S = 10
 
-# Every Nth reconnect round falls back to scanning instead of a directed
-# gap_connect, so a keyboard that woke up with a rotated address is found.
-_SCAN_EVERY = 4
+# Alternate reconnect rounds: directed gap_connect vs scan. Field probe
+# (2026-10-31): after a keyboard suspend/wake the directed connect to the
+# saved address never lands, while a scan from a clean radio finds the woken
+# keyboard in <=3s (it advertises on wake) and connecting from the scan
+# result succeeds. Alternating puts a scan round at most ~2 cap periods away
+# instead of every 4th round.
+_SCAN_EVERY = 2
+# Hard cap (seconds) between retry rounds while disconnected. Without this the
+# armed deadline degraded to ~1 minute in the field (probe: recon_in=64s with
+# delay=3.0), so a keyboard advertising right after wake was not retried in
+# time. Every loop tick clamps the deadline to now+_RETRY_CAP_S; 3s matches
+# the scan window size, keeps worst-case recovery under ~5s (a scan round
+# finds a woken, advertising keyboard within ~1s of starting) while spacing
+# radio work so other apps are barely affected.
+_RETRY_CAP_S = 3
 # After a resume-from-lightsleep, don't wait for _SCAN_EVERY failed rounds: if
 # the directed gap_connect hasn't landed within this many seconds, scan too.
 # The peer woke with us and may advertise a rotated RPA we can't direct-connect.
@@ -298,8 +310,15 @@ class BLEKeyboardHost:
       # connected links that flapped need the conservative delay (those drops
       # race the peer's security cleanup, where a fast retry causes
       # connect-then-drop cycles).
+      # Field probe (2026-10-31): a woken keyboard NEVER accepts a directed
+      # gap_connect to its saved address, but advertises immediately on wake
+      # and accepts connect-from-scan-result. So for a peer-initiated drop,
+      # make the very first retry a SCAN round (the reconnect loop's round
+      # counter is offset so round 1 takes the scan branch), not a doomed
+      # directed connect followed by a 5s wait for round 2.
       if c and time.time() - c.conn_at >= _QUICK_RECONNECT_UP_S:
-        self._recon_delay = 0.2
+        self._recon_delay = 0.5
+        self._recon_fails = (_SCAN_EVERY - 1) - 1  # next round -> scan branch
       self._recon_t = time.time() + self._recon_delay
       # Failed reconnects escalate the delay; a successful _CONNECT resets it.
       self._recon_delay = min(self._recon_delay * 2, 3.0)
@@ -555,6 +574,29 @@ class BLEKeyboardHost:
       self.v.send_key_event(0, mod, 1)
     c.prev_keys = keys
 
+  def status(self):
+    # Read-only debug probe: summarize the live reconnect state machine without
+    # touching the radio. Reachable remotely once main() has register_module'd
+    # this host object (pdeck_utils.app_list), so an assistant can inspect why
+    # a suspended keyboard did / didn't resume without keying on this screen.
+    now = time.time()
+    lines = [
+      f"[ble_kb probe @{now:.0f}]",
+      f"scanning={self.scanning} scan_deadline_in={max(0, self._scan_t - now):.0f}s",
+      f"connecting={self.connecting} conns={len(self._conns)}",
+      f"recon_in={max(0, self._recon_t - now):.0f}s "
+      f"delay={self._recon_delay} fails={self._recon_fails}",
+      f"resume_scan_in={max(0, self._resume_scan_at - now):.0f}s "
+      f"saved={len(self._saved)}",
+    ]
+    for c in self._conns.values():
+      lines.append(
+        f"ch={c.ch} addr={c.addr} enc={c.encrypted} ready={c.ready} "
+        f"fast_pending={c.fast_pending} fast_failed={c.fast_failed} "
+        f"intercepted={c.intercepted} path={c.path} "
+        f"disc_in={max(0, c.disc_at - now):.0f}s up={now - c.conn_at:.0f}s")
+    return "\n".join(lines)
+
   def scan(self, ms=30000):
     if self.scanning: return
     self._msg("Scanning...")
@@ -621,7 +663,7 @@ class BLEKeyboardHost:
     if self._saved:
       self.reconnect_all()
     else:
-      self.scan(1500)
+      self.scan(5000)
     # The keyboard woke when the deck woke, so it is very likely advertising
     # right now — and possibly with a rotated RPA the directed gap_connect
     # can't reach. Don't wait out the _SCAN_EVERY failure cadence: also scan
@@ -648,13 +690,21 @@ def main(vs, args):
     except: pass
 
   kb = BLEKeyboardHost(vs.v)
+  # Register the live host object for remote probing: an assistant (or another
+  # app) can find it via pdeck_utils.app_list and call kb.status() to inspect
+  # the reconnect state machine without switching to this screen or pressing
+  # any key here. No effect on the BLE flow itself.
+  try:
+    vs.register_module(kb)
+  except Exception as e:
+    print("[ble_kb] register_module failed:", e)
   conn_t = time.time()
 
   # Start with both reconnect + scan
   if kb._saved:
     kb.reconnect_all()
   else:
-    kb.scan(1500)
+    kb.scan(5000)
   kb._recon_t = time.time() + 3
   last_tick = time.time()
   try:
@@ -680,7 +730,7 @@ def main(vs, args):
           kb._msg("Stopping (BS pressed)...")
           break
         if key[1] == '\r' and not kb.scanning:
-          kb.scan(1500)
+          kb.scan(5000)
 
       # Per-connection: pair & discover
       for c in list(kb._conns.values()):
@@ -788,7 +838,7 @@ def main(vs, args):
             if resume_scan:
               kb._dbg("resume: directed connect missed within window -> scan", scr=True)
               kb._resume_scan_at = 0  # one scan fallback per resume
-            kb.scan(1500)
+            kb.scan(5000)
           kb._recon_fails += 1
         # Schedule the next retry with the escalating backoff. A failed
         # gap_connect does NOT raise a DISCONNECT event (no link was ever
@@ -796,6 +846,14 @@ def main(vs, args):
         # IRQ handler — otherwise retries stay on the slow fixed cadence.
         kb._recon_t = now + kb._recon_delay
         kb._recon_delay = min(kb._recon_delay * 2, 3.0)
+
+      # Clamp: never let the armed retry deadline sit further than the cap
+      # away, whatever backoff/staleness wedged it there. Field probe showed
+      # the deadline degraded to ~1 minute out (recon_in=64s), long past the
+      # point where a woken keyboard had already been advertising for a while
+      # — reconnecting was then only possible via a manual keypress (A/Enter).
+      if not kb._conns and kb._recon_t > now + _RETRY_CAP_S:
+        kb._recon_t = now + _RETRY_CAP_S
 
       # Tick fast (~0.1s) while a link is still being set up so each stage
       # advances quickly. Once everything is ready, idle at 0.5s BUT wake

@@ -1,3 +1,13 @@
+## Release Note, October 15, 2026
+
+## Application
+
+- ble_kb : connection improvement from resume
+- gpt : improvements
+- reader : Sorting bug fix.
+- curl : Max length extended
+- extract : Bug fix
+
 ## Release Note, October 14, 2026
 
 ## Applications

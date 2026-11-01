@@ -856,7 +856,11 @@ Edit /main.py and uncomment / comment applications.
 
 ## Micropython Application development
 
-You can make your own applications. Refer [[app_development.md]] for detail.
+You can make your own applications. Before you write or change app code, read
+/sd/Documents/pd/app_development.md: it is the API reference (vscreen drawing,
+vscreen_stream, pdeck_utils, dsplib 3D, anm, font2d, capture_stream, shortcuts,
+ssh) and shows the app skeleton and error handling. Read it instead of grepping
+lib/ to rediscover an API; grep lib/ only for examples of an API in use.
 
 
 ## Updating built-in applications and firmware

@@ -435,8 +435,9 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
     # Server-side conversation state. Chaining requests with this id lets the
     # server keep prior turns so we only send the new user message each turn.
     self.prev_response_id = None
-    # Execution mode for effectful tools. 'auto' runs command_with_return and
-    # write_file without asking; 'plan' confirms each one with the user first.
+    # Execution mode for effectful tools. 'auto' runs command_with_return,
+    # run_python and write_file without asking; 'plan' confirms each one with
+    # the user first.
     # Toggled at runtime via the /mode|/auto|/plan commands or Shift-Tab.
     self.mode = 'auto'
     # Japanese IME state for conversation-mode input. jp_ime tracks whether the
@@ -946,6 +947,16 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
       except:
         a = {}
       return "write_file  %s  (%d bytes)" % (a.get("path", ""), len(a.get("content", "")))
+    if name == "run_python":
+      # A snippet is usually multi-line; show it as one clipped line.
+      try:
+        code = (ujson.loads(arguments) if arguments else {}).get("code", "")
+      except:
+        code = arguments
+      code = " ".join(str(code).split())
+      if len(code) > 120:
+        code = code[:120] + " ..."
+      return "run_python  %s" % code
     return "%s %s" % (name, arguments)
 
   def _summarize_action(self, name, arguments):
@@ -956,6 +967,8 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
       a = {}
     if name == "command_with_return":
       return "run command:  %s" % a.get("command", "")
+    if name == "run_python":
+      return "run python:  %s" % str(a.get("code", "")).replace("\n", " ")
     if name == "write_file":
       return "write %d byte(s) to  %s" % (len(a.get("content", "")), a.get("path", ""))
     return "%s %s" % (name, arguments)
@@ -994,7 +1007,8 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
     """Confirm a pending call when plan mode requires it. Returns None to run
     it, or the tool-output string reporting the decline - the model sees that
     and can adjust instead of silently failing."""
-    if self.mode != 'plan' or name not in ('command_with_return', 'write_file'):
+    if self.mode != 'plan' or name not in ('command_with_return', 'run_python',
+                                           'write_file'):
       return None
     approved, feedback = self.confirm_tool(name, arguments)
     if approved:
@@ -1173,8 +1187,10 @@ CODER_ROLE = (
   "indented line under a 'def' — it must start with exactly 2 spaces.\n"
   " Before you tell the user "
   "a task is done, run the code with your tools and confirm it works; if it "
-  "errors, read the output, fix it, and re-run. Briefly explain what you changed."
-  "Refer and follow /sd/Documents/pd/app_development.md as needed, the document has all available APIs in Pocket Deck")
+  "errors, read the output, fix it, and re-run. Briefly explain what you changed. "
+  "Before writing any code, read /sd/Documents/pd/app_development.md: it "
+  "documents every Pocket Deck API (vscreen, vscreen_stream, pdeck_utils, "
+  "dsplib, anm, font2d, ssh). Follow it instead of guessing from other apps.")
 
 TTS_NOTE = ("Your reply will be fed to a TTS engine; optimize for text-to-speech: "
             "keep it short and speakable.")
@@ -1235,6 +1251,45 @@ def assemble_instructions(role, tts, agent, app_list, my_screen=None, vision=Tru
   return text
 
 
+# README.md sections (# / ## headings) the agent gets in full; the rest of the
+# README is reduced to a heading index it can grep on demand. Keep these names
+# in sync with docs/README.md - a missing one falls back to the full README.
+README_KEEP = ("Pocket Deck", "Basic file structure", "Command Shell",
+              "Micropython Application development")
+
+
+def slim_readme(text, path):
+  """Return README text with only README_KEEP sections in full, plus an index
+  of the other headings. Returns `text` unchanged if a kept section is missing."""
+  kept, index, found = [], [], set()
+  keep = fence = False
+  for line in text.split("\n"):
+    if line.startswith("```"):
+      fence = not fence
+    elif not fence and line.startswith("#"):
+      level = len(line) - len(line.lstrip("#"))
+      title = line[level:].strip()
+      if level <= 2:
+        keep = title in README_KEEP
+        if keep:
+          found.add(title)
+        else:
+          index.append([title])
+          continue
+      elif not keep:
+        index[-1].append(title)
+        continue
+    if keep:
+      kept.append(line)
+  if len(found) < len(README_KEEP):
+    return text
+  return ("\n".join(kept) + "\n\n## Other README topics (not loaded)\n"
+          "Look them up when needed: grep -n '^#' " + path + " to find a "
+          "section's line, then view " + path + " <line> 60 to read it.\n" +
+          "".join("- %s%s\n" % (t[0], (": " + ", ".join(t[1:])) if len(t) > 1 else "")
+                  for t in index))
+
+
 def load_agent_references(vs, silent=False):
   """Read the default Pocket Deck reference files (README.md) for agent mode.
   On PC the /sd paths don't exist, so fall back to ~/.config/gpt/pd/ and the
@@ -1252,7 +1307,10 @@ def load_agent_references(vs, silent=False):
     for cand in candidates:
       try:
         with open(cand, "r") as f:
-          refs.append("---- " + path + " ----\n" + f.read())
+          text = f.read()
+        if path.endswith("README.md"):
+          text = slim_readme(text, path)
+        refs.append("---- " + path + " ----\n" + text)
         if not silent:
           print("Attached reference: %s" % cand, file=vs)
         break
@@ -1503,7 +1561,7 @@ def main(vs, args_in):
   parser.add_argument('-a', '--agent', action='store_true', help='Enable function-calling tools (already the default in conversation mode)')
   parser.add_argument('-na', '--no-agent', action='store_true', help='Disable function-calling tools (plain chat, even in conversation mode)')
   parser.add_argument('-C', '--chat', action='store_true', help='Conversation mode (keep context across turns). Default unless a prompt is passed as an argument (or -v); then -C forces conversation with the prompt as the first message.')
-  parser.add_argument('-P', '--plan', action='store_true', help='Start in Plan mode (confirm before running command_with_return / write_file). Default is Auto.')
+  parser.add_argument('-P', '--plan', action='store_true', help='Start in Plan mode (confirm before running command_with_return / run_python / write_file). Default is Auto.')
   parser.add_argument('-n', '--nosave', action='store_true', help='do not save the result')
   parser.add_argument('-s', '--silent', action='store_true', help='Suppress progress output')
   parser.add_argument('-nf', '--no-format', action='store_true', help='do not format text (No bold)')
@@ -1756,15 +1814,16 @@ def main(vs, args_in):
   # Most recent raw AI reply, kept for the /speak command.
   last_answer = [None]
 
-  # Stamped once per session, not per turn: a constant prefix keeps the turn
-  # text stable for prompt caching. ponytail: a long conversation then shows the
-  # start time; move this back into run_turn if the drift ever matters.
+  # Stamped once per session and appended after the user text, so the large,
+  # stable part of the turn (a -q spec file, skill body) stays a cacheable prefix
+  # across sessions. ponytail: a long conversation then shows the start time;
+  # move this into run_turn if the drift ever matters.
   ctime = time.gmtime(time.time() + pu.timezone * 60 * 15)
-  time_str = "[User current time: %04d-%02d-%02d %02d:%02d]\n" % (ctime[0], ctime[1], ctime[2], ctime[3], ctime[4])
+  time_str = "\n[User current time: %04d-%02d-%02d %02d:%02d]" % (ctime[0], ctime[1], ctime[2], ctime[3], ctime[4])
 
   def run_turn(turn_message, refs, imgs):
     gpt_obj.model = ctx['model']  # so update_memory / self-improve can reach the active model/endpoint
-    full = time_str + turn_message + jp_suffix
+    full = turn_message + jp_suffix + time_str
     raw = gpt_obj.ask_agent(full, refs, imgs, ctx['model'], ctx['instructions'],
                             ctx['effort'], ctx['tools'], silent=args.silent)
     if raw:
@@ -1883,7 +1942,7 @@ def main(vs, args_in):
     lines.append("  /<skill-name>      run a skill by name (e.g. /morning_ritual; Tab completes)")
     lines.append("  /improve           learn from this session & update long-term memory")
     lines.append("  /auto-improve [n]  auto-run /improve every n turns (no arg shows; 'off' disables)")
-    lines.append("Plan mode confirms each command_with_return / write_file before it runs.")
+    lines.append("Plan mode confirms each command_with_return / run_python / write_file before it runs.")
     lines.append("Japanese input: Alt+` or Alt+j toggles the kana IME (best with -j font).")
     lines.append("Editing: arrows move, Up/Down history, Ctrl-A/E start/end, Ctrl-K/U kill, Ctrl-C cancel, Shift-Tab toggles mode.")
     lines.append("Tab on a /<skill> line completes the name (or lists matches).")

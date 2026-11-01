@@ -142,6 +142,14 @@ def _module(name, **attrs):
   return m
 
 
+def _reimport(name):
+  """Stand-in for the device's pdeck_utils.reimport (run_python's reload()):
+  drop the cached module and import it again."""
+  import importlib
+  sys.modules.pop(name, None)
+  return importlib.import_module(name)
+
+
 def _ensure(name, **attrs):
   """Like reg(), but cooperate with an already-registered module (e.g. another
   compat layer such as pem's own PC shims got there first): backfill only the
@@ -245,6 +253,7 @@ def install():
           timezone=_local_tz_quarter_hours(),
           app_list={},
           launch=_noop,
+          reimport=_reimport,
           CaptureStream=_CaptureStream)
 
   reg('pngwriter', _module('pngwriter', encode_mono_xbm=_noop))

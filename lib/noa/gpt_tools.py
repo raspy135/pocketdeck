@@ -11,9 +11,10 @@
 #     Chat Completions shape (gpt_c.build_tools_c). The descriptions live here,
 #     so they no longer drift between frontends.
 #   - ToolExecBase: a mixin carrying the transport-independent tool
-#     implementations (command_with_return, write_file, list_running_apps,
-#     switch_screen, capture_screen, send_keys, launch_command_shell,
-#     launch_app) plus the execute_function_call dispatcher.
+#     implementations (command_with_return, run_python, write_file,
+#     list_running_apps, switch_screen, capture_screen, send_keys,
+#     launch_command_shell, launch_app) plus the execute_function_call
+#     dispatcher.
 #
 # A subclass must provide these instance attributes:
 #   self.vs           - the vscreen_stream for output
@@ -262,6 +263,60 @@ class AgentCaptureStream(pu.CaptureStream):
                          % (name, AgentCaptureStream.NEEDS_SCREEN))
 
 
+def _capture_print(stream):
+  """A print() stand-in for run_python snippets: it writes into the capture
+  stream (or an explicit file= target) instead of the REPL, so the snippet's
+  output can be returned to the model. MicroPython's print() writes to a C-level
+  stdout object that cannot be swapped out, so the exec namespace gets this
+  function as `print` instead."""
+  def _print(*args, **kwargs):
+    target = kwargs.pop("file", None) or stream
+    sep = kwargs.pop("sep", " ")
+    end = kwargs.pop("end", "\n")
+    try:
+      text = sep.join([str(a) for a in args]) + end
+    except Exception:
+      text = " ".join([repr(a) for a in args]) + end
+    try:
+      target.write(text)
+    except Exception:
+      pass
+  return _print
+
+
+def _run_python_reload(name):
+  """Force a fresh import of an already-imported module and return it, so a
+  run_python snippet can test source it has just edited (the shell's 'r'
+  prefix, available inside a snippet)."""
+  pu.reimport(name)
+  return __import__(name)
+
+
+def _run_python_app(scnum):
+  """The object a running app registered with vs.register_module() on that
+  screen (0-based), i.e. pu.app_list[scnum]['obj'], or None. Gives a run_python
+  snippet a handle on a live app (analog_clock registers its clock object, pem
+  its editor) so it can be inspected or driven without pub_* wrappers."""
+  try:
+    entry = pu.app_list.get(int(scnum))
+  except Exception:
+    return None
+  if isinstance(entry, dict):
+    return entry.get('obj')
+  return entry  # tolerate an entry that is the registered object itself
+
+
+def run_python_namespace(cap):
+  """Globals for a run_python snippet. Fresh per call (no state leaks between
+  snippets), with just enough preloaded to make a one-liner useful: print()
+  captured into `cap`, `vs` = that capture stream (pass it as the main(vs, args)
+  of a command to capture what the command prints), reload('mod'), app(screen)
+  for the live app object on a screen, and the two device modules pu / pdeck."""
+  return {"__name__": "__main__", "print": _capture_print(cap), "vs": cap,
+          "reload": _run_python_reload, "app": _run_python_app,
+          "pu": pu, "pdeck": pdeck}
+
+
 def indent_hint(path, content):
   """Post-write teaching hint: Pocket Deck Python uses 2 spaces per indent
   level. Models often emit 4 (training bias) and can't 'see' the difference,
@@ -390,7 +445,7 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False,
   tools.append({
     "type": "function",
     "name": "command_with_return",
-    "description": "Run one device command and return its output. This is a MicroPython shell, NOT Linux. The ONLY commands that exist: ls, cat, head, tail, grep, curl, ping, mv, rm, cp, mkdir, rmdir, diff, and the other commands described in README.md. Anything else (sed, find, echo, wc, sort, touch, chmod, python...) does not exist - do not guess; write a MicroPython script with write_file and run it by name instead. Syntax: no '<', '&&' or backticks; ';' chains commands; '|' pipes only into grep/head/tail; '> file' or '>> file' saves the output of the last stage. To run a script or app (a module with main(vs, args)), pass its name and arguments, e.g. 'temp_foo arg1' for /sd/py/temp_foo.py. After EDITING it, prefix 'r ' to reload ('r temp_foo'), or the old cached code runs. Graphic/interactive apps cannot run here - use launch_app (reload=true after edits). Note: 'ls -c N' copies the filename at index N to the clipboard (not a Linux sort option). See README.md for options.",
+    "description": "Run one device command and return its output. This is a MicroPython shell, NOT Linux. The ONLY commands that exist: ls, cat, head, tail, grep, curl, ping, mv, rm, cp, mkdir, rmdir, diff, and the other commands described in README.md. Anything else (sed, find, echo, wc, sort, touch, chmod, python...) does not exist - do not guess; use run_python for a one-off MicroPython snippet, or write a script with write_file and run it by name. Syntax: no '<', '&&' or backticks; ';' chains commands; '|' pipes only into grep/head/tail; '> file' or '>> file' saves the output of the last stage. To run a script or app (a module with main(vs, args)), pass its name and arguments, e.g. 'temp_foo arg1' for /sd/py/temp_foo.py. After EDITING it, prefix 'r ' to reload ('r temp_foo'), or the old cached code runs. Graphic/interactive apps cannot run here - use launch_app (reload=true after edits). Note: 'ls -c N' copies the filename at index N to the clipboard (not a Linux sort option). See README.md for options.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -400,6 +455,22 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False,
         }
       },
       "required": ["command"]
+    }
+  })
+
+  tools.append({
+    "type": "function",
+    "name": "run_python",
+    "description": "Execute a MicroPython snippet on the device now and return what it printed, without creating a script file. Use it for small things: compute or format a value, inspect a data file, try a device API, or test a function of a module you are working on (e.g. 'import temp_foo; print(temp_foo.parse(\"x\"))'). print() output is returned to you, and a snippet that is a single expression returns its value too ('1+1' returns 2); exceptions come back with a traceback. Fresh namespace per call, preloaded with: print (captured), vs (capture stream: pass it as main(vs, args) to run a command and capture its output), reload('mod') (fresh import after you edited a module), app(screen) (the live object of a running app that registered one; read its attributes or call its pub_* methods), pu, pdeck. Modules stay cached between calls. It draws nothing: use launch_app for graphic apps and command_with_return for device commands. No timeout - a runaway loop blocks the device until Ctrl-C, so keep snippets short.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "MicroPython source to run, e.g. 'print(sum(range(10)))' or 'import json; print(json.loads(open(\"/sd/data/x.json\").read()))'. Separate multiple lines with \\n. Use print() for anything you want to see back."
+        }
+      },
+      "required": ["code"]
     }
   })
 
@@ -467,11 +538,35 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False,
       }
     })
 
+  tools.append({
+    "type": "function",
+    "name": "update_plan",
+    "description": "Keep a short task checklist for multi-step work so you stay on track. Send the WHOLE list each time (it replaces the previous one); mark at most one step in_progress. Skip it for trivial tasks.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "plan": {
+          "type": "array",
+          "description": "The full list of steps.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "step": {"type": "string", "description": "What to do."},
+              "status": {"type": "string", "enum": ["pending", "in_progress", "completed"]}
+            },
+            "required": ["step", "status"]
+          }
+        }
+      },
+      "required": ["plan"]
+    }
+  })
+
   if app_list:
     tools.append({
       "type": "function",
       "name": "launch_app",
-      "description": "Launch a Pocket Deck application by its exact name, or any installed module/custom app by its module name (e.g. 'myapp' for /sd/lib/myapp.py), optionally passing arguments such as a file path to open. It returns screen number (0-based).",
+      "description": "Launch a Pocket Deck application by its exact name, or any installed module/custom app by its module name (e.g. 'myapp' for /sd/lib/myapp.py), optionally passing arguments such as a file path to open. It returns screen number (0-based). To debug or drive the app once it runs, probe it with run_python: if it calls vs.register_module() its live object is app(screen) there (read attributes, call methods, inspect state).",
       "parameters": {
         "type": "object",
         "properties": {
@@ -571,21 +666,6 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False,
 
   tools.append({
     "type": "function",
-    "name": "app_call",
-    "description": "Call a remote-control method (named pub_*) on a running app to read or change its state through method call; it works even while the app is in the background and returns the result as text, you can use them as a debug probe if the app has the methods. Call app_call with only 'screen' first to list them, then call again with 'method' and 'arguments' (a JSON object of keyword args; arguments are app-specific, see the app's source in /sd/lib or /sd/py). Errors are returned as text. PEM is the exception: use its dedicated pem_* tools, not app_call.",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "screen": {"type": "integer", "description": "0-based screen number the app is on (see list_running_apps)."},
-        "method": {"type": "string", "description": "Name of the pub_* method to call. Omit to list the methods this screen's app exposes."},
-        "arguments": {"type": "string", "description": "JSON object of keyword arguments to pass, e.g. {\"line_from\": 3, \"line_to\": 5, \"content\": \"x\"}. Omit or '{}' for none."}
-      },
-      "required": ["screen"]
-    }
-  })
-
-  tools.append({
-    "type": "function",
     "name": "pem_get_status",
     "description": "Get the current state of the PEM text editor, if it is running on some screen: the file being edited, the cursor position (1-based line and column), the number of lines, whether it has unsaved changes, and the list of open files/buffers. Call this before pem_edit_block so you know the current file and its line numbers. Returns an error if PEM is not running.",
     "parameters": {"type": "object", "properties": {}, "required": []}
@@ -667,7 +747,9 @@ def device_instructions(app_list=None, vision=True, realtime=False, my_screen=No
     "and rm them when finished. "
     "main(vs, args) receives an output stream as its first argument; write results "
     "with print(..., file=vs) so command_with_return can capture and return that "
-    "output to you (plain print() goes to the REPL and is NOT captured).\n"
+    "output to you (plain print() goes to the REPL and is NOT captured). If an "
+    "app calls vs.register_module(obj) with its own object, you can probe that "
+    "live app from run_python via app(screen) — so register your apps too.\n"
     "Use command_with_return to look up information too (e.g. list files with "
     "'ls /sd/Documents/word*', read a file with 'cat /path', search with grep).\n "
     "**Pocket Deck is not Linux**: only the commands listed in README.md "
@@ -689,6 +771,13 @@ def device_instructions(app_list=None, vision=True, realtime=False, my_screen=No
     "write a graphical app (dashboard, chart, meter), cat "
     "/sd/lib/skills/dashboard_design.md and follow it; 'ls /sd/lib/skills' for the "
     "rest.\n"
+    "THE API REFERENCE for app code is /sd/Documents/pd/app_development.md. Read "
+    "it BEFORE writing or changing a .py app/script (vscreen drawing, "
+    "vscreen_stream, pdeck_utils, dsplib 3D, anm, font2d, capture_stream, "
+    "shortcuts, ssh, app skeleton, error handling) instead of grepping lib/ to "
+    "rediscover an API - grep lib/ only to see how an existing app uses one. To "
+    "read a single part: grep -n '^##' on it lists the sections, then grep -A 60 "
+    "'^## <section title>' prints that one.\n"
     "You can see and drive other apps running on the device. Use list_running_apps "
     "to see which app is on which screen. Use switch_screen to bring a screen to "
     "the foreground. IMPORTANT: screen numbers in these tools are 0-based and match "
@@ -710,11 +799,11 @@ def device_instructions(app_list=None, vision=True, realtime=False, my_screen=No
     "To read TEXT a command-line app printed (e.g. to diagnose an error the user "
     "asks about), prefer read_console_log over a screenshot — it returns the "
     "recent console text directly and cheaply.\n"
-    "Some apps expose remote-control methods named pub_* (registered with "
-    "vs.register_module()). For those, prefer app_call over send_keys: it works "
-    "on a background screen, is deterministic, and returns a value. Call app_call "
-    "with only a screen to list the pub_* methods it exposes, then again with "
-    "'method' and a JSON 'arguments' object (arguments are app-specific).\n"
+    "For small tasks do not write a script: run_python runs a MicroPython "
+    "snippet now and returns what it prints, so use it to compute something, "
+    "test a function of a module you are editing (reload('mod') first), or poke "
+    "a device API. Use command_with_return for device commands and whole "
+    "scripts/apps.\n"
   )
   if realtime:
     text += (
@@ -731,6 +820,9 @@ def device_instructions(app_list=None, vision=True, realtime=False, my_screen=No
       "call ask_user with a short question instead of retrying in circles; the "
       "user's answer comes back as its result. Asking early beats a long stretch of failing "
       "tool calls.\n")
+    text += (
+      "For multi-step jobs, keep a short checklist with update_plan and update "
+      "it as you go; skip it for trivial tasks.\n")
   if my_screen is not None:
     text += ("\nIMPORTANT: your own screen — where your typed answers are shown — "
              "is screen %d. While working you may switch to other screens to drive "
@@ -800,6 +892,8 @@ class ToolExecBase:
       return self.execute_web_search(arguments)
     if name == "command_with_return":
       return self.execute_command_with_return(arguments)
+    if name == "run_python":
+      return self.execute_run_python(arguments)
     if name == "write_file":
       return self.execute_write_file(arguments)
     if name == "edit_file":
@@ -820,8 +914,6 @@ class ToolExecBase:
       return self.execute_launch_app(arguments)
     if name == "ask_user":
       return self.execute_ask_user(arguments)
-    if name == "app_call":
-      return self.execute_app_call(arguments)
     if name == "pem_get_status":
       return self.execute_pem_get_status(arguments)
     if name == "pem_edit_block":
@@ -834,6 +926,8 @@ class ToolExecBase:
       return self.execute_wait_and_resume(arguments)
     if name == "update_memory":
       return self.execute_update_memory(arguments)
+    if name == "update_plan":
+      return self.execute_update_plan(arguments)
     return ("Unknown function: %s. Only the listed tools exist; to run a "
             "device command, call command_with_return." % name)
 
@@ -1005,6 +1099,37 @@ class ToolExecBase:
       return "Error updating memory: %s" % str(e)
     return ("OK: " + msg) if ok else ("Error: " + msg)
 
+  # ---- task checklist ------------------------------------------------------
+  def execute_update_plan(self, arguments):
+    # Store the model's task checklist and show it to the user. Pure state -
+    # nothing else happens here; the plan stays in the transcript (in the call
+    # args) so the model re-reads its own checklist on later turns.
+    try:
+      args = ujson.loads(arguments) if arguments else {}
+    except:
+      return "Error: invalid arguments"
+    plan = args.get("plan")
+    if not isinstance(plan, list):
+      return "Error: 'plan' must be a list of {step, status} items"
+    marks = {"pending": "[ ]", "in_progress": "[>]", "completed": "[x]"}
+    items = []
+    for it in plan:
+      if not isinstance(it, dict):
+        continue
+      status = it.get("status", "pending")
+      if status not in marks:
+        status = "pending"
+      items.append((status, str(it.get("step", "")).strip()))
+    self.plan = items
+    if not items:
+      return "(plan cleared)"
+    text = "\n".join("%s %s" % (marks[s], step) for s, step in items)
+    vs = getattr(self, 'vs', None)
+    if vs is not None:
+      print("%s[Plan]%s\n%s" % (el.bold(), el.bold_off(), text), file=vs)
+    done = sum(1 for s, _step in items if s == "completed")
+    return "Plan updated: %d step(s), %d done." % (len(items), done)
+
   # ---- web search ----------------------------------------------------------
   def _read_tavily_key(self):
     # Optional bearer key for the Tavily search endpoint. When present, web_search
@@ -1165,10 +1290,61 @@ class ToolExecBase:
         if "Error running '%s':" % name in result:
           result += ("\nHint: '%s' does not exist - this is a MicroPython "
                      "device, not Linux. Use ls/cat/grep/head/tail/curl, or "
-                     "write a MicroPython script with write_file and run it "
-                     "by name. For wget, use curl -O." % name)
+                     "run_python for the same logic in MicroPython (or write "
+                     "a script with write_file and run it by name). For "
+                     "wget, use curl -O." % name)
           break
     return result
+
+  # ---- one-off python ------------------------------------------------------
+  def execute_run_python(self, arguments):
+    """Run a short MicroPython snippet on the device and return what it printed
+    (plus the repr of the value when the whole snippet is one expression). The
+    script-free path: check a device API, test a function, parse a file."""
+    try:
+      args = ujson.loads(arguments) if arguments else {}
+    except:
+      return "Error: invalid arguments"
+    code = args.get("code", "")
+    if not isinstance(code, str) or not code.strip():
+      return "Error: no code specified"
+    cap = pu.CaptureStream()
+    ns = run_python_namespace(cap)
+    value = None
+    try:
+      try:
+        # REPL-style: a snippet that is a single expression evaluates to a
+        # value; anything else (assignments, imports, loops) runs as statements.
+        value = eval(code, ns)
+      except SyntaxError:
+        exec(code, ns)
+    except KeyboardInterrupt:
+      return "Interrupted by the user (the snippet was stopped).\n" + cap.getvalue()
+    except BaseException as e:
+      # Catch BaseException too: a snippet calling sys.exit()/quit() would
+      # otherwise escape and kill the assistant's turn.
+      if cap.getvalue() and not cap.getvalue().endswith("\n"):
+        cap.write("\n")
+      try:
+        sys.print_exception(e, cap)
+      except Exception:
+        cap.write("Error: %s: %s" % (type(e).__name__, e))
+      out = cap.getvalue()
+      return out if out.strip() else "Error: %s" % str(e)
+    out = cap.getvalue()
+    if value is not None:
+      try:
+        rep = repr(value)
+      except Exception:
+        rep = str(value)
+      if out and not out.endswith("\n"):
+        out += "\n"
+      out += rep
+    if not out:
+      return "(ok, no output)"
+    if cap._total >= CaptureStream._MAX:
+      out += "\n...(truncated)"
+    return out
 
   def execute_write_file(self, arguments):
     try:
@@ -1259,74 +1435,6 @@ class ToolExecBase:
     return "Edited %s%s%s" % (path,
                               (" (backup: %s)" % backup_path) if backup_path else "",
                               indent_hint(path, content))
-
-  def _app_entry(self, scnum):
-    # Find the app object registered via vs.register_module() on a screen.
-    # pu.app_list maps screen -> entry; the object is under 'obj'.
-    try:
-      entry = pu.app_list.get(scnum)
-    except Exception:
-      entry = None
-    if isinstance(entry, dict):
-      return entry.get('obj')
-    return None
-
-  def _pub_methods(self, obj):
-    if obj is None:
-      return []
-    out = []
-    for name in dir(obj):
-      if name.startswith('pub_') and callable(getattr(obj, name, None)):
-        out.append(name)
-    out.sort()
-    return out
-
-  def execute_app_call(self, arguments):
-    try:
-      args = ujson.loads(arguments) if arguments else {}
-    except:
-      return "Error: invalid arguments"
-    try:
-      scnum = int(args.get("screen"))
-    except:
-      return "Error: 'screen' (an integer) is required"
-    obj = self._app_entry(scnum)
-    if obj is None:
-      return ("No app registered on screen %d. Apps must call vs.register_module() "
-              "to be callable. Use list_running_apps to see what is running." % scnum)
-    methods = self._pub_methods(obj)
-    method = args.get("method")
-    if not method:
-      if not methods:
-        return "App on screen %d exposes no pub_* methods." % scnum
-      return "Screen %d app exposes: %s" % (scnum, ", ".join(methods))
-    if not method.startswith("pub_"):
-      return ("Error: method '%s' is not public. Only pub_* methods may be "
-              "called (available: %s)." % (method, ", ".join(methods) or "none"))
-    if method not in methods:
-      return ("Error: app on screen %d has no method '%s'. Available: %s"
-              % (scnum, method, ", ".join(methods) or "none"))
-    raw = args.get("arguments")
-    if raw is None or raw == "":
-      kwargs = {}
-    elif isinstance(raw, dict):
-      kwargs = raw
-    else:
-      try:
-        kwargs = ujson.loads(raw)
-      except:
-        return "Error: 'arguments' must be a JSON object"
-      if not isinstance(kwargs, dict):
-        return "Error: 'arguments' must be a JSON object"
-    try:
-      result = getattr(obj, method)(**kwargs)
-    except TypeError as e:
-      return "Error calling %s: bad arguments (%s)" % (method, str(e))
-    except Exception as e:
-      return "Error in %s: %s" % (method, str(e))
-    if result is None:
-      return "%s() ok (no return value)" % method
-    return str(result)
 
   def execute_list_running_apps(self, arguments):
     lines = ["screen 0: Python REPL"]

@@ -820,7 +820,7 @@
         },
         {
             "path": "pc_compat.py",
-            "md5": "642e9d0ae191a581c9056e05373660a6"
+            "md5": "c117bc78fc2deffc013437e3fba055f5"
         },
         {
             "path": "rmdir.py",
@@ -836,11 +836,11 @@
         },
         {
             "path": "ble_kb.py",
-            "md5": "c3088ea9aa98c03e8766b6b27af886c4"
+            "md5": "902f4d3ada5151aea7334d017f1073c9"
         },
         {
             "path": "curl.py",
-            "md5": "715dd156af67cc688b44706768a7493f"
+            "md5": "6ab8e86b90af0d617e9db8133aeac9fe"
         },
         {
             "path": "find.py",
@@ -920,7 +920,7 @@
         },
         {
             "path": "gpt.py",
-            "md5": "858c0e52a0b355565e83504a81730e15"
+            "md5": "e196c53797114a371ce712b84fe2c463"
         },
         {
             "path": "morning_word.py",
@@ -956,7 +956,7 @@
         },
         {
             "path": "reader.py",
-            "md5": "14bc3bcc842595f1f953f66fdc007730"
+            "md5": "9d6545ad404b8a43d16723bea93a9236"
         },
         {
             "path": "view.py",
@@ -1016,7 +1016,7 @@
         },
         {
             "path": "extract.py",
-            "md5": "dee700279e24b9236abe5ab3ed67003d"
+            "md5": "6cd0b06d50e2ea581984fdcf2c5effa4"
         },
         {
             "path": "dl.py",
@@ -1128,7 +1128,7 @@
         },
         {
             "path": "noa/reader_menu.py",
-            "md5": "b23b62fc8b89ee4dda81de778db7498a"
+            "md5": "ed18678bd89d62f74aa055bee8db669a"
         },
         {
             "path": "noa/wav_play.py",
@@ -1136,7 +1136,7 @@
         },
         {
             "path": "noa/pc_compat.py",
-            "md5": "10156fe5a967992537ec3fcb6c701f32"
+            "md5": "10226f337c039f014758d8b573b2bcc9"
         },
         {
             "path": "noa/benchmark.py",
@@ -1176,7 +1176,7 @@
         },
         {
             "path": "noa/gpt_tools.py",
-            "md5": "fff464f0f3c175b249036d153c54e28f"
+            "md5": "34a78b44cb96924aaf14dbe845a01a7d"
         },
         {
             "path": "noa/pdeck_complete.py",
