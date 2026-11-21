@@ -166,6 +166,8 @@ Usually it will be 1(0 based number) because command shell is always running on 
 
 - `init()`  Internal use, do not call.
 
+- `keyboard_layout(layout)` Get or set the keyboard layout for USB/BLE keyboards: `us` (default), `uk` or `jp` (ISO/JIS key positions). Call without an argument to get the current layout name. The setting applies immediately and survives reboot. Raises `ValueError` for an unknown name.
+
 - `led(led_index, brightness)` Light up LED. led_index 1,2,3,4 can be used for user applications. brightness is 0 to 254.
 
 - `rtc(tuple)` Set or get built-in RTC time. Tuple format is (year, month, day, weekday, hour, minute, second). Normally the date and time will be synchronized when you connect to Internet.

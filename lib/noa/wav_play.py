@@ -159,8 +159,7 @@ class wav_play:
     audio.stream_setup(0, self.h_fmt_sampleRate, self.h_fmt_numOfChannels, num_samples, self.send_callback)
 
   def seek(self, pos):
-    
-    print(f"seek to {pos}")
+
     bytes_per_sample = (self.h_fmt_bitsPerSample // 8) * self.h_fmt_numOfChannels
 
     self.total_read = pos * bytes_per_sample

@@ -224,6 +224,27 @@ def skill_tokens(prefix=''):
   return toks
 
 
+# Built-in slash commands (the canonical names handle_command accepts; aliases
+# like 'q' or 'ls' still work but aren't completed). Used for Tab completion.
+COMMAND_NAMES = (
+  'quit', 'exit', 'help', 'clear', 'reset',
+  'model', 'models', 'effort', 'role',
+  'mode', 'auto', 'plan', 'tools', 'stream', 'speak',
+  'file', 'history', 'compact', 'context', 'auto-compact',
+  'skills', 'improve', 'auto-improve',
+)
+
+
+def command_tokens(prefix=''):
+  """Built-in command tokens for tab-completion, optionally filtered by prefix."""
+  return [c for c in COMMAND_NAMES if c.startswith(prefix)]
+
+
+def slash_tokens(prefix=''):
+  """Built-in commands + skill names, merged and de-duplicated."""
+  return sorted(set(command_tokens(prefix)) | set(skill_tokens(prefix)))
+
+
 def find_skill(name):
   """Resolve a typed name to (path, content), or None if no skill matches."""
   key = _skill_key(name)
@@ -269,13 +290,31 @@ build_tools = gpt_tools.build_tools
 # An entry may carry its own "key" (bearer token) for providers that need one
 # (e.g. xAI); with no "key", OpenAI endpoints fall back to /config/openai_api_key
 # for backward compatibility and every other endpoint is called without auth.
+# An entry may also set "context_length": <max tokens>. Chat Completions models
+# then report context usage (/context) and the conversation auto-compacts when
+# the prompt reaches 90% of the limit. Defaults to 512000; set 0 to disable.
+#
+# The same file may also carry a "search_engine" key: an ordered list of
+# {"type", "endpoint", "api_key"} records selecting which engines the
+# device-side web_search tool uses (tried in order, with keyless DuckDuckGo
+# as the final fallback). Types: "tavily" (api.tavily.com, needs an api_key)
+# and "rustxng"/"searxng" (a self-hosted SearXNG-compatible instance, e.g.
+# RustXNG on the LAN, which also serves the top result pages' text so the
+# model can ground on the sources without a second fetch). Resolution and
+# enforcement live in gpt_tools (shared by every frontend), so nothing here
+# plumbs the list through; with no "search_engine" key, a legacy
+# /config/tavily_api_key file still selects Tavily (backward compatibility).
 
 OPENAI_BASE = "https://api.openai.com/v1"
 
+# Default context window (tokens) assumed for entries that don't set
+# "context_length". Set "context_length": 0 on an entry to turn monitoring off.
+DEFAULT_CONTEXT_LENGTH = 512000
+
 DEFAULT_REGISTRY_MODELS = [
-  {"name": "gpt-5.4", "api": "responses", "model": "gpt-5.4"},
-  {"name": "gpt-5.5", "api": "responses", "model": "gpt-5.5"},
-  {"name": "gpt-5.4-mini", "api": "responses", "model": "gpt-5.4-mini"},
+  {"name": "gpt-5.4", "api": "responses", "model": "gpt-5.4", "context_length": DEFAULT_CONTEXT_LENGTH},
+  {"name": "gpt-5.5", "api": "responses", "model": "gpt-5.5", "context_length": DEFAULT_CONTEXT_LENGTH},
+  {"name": "gpt-5.4-mini", "api": "responses", "model": "gpt-5.4-mini", "context_length": DEFAULT_CONTEXT_LENGTH},
 ]
 DEFAULT_REGISTRY_DEFAULT = "gpt-5.4"
 
@@ -295,6 +334,8 @@ def _format_registry(models, default):
     parts.append('"model": "%s"' % m.get("model", m.get("name", "")))
     if m.get("text_only"):
       parts.append('"text_only": true')
+    if m.get("context_length"):
+      parts.append('"context_length": %d' % int(m["context_length"]))
     comma = "," if i < len(models) - 1 else ""
     lines.append("    {" + ", ".join(parts) + "}" + comma)
   lines.append("  ]")
@@ -333,6 +374,15 @@ def load_registry(vs=None):
   return default_reg
 
 
+def _as_positive_int(v):
+  """Parse a registry numeric field; None when missing/invalid/<= 0."""
+  try:
+    n = int(v)
+  except (TypeError, ValueError):
+    return None
+  return n if n > 0 else None
+
+
 def _normalize_entry(entry):
   """Fill defaults so callers can rely on every field being present."""
   name = entry.get("name") or entry.get("model") or DEFAULT_REGISTRY_DEFAULT
@@ -345,6 +395,11 @@ def _normalize_entry(entry):
           "effort": entry.get("effort"),
           "key": entry.get("key"),
           "audio": entry.get("audio"),  # link to an api:"audio" entry, if any
+          # Max context window in tokens. Chat Completions entries use it for
+          # /context reporting and the 90%-full auto-compaction. Missing ->
+          # DEFAULT_CONTEXT_LENGTH; an explicit 0 (or junk) turns it off.
+          "context_length": _as_positive_int(entry["context_length"]) if "context_length" in entry
+          else DEFAULT_CONTEXT_LENGTH,
           # Some models (local/text-only endpoints) can't see images but are
           # never told that, so they'll happily "call" capture_screen and then
           # invent a description of what it returned. Set true in /config/gpt.json
@@ -352,7 +407,11 @@ def _normalize_entry(entry):
           "text_only": bool(entry.get("text_only", False)),
           # Free-form extra top-level request fields merged into the payload
           # (e.g. {"chat_template_kwargs": {"reasoning_effort": "medium"}} for
-          # a local Qwen3 server, or "top_p"/"temperature").
+          # a local Qwen3 server, or "top_p"/"temperature"). On the Responses
+          # client a "reasoning" dict is merged into the effort field rather
+          # than replacing it, so {"reasoning": {"context": "all_turns"}}
+          # keeps the selected effort and lets thinking from earlier turns be
+          # rendered into the model's context (GPT-5.6+ / GPT-6.1 families).
           "extra_args": entry.get("extra_args") or {}}
 
 
@@ -388,6 +447,7 @@ def make_client(entry, vs):
   obj.base_url = entry["base_url"]  # remembered so /model can detect endpoint changes
   obj.text_only = entry.get("text_only", False)  # drives capture_screen inclusion
   obj.extra_args = entry.get("extra_args") or {}  # merged into every request payload
+  obj.context_length = entry.get("context_length")  # token limit; None = no monitoring
   return obj
 
 
@@ -752,6 +812,16 @@ class chatgpt_agent(gpt.chatgpt_util, gpt_tools.ToolExecBase):
         "input": input_list,
       }
       payload.update(self.extra_args)
+      # Merge (don't replace) a reasoning dict from extra_args, so a registry
+      # entry can add reasoning.context without losing the effort. OpenAI keeps
+      # reasoning items server-side and chains them with previous_response_id;
+      # "all_turns" is what makes earlier turns' reasoning visible to the model
+      # (5.4/5.5 only support the default "current_turn").
+      extra_reasoning = self.extra_args.get("reasoning")
+      if isinstance(extra_reasoning, dict):
+        merged = {"effort": effort}
+        merged.update(extra_reasoning)
+        payload["reasoning"] = merged
       if instructions:
         payload["instructions"] = instructions
       if prev_id:
@@ -1529,13 +1599,13 @@ def read_line(vs, prompt, history, on_shift_tab=None, lead="\n",
     elif o == 3:                                   # Ctrl-C: cancel line
       vs.write('^C\r\n')
       return None
-    elif o == 9:                                   # Tab: complete a /skill name
+    elif o == 9:                                   # Tab: complete a /command or /skill name
       # Only while typing the command word of a slash line ("/foo", no space yet)
       # and with the caret at the end, so Tab is inert everywhere else.
       s = ''.join(buf)
       if s.startswith('/') and ' ' not in s and cur == len(buf):
         prefix = s[1:]
-        toks = skill_tokens(prefix)
+        toks = slash_tokens(prefix)
         if len(toks) == 1:                         # unique: fill it in + a space
           buf = list('/' + toks[0] + ' '); cur = len(buf); redraw()
         elif len(toks) > 1:
@@ -1589,7 +1659,7 @@ def main(vs, args_in):
     print("Network is not available", file=vs)
     return
 
-  # Model registry: -m selects an entry (name/shortcut/raw id); the entry picks
+  # Model registry: -m selects an entry (name/raw id); the entry picks
   # the API (Responses here vs Chat Completions in gpt_c), base_url and model id.
   registry = load_registry(None if args.silent else vs)
   entry = resolve_entry(registry, args.model)
@@ -1755,7 +1825,7 @@ def main(vs, args_in):
 
   # Auto-compaction (Chat Completions clients only): 'every' = compact after
   # this many turns (0 = off); 'since' = turns completed since last compaction.
-  compact_state = {'every': 0, 'since': 0}
+  compact_state = {'every': 0, 'since': 0, 'backoff': 0}
   # Auto-improve: run /improve every this many completed turns to distill the
   # session into long-term memory. Off by default (it blocks the prompt for a
   # whole extra model call); turn it on with /auto-improve <num_turns>.
@@ -1785,6 +1855,7 @@ def main(vs, args_in):
       # full client rebuild.
       gpt_obj.text_only = new_entry.get('text_only', False)
       gpt_obj.extra_args = new_entry.get('extra_args') or {}
+      gpt_obj.context_length = new_entry.get('context_length')
       refresh()
       print("Model: %s (%s API)." % (new_entry['name'], new_entry['api']), file=vs)
       return
@@ -1802,6 +1873,7 @@ def main(vs, args_in):
     ctx['model'] = new_entry['model']
     ctx['entry'] = new_entry
     compact_state['since'] = 0
+    compact_state['backoff'] = 0
     improve_state['since'] = 0
     refresh()
     print("Switched to %s (%s API); context reset." %
@@ -1862,8 +1934,16 @@ def main(vs, args_in):
               else "Compaction failed; context unchanged.", file=vs)
       return False
     compact_state['since'] = 0
+    compact_state['backoff'] = 0
     print("%sContext compacted: %d -> %d messages." %
           ("[Auto-compact] " if auto else "", before, len(gpt_obj.messages)), file=vs)
+    st = getattr(gpt_obj, 'context_status', None)
+    if callable(st):
+      s = st()
+      if s:
+        used, lim, est = s
+        print("Context: ~%d / %d tokens (%.0f%%)%s" % (used, lim, used * 100.0 / lim,
+                                                       " (estimated)" if est else ""), file=vs)
     if not auto:
       print(gpt.format(summary), file=vs)
     return True
@@ -1923,7 +2003,7 @@ def main(vs, args_in):
       "  /help              this help",
       "  /quit  /exit       leave conversation",
       "  /clear /reset      start fresh (clear conversation context)",
-      "  /model [name]      show or set model (a name from /config/gpt.json, m/h/f, or id)",
+      "  /model [name]      show or set model (a name from /config/gpt.json, or a raw id)",
       "  /models            list configured models",
     ]
     if gpt_obj.USE_EFFORT:
@@ -1937,7 +2017,9 @@ def main(vs, args_in):
     lines.append("  /history           show recent input history")
     if gpt_obj.CAN_COMPACT:
       lines.append("  /compact           summarize & shrink the conversation context now")
+      lines.append("  /context           show context usage vs the model's context_length")
       lines.append("  /auto-compact [n]  auto-compact every n turns (no arg shows; 'off' disables)")
+      lines.append("                     (auto-compact also triggers at 90% of context_length, if set)")
     lines.append("  /skills            list available skills (user + system)")
     lines.append("  /<skill-name>      run a skill by name (e.g. /morning_ritual; Tab completes)")
     lines.append("  /improve           learn from this session & update long-term memory")
@@ -1945,7 +2027,7 @@ def main(vs, args_in):
     lines.append("Plan mode confirms each command_with_return / run_python / write_file before it runs.")
     lines.append("Japanese input: Alt+` or Alt+j toggles the kana IME (best with -j font).")
     lines.append("Editing: arrows move, Up/Down history, Ctrl-A/E start/end, Ctrl-K/U kill, Ctrl-C cancel, Shift-Tab toggles mode.")
-    lines.append("Tab on a /<skill> line completes the name (or lists matches).")
+    lines.append("Tab on a slash line completes /commands and /skill names (or lists matches).")
     print("\n".join(lines), file=vs)
 
   def show_models():
@@ -1954,6 +2036,8 @@ def main(vs, args_in):
       e = _normalize_entry(m)
       mark = "* " if e['name'] == ctx['entry']['name'] else "  "
       loc = "" if e['base_url'].rstrip('/') == OPENAI_BASE else "  @ " + e['base_url']
+      if e.get('context_length'):
+        loc += "  ctx:%dk" % (e['context_length'] // 1000)
       print("  %s%-16s %-9s %s%s" % (mark, e['name'], e['api'], e['model'], loc), file=vs)
 
   def handle_command(line):
@@ -2059,6 +2143,21 @@ def main(vs, args_in):
         print("  " + h, file=vs)
     elif cmd == 'compact':
       do_compact()
+    elif cmd == 'context':
+      st = getattr(gpt_obj, 'context_status', None)
+      if not callable(st):
+        print("Context monitoring is only available for chat-completions models.", file=vs)
+      else:
+        s = st()
+        if s is None:
+          print("Context monitoring is disabled for '%s' (context_length is 0)." % ctx['entry']['name'], file=vs)
+          print('Set "context_length": <tokens> on its entry in /config/gpt.json to enable it.', file=vs)
+        else:
+          used, lim, est = s
+          print("Context: ~%d / %d tokens (%.0f%%)%s" % (used, lim, used * 100.0 / lim,
+                                                         " (estimated)" if est else ""), file=vs)
+          if used >= 0.9 * lim:
+            print("At/over 90% — auto-compact will trigger after this turn (or /compact now).", file=vs)
     elif cmd in ('auto-compact', 'autocompact'):
       if not gpt_obj.CAN_COMPACT:
         print("Auto-compact isn't available for this model.", file=vs)
@@ -2175,10 +2274,24 @@ def main(vs, args_in):
     try:
       run_turn(line, turn_refs, turn_imgs)
       # Count completed turns; auto-compact once the threshold is reached.
-      if gpt_obj.CAN_COMPACT and compact_state['every']:
-        compact_state['since'] += 1
-        if compact_state['since'] >= compact_state['every']:
-          do_compact(auto=True)
+      if gpt_obj.CAN_COMPACT:
+        if compact_state['every']:
+          compact_state['since'] += 1
+          if compact_state['since'] >= compact_state['every']:
+            do_compact(auto=True)
+        # Token-threshold auto-compact: once the prompt reaches 90% of the
+        # model's configured context_length. Skipped while backing off after a
+        # failed attempt so a broken endpoint isn't retried every turn.
+        lim = getattr(gpt_obj, 'context_length', None)
+        if lim:
+          if compact_state['backoff'] > 0:
+            compact_state['backoff'] -= 1
+          else:
+            used = (getattr(gpt_obj, 'last_usage', None) or {}).get('prompt')
+            if used is not None and used >= int(lim * 0.9):
+              print("[Auto-compact] context at ~%d%% of %d tokens." % (used * 100 // lim, lim), file=vs)
+              if not do_compact(auto=True):
+                compact_state['backoff'] = 3
       # Periodically distill the session into long-term memory (like gpt_rt).
       if improve_state['every']:
         improve_state['since'] += 1

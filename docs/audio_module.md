@@ -39,6 +39,13 @@ Streaming module is part of audio module. Two streaming is available, mod_index 
 - `stream_play(state)`
   Starts or stops playback for playback stream(0). If no argument is provided, returns the playing status.
 
+- `stream_volume([volume, transition_ms=0, execute_at=0])`
+  Sets or gets the playback volume of the playback stream(0). `volume` is 0.0 to 1.0. If no argument is provided, returns the current volume.
+  The setting is persistent: it is not reset by `stream_setup()`.
+
+- `stream_clear_events()`
+  Forcefully executes all pending scheduled stream events and clears the event queue.
+
 - `stream_record(state)`
   Starts or stops recording for recording stream(1). If no argument is provided, returns the recording status.
 
@@ -47,7 +54,7 @@ Streaming module is part of audio module. Two streaming is available, mod_index 
 
 ### Timing and Scheduling (execute_at)
 
-Many methods in `sampler` and `wavetable` accept an optional `execute_at` parameter. This allows for sample-perfect scheduling of events.
+Many methods in `sampler` and `wavetable`, and stream functions such as `stream_volume()`, accept an optional `execute_at` parameter. This allows for sample-perfect scheduling of events.
 - **Integer**: The exact tick (sample count) at which to execute.
 - **String**: 
   - `"+1s"`: Execute in 1 second from now.
@@ -156,7 +163,7 @@ with audio.wavetable(4) as w:
   Sets or gets the oscillator volume.
 
 - `morph(slot, [morph, transition_ms=0, execute_at=0])`
-  Sets or gets the morph position (0.0 to number of frames - 1.0) to interpolate between wavetable frames.
+  Sets or gets the morph position (0.0 = first frame, 1.0 = last frame; clamped) to interpolate between wavetable frames.
 
 - `set_adsr(slot, attack_ms, decay_ms, sustain_level, release_ms, [execute_at=0])`
   Configures the amplitude ADSR envelope for the oscillator.

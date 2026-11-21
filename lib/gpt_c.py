@@ -138,6 +138,18 @@ class chatgpt_chat(gpt.chatgpt_agent):
   USE_WEB_SEARCH = True
   CAN_COMPACT = True
 
+  # Reasoning ("thinking") replay. Providers expose it under different names;
+  # whatever name the server used we send back on the assistant message
+  # verbatim, because that is the only shape it is guaranteed to accept:
+  #   - DeepSeek: once `tools` is in the request, reasoning_content must be
+  #     passed back on *every* assistant message (all turns), or the API
+  #     returns 400.
+  #   - OpenRouter: reasoning_details must be replayed complete, in order, with
+  #     signatures untouched (that is what keeps Claude/Gemini thinking valid).
+  # The text is never folded into `content`: the model would read its private
+  # notes as part of the conversation and repeat/act on them.
+  REASONING_KEYS = ("reasoning_content", "reasoning_details", "reasoning")
+
   def __init__(self, vs, base_url=None):
     super().__init__(vs)
     # /v1/chat/completions on the configured base (default OpenAI).
@@ -149,6 +161,13 @@ class chatgpt_chat(gpt.chatgpt_agent):
     # Set by resume_from/persist_session so a resumed session is saved back to
     # the same conversation id.
     self.conv_id = None
+    # Context-length monitoring. context_length comes from the registry entry
+    # (gpt.make_client copies it here); last_usage is refreshed after every
+    # round-trip from the response's usage block (or a local estimate when the
+    # provider reports none). None means "not configured / unknown".
+    self.context_length = None
+    self.last_usage = None      # {"prompt": int, "completion": int, "total": int, "estimated": bool}
+    self._stream_include_usage = True
 
   # --- uniform client interface (shared driver in gpt.main() calls these) ----
 
@@ -181,6 +200,7 @@ class chatgpt_chat(gpt.chatgpt_agent):
 
   def reset_context(self):
     self.messages = []
+    self.last_usage = None
 
   def build_tools_for(self, app_list, agent):
     return build_tools_c(app_list, agent=agent, vision=not self.text_only)
@@ -195,6 +215,7 @@ class chatgpt_chat(gpt.chatgpt_agent):
       self.conv_id = resolved
       if not silent and vs is not None:
         print("Resuming session %s" % resolved, file=vs)
+      self.last_usage = None
       return resolved
     if not silent and vs is not None:
       print("No previous session to resume; starting new.", file=vs)
@@ -288,6 +309,70 @@ class chatgpt_chat(gpt.chatgpt_agent):
       return out
     return ""
 
+  # --- context-length monitoring ----------------------------------------------
+
+  def _record_usage(self, data):
+    """Remember the token usage of the last response. Uses the provider's
+    usage block when present; otherwise falls back to a rough local estimate
+    so context monitoring still works on endpoints that report nothing."""
+    usage = data.get("usage") if isinstance(data, dict) else None
+    if isinstance(usage, dict):
+      p = usage.get("prompt_tokens", usage.get("input_tokens"))
+      c = usage.get("completion_tokens", usage.get("output_tokens"))
+      t = usage.get("total_tokens")
+      try:
+        p = int(p) if p is not None else None
+      except (TypeError, ValueError):
+        p = None
+      if p is not None:
+        try:
+          c = int(c) if c else 0
+        except (TypeError, ValueError):
+          c = 0
+        try:
+          t = int(t) if t else p + c
+        except (TypeError, ValueError):
+          t = p + c
+        self.last_usage = {"prompt": p, "completion": c, "total": t, "estimated": False}
+        return
+    self.last_usage = self._estimate_usage()
+
+  def _estimate_usage(self):
+    """Rough prompt-size estimate (~4 chars/token) for providers that don't
+    report usage. Images count as a flat 1000 tokens, not their base64 size."""
+    total = 0
+    for m in self.messages:
+      total += 4  # per-message overhead
+      c = m.get("content")
+      if isinstance(c, str):
+        total += len(c) // 4
+      elif isinstance(c, list):
+        for it in c:
+          if not isinstance(it, dict):
+            continue
+          if it.get("type") == "text":
+            total += len(it.get("text") or "") // 4
+          elif it.get("type") == "image_url":
+            total += 1000
+      for tc in m.get("tool_calls") or []:
+        fn = tc.get("function") or {}
+        total += (len(fn.get("arguments") or "") + len(fn.get("name") or "")) // 4
+      rc = m.get("reasoning_content")
+      if isinstance(rc, str):
+        total += len(rc) // 4
+    return {"prompt": total, "completion": 0, "total": total, "estimated": True}
+
+  def context_status(self):
+    """(used_tokens, limit, estimated) for the current context, or None when
+    no context_length is configured for this model. `used` is the prompt size
+    of the last request (or a local estimate before the first response)."""
+    limit = self.context_length
+    if not limit:
+      return None
+    if self.last_usage:
+      return self.last_usage["prompt"], int(limit), self.last_usage.get("estimated", False)
+    return self._estimate_usage()["prompt"], int(limit), True
+
   @staticmethod
   def _slim_tool_calls(tool_calls):
     """Reconstruct only the fields Chat Completions needs when the assistant's
@@ -314,6 +399,10 @@ class chatgpt_chat(gpt.chatgpt_agent):
   def _stream_payload(self, payload):
     p = dict(payload)          # shallow copy: never mutate the caller's
     p["stream"] = True
+    if self._stream_include_usage:
+      # Ask for a final usage-only chunk so context monitoring works while
+      # streaming. If an endpoint rejects this, ask_agent drops it and retries.
+      p["stream_options"] = {"include_usage": True}
     return p
 
   def _stream_begin(self):
@@ -321,6 +410,11 @@ class chatgpt_chat(gpt.chatgpt_agent):
     self._calls = {}           # index -> partial tool_call
     self._err = None
     self._got = False
+    self._usage = None         # final usage-only chunk, when the endpoint sends one
+    # Reasoning is collected separately so it can be replayed verbatim.
+    self._reason = ''          # plain string form (DeepSeek/Qwen/vLLM)
+    self._reason_key = None    # which field name the server used
+    self._reason_details = {}  # index/id -> OpenRouter-style detail block
 
   def _stream_result(self):
     if self._err is not None:
@@ -328,27 +422,112 @@ class chatgpt_chat(gpt.chatgpt_agent):
     if not self._got:
       return None              # nothing usable arrived; let the caller re-ask
     msg = {"role": "assistant", "content": self._text or None}
+    if self._reason:
+      msg[self._reason_key or "reasoning_content"] = self._reason
+    details = self._reasoning_details_list()
+    if details:
+      msg["reasoning_details"] = details
     if self._calls:
       msg["tool_calls"] = [self._calls[i] for i in sorted(self._calls)]
-    return {"choices": [{"message": msg}]}
+    result = {"choices": [{"message": msg}]}
+    if self._usage:
+      result["usage"] = self._usage
+    return result
 
   def _stream_event(self, ev):
     if ev.get("error"):
       self._err = ev["error"]
       return
+    if ev.get("usage"):        # final usage-only chunk (choices is empty)
+      self._usage = ev["usage"]
+      return
     for ch in ev.get("choices") or []:
       d = ch.get("delta") or {}
       self._got = True
       # Reasoning goes by different names per provider (DeepSeek/Qwen/vLLM).
-      think = d.get("reasoning_content") or d.get("reasoning")
-      if isinstance(think, str) and think:
-        self._think(think)
+      for k in ("reasoning_content", "reasoning"):
+        think = d.get(k)
+        if isinstance(think, str) and think:
+          self._reason += think
+          self._reason_key = k
+          self._think(think)
+          break
+      rd = d.get("reasoning_details")
+      if isinstance(rd, list):
+        self._merge_reasoning_details(rd)
       c = d.get("content")
       if isinstance(c, str) and c:
         self._text += c
         self._say(c)
       for tc in d.get("tool_calls") or []:
         self._tool_call_delta(tc)
+
+  # --- reasoning accumulation / replay --------------------------------------
+
+  def _merge_reasoning_details(self, chunks):
+    """Accumulate streamed reasoning_details. Chunks sharing an index are
+    fragments of one block: concatenate reasoning.text, but keep the first
+    id/format/signature untouched (they are replayed byte-for-byte)."""
+    for pos, d in enumerate(chunks):
+      if not isinstance(d, dict):
+        continue
+      idx = d.get("index")
+      if not isinstance(idx, int):
+        idx = d.get("id") or pos
+      kind = d.get("type")
+      cur = self._reason_details.get(idx)
+      if cur is None:
+        self._reason_details[idx] = dict(d)
+      else:
+        if kind is None:
+          kind = cur.get("type")   # fragments may omit it after the first chunk
+        self._apply_reasoning_chunk(cur, kind, d)
+      # Live echo. Skip it when the provider also streams a plain reasoning
+      # string, so the screen doesn't show the same thinking twice.
+      if not self._reason_key:
+        if kind == "reasoning.text" and d.get("text"):
+          self._think(d["text"])
+        elif kind == "reasoning.summary" and d.get("summary"):
+          self._think(d["summary"])
+
+  @staticmethod
+  def _apply_reasoning_chunk(cur, kind, d):
+    """Merge one streaming fragment into an existing reasoning detail block."""
+    if kind == "reasoning.text":
+      # Text fragments arrive across chunks; signature/id stay from the first.
+      cur["text"] = (cur.get("text") or "") + (d.get("text") or "")
+    elif kind == "reasoning.summary":
+      cur["summary"] = (cur.get("summary") or "") + (d.get("summary") or "")
+    else:
+      # Encrypted/complete blocks: last one wins, never edited.
+      cur.update(d)
+      return
+    for k, v in d.items():
+      if k not in cur or cur[k] is None:
+        cur[k] = v
+
+  def _reasoning_details_list(self):
+    """Reasoning details in their original order (integer index first, then
+    anything without one). """
+    if not self._reason_details:
+      return None
+    out = []
+    n = len(self._reason_details)
+    for i in range(n):
+      if i in self._reason_details:
+        out.append(self._reason_details[i])
+    for k in self._reason_details:
+      if not isinstance(k, int) or k < 0 or k >= n:
+        out.append(self._reason_details[k])
+    return out
+
+  def _copy_reasoning(self, src, dst):
+    """Carry the provider's own reasoning fields from the response message to
+    the assistant message kept in the history, without touching `content`."""
+    for k in self.REASONING_KEYS:
+      v = src.get(k)
+      if v:
+        dst[k] = v
 
   def _tool_call_delta(self, tc):
     i = tc.get("index", 0)
@@ -447,6 +626,15 @@ class chatgpt_chat(gpt.chatgpt_agent):
       if data.get("error"):
         err = data["error"]
         msg = err.get("message", "Unknown error") if isinstance(err, dict) else str(err)
+        # An endpoint that doesn't know stream_options may reject the request;
+        # drop it and re-ask this round instead of failing the turn.
+        if (streamed and self._stream_include_usage
+            and 'stream_options' in str(msg).lower()):
+          self._stream_include_usage = False
+          if not silent:
+            print("(endpoint rejected stream_options; retrying without usage stats)",
+                  file=self.vs)
+          continue
         print("API Error: %s" % msg, file=self.vs)
         break
 
@@ -454,13 +642,19 @@ class chatgpt_chat(gpt.chatgpt_agent):
       if not choices:
         print("API Error: no choices returned", file=self.vs)
         break
+      self._record_usage(data)
       msg = choices[0].get("message", {}) or {}
       content = msg.get("content")
       tool_calls = msg.get("tool_calls") or []
 
       # Record the assistant turn. The tool_calls must be echoed verbatim on the
-      # next request so the following tool results can reference their ids.
+      # next request so the following tool results can reference their ids, and
+      # the thinking must ride along in the provider's own field (see
+      # REASONING_KEYS): DeepSeek rejects a tool conversation whose reasoning
+      # was dropped, and OpenRouter needs the signed details to continue Claude's
+      # reasoning after a tool result.
       assistant_msg = {"role": "assistant", "content": self._content_text(content)}
+      self._copy_reasoning(msg, assistant_msg)
       if tool_calls:
         assistant_msg["tool_calls"] = self._slim_tool_calls(tool_calls)
       self.messages.append(assistant_msg)
@@ -648,6 +842,7 @@ class chatgpt_chat(gpt.chatgpt_agent):
     new_msgs.append({"role": "assistant",
                      "content": "Understood — I'll continue from that summary."})
     self.messages = new_msgs
+    self.last_usage = None   # stale: it described the pre-compact context
     gc.collect()
     return summary
 

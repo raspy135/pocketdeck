@@ -1,3 +1,14 @@
+## Release Note, November 2, 2026
+
+## Firmware
+
+- Now it supports UK and Japanese keyboard layout.
+
+## Application
+
+- gpt : searXNG, rustXNG support for search engine
+- gpt : Support context length and compaction.
+
 ## Release Note, October 15, 2026
 
 ## Application

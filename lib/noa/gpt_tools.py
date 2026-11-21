@@ -47,16 +47,39 @@ el = gpt_l.el
 CaptureStream = pu.CaptureStream
 
 
-# web_search backends (see ToolExecBase.execute_web_search):
+# web_search engines (see ToolExecBase.execute_web_search and
+# resolve_search_engines below):
+#   - Configured engines: the "search_engine" list in /config/gpt.json, tried
+#     in order. Each record is {"type", "endpoint", "api_key"}:
+#       - "tavily": Tavily's LLM-native JSON search (api.tavily.com, free
+#         tier). "api_key" required; "endpoint" optional (defaults to Tavily).
+#       - "rustxng"/"searxng": a self-hosted RustXNG or SearXNG instance
+#         speaking the SearXNG JSON API (GET /search?q=..&format=json).
+#         "endpoint" is the instance's base URL; a bare host is completed
+#         with plain http and RustXNG's default port 8888, so
+#         "192.168.11.206" reaches the instance exactly as installed,
+#         while an endpoint that already carries a scheme/port is taken
+#         verbatim; "api_key" optional (bearer).
+#         include_raw_content=1 also serves the text of the top result pages,
+#         so the model can ground on the sources without a second fetch.
+#     An engine that fails (down, bad key, rate limit) falls through to the
+#     next list entry; keyless DuckDuckGo stays the floor when the list is
+#     missing/empty or every configured engine failed.
 #   - Default, keyless: DuckDuckGo's HTML endpoint. It returns a plain server-
 #     rendered result page that _ddg_parse turns into (title, url, snippet)
 #     tuples on-device, so the model never sees raw HTML.
-#   - Optional upgrade: drop a Tavily key at TAVILY_KEY_PATH and web_search
-#     switches to Tavily's LLM-native JSON search (api.tavily.com), which has a
-#     free tier for real use. Both paths feed the same result formatter.
+#   - Backward compatibility: with no "search_engine" list configured, a
+#     Tavily key at TAVILY_KEY_PATH still selects Tavily, exactly as before
+#     the registry carried engine configs.
 DDG_SEARCH_URL = "https://html.duckduckgo.com/html/"
 TAVILY_SEARCH_URL = "https://api.tavily.com/search"
 TAVILY_KEY_PATH = "/config/tavily_api_key"
+# Output budgets for the formatted result list: snippets stay short so the
+# listing stays compact; page text (RustXNG/SearXNG raw content) gets its own
+# larger budget because serving that text is the point of the engine, and the
+# model can still fetch the full page with curl when the clip is not enough.
+SEARCH_SNIPPET_MAX = 500
+SEARCH_PAGE_MAX = 4000
 # A browser-like UA: DuckDuckGo's HTML endpoint 403s a bare tool user-agent.
 WEB_UA = "Mozilla/5.0 (X11; Linux x86_64) pdeck/0.2"
 
@@ -114,6 +137,78 @@ def html_unescape(s):
       out.append(c)
       i += 1
   return "".join(out)
+
+
+def _clip_text(s, cap):
+  """Trimmed `s`, clipped to `cap` characters with an ellipsis marker."""
+  s = (s or "").strip()
+  if len(s) > cap:
+    return s[:cap] + "..."
+  return s
+
+
+def _read_key_file(path):
+  """Contents of the key file at `path` (stripped), or '' when missing."""
+  try:
+    with open(path) as f:
+      return f.read().strip()
+  except OSError:
+    return ""
+
+
+def _normalize_search_engine(record):
+  """Validate and normalize one "search_engine" record from /config/gpt.json
+  to {"type", "endpoint", "api_key"}, or None if it is unusable. A bare
+  host gets RustXNG's own defaults filled in - plain http, and port 8888
+  when no port was given - so "192.168.11.206" reaches the instance as
+  installed; an endpoint that already carries a scheme or a port is the
+  deployer's explicit choice and is taken verbatim."""
+  if not isinstance(record, dict):
+    return None
+  etype = str(record.get("type") or "").strip().lower()
+  if etype not in ("tavily", "rustxng", "searxng"):
+    return None
+  endpoint = str(record.get("endpoint") or "").strip().rstrip("/")
+  api_key = str(record.get("api_key") or "").strip()
+  if etype == "tavily" and not endpoint:
+    endpoint = TAVILY_SEARCH_URL
+  if etype != "tavily" and endpoint and "://" not in endpoint:
+    # Bare host[:port] with no scheme: fill in plain http, and RustXNG's own
+    # default port 8888 when no port was given, so "192.168.11.206" reaches
+    # the instance as installed. Anything that already carries a scheme or a
+    # port is the deployer's explicit choice and is taken verbatim.
+    endpoint = "http://" + endpoint
+    if ":" not in endpoint.split("//", 1)[1].split("/", 1)[0]:
+      endpoint += ":8888"
+  return {"type": etype, "endpoint": endpoint, "api_key": api_key}
+
+
+def resolve_search_engines(vs=None):
+  """The web_search engine chain, in try-order, from the "search_engine" list
+  in /config/gpt.json (read via gpt_l.load_registry_ro; see the header comment
+  for the record shape and the fallback rules). Returns [] when nothing usable
+  is configured, which leaves web_search on the built-in keyless DuckDuckGo
+  path. With no "search_engine" key at all, a legacy Tavily key file still
+  selects Tavily (backward compatibility with pre-registry setups)."""
+  registry = gpt_l.load_registry_ro()
+  configured = (registry.get("search_engine")
+                if isinstance(registry, dict) else None)
+  if isinstance(configured, list):
+    engines = []
+    for record in configured:
+      engine = _normalize_search_engine(record)
+      if engine:
+        engines.append(engine)
+      elif vs is not None:
+        print("%s[search]%s skipped an unusable search_engine record in %s "
+              "(records are {type, endpoint, api_key}; types: tavily, rustxng)"
+              % (el.bold(), el.bold_off(), gpt_l.registry_path()), file=vs)
+    return engines
+  key = _read_key_file(TAVILY_KEY_PATH)
+  if key:
+    return [{"type": "tavily", "endpoint": TAVILY_SEARCH_URL,
+             "api_key": key}]
+  return []
 
 
 def strip_tags(s):
@@ -405,7 +500,7 @@ def build_tools(app_list, agent=False, web_search=True, realtime=False,
       tools.append({
         "type": "function",
         "name": "web_search",
-        "description": "Search the web and get back ranked, up-to-date results (title, URL, and a short snippet for each) from an AI-friendly search engine. Use this for ANY general web search or whenever you need current information the model may not know: news, documentation, product/prices, facts, people, etc. IMPORTANT: prefer this over running curl on a search-engine URL — scraping search result pages with curl is unreliable and frequently blocked, which is why searches fail. Workflow: call web_search to find relevant pages, then, if you need the full text of a specific result, fetch just that page with command_with_return using 'curl -s <url>'.",
+        "description": "Search the web and get back ranked, up-to-date results (title, URL, and a short snippet for each) from an AI-friendly search engine; when the engine provides it, the text of the top result pages is included as well. Use this for ANY general web search or whenever you need current information the model may not know: news, documentation, product/prices, facts, people, etc. IMPORTANT: prefer this over running curl on a search-engine URL — scraping search result pages with curl is unreliable and frequently blocked, which is why searches fail. Workflow: call web_search to find relevant pages, then, if a result's full page text is not already included, fetch just that page with command_with_return using 'curl -s <url>'.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -1131,28 +1226,27 @@ class ToolExecBase:
     return "Plan updated: %d step(s), %d done." % (len(items), done)
 
   # ---- web search ----------------------------------------------------------
-  def _read_tavily_key(self):
-    # Optional bearer key for the Tavily search endpoint. When present, web_search
-    # upgrades from keyless DuckDuckGo to Tavily's JSON search. Missing = keyless.
-    try:
-      with open(TAVILY_KEY_PATH) as f:
-        return f.read().strip()
-    except OSError:
-      return ""
-
   def _format_web_results(self, query, items):
-    # items: list of (title, url, snippet). Render a compact numbered list.
+    # items: (title, url, snippet) tuples, or (title, url, snippet, page_text)
+    # when the engine also returned the page's own text (RustXNG/SearXNG raw
+    # content). Snippets stay tightly capped so the listing stays compact; page
+    # text gets its own larger budget (SEARCH_PAGE_MAX) because serving it is
+    # the point of that engine, and the model can still fetch the full page
+    # with curl when the clipped part is not enough.
     if not items:
       return "No web results found for '%s'." % query
     lines = ["Web search results for '%s':" % query]
-    for i, (title, link, snippet) in enumerate(items):
-      title = (title or "").strip() or "(no title)"
-      snippet = (snippet or "").strip()
-      if len(snippet) > 500:
-        snippet = snippet[:500] + "..."
-      lines.append("\n%d. %s\n   %s" % (i + 1, title, (link or "").strip()))
+    for i, item in enumerate(items):
+      title, link = item[0], item[1]
+      snippet = _clip_text(item[2], SEARCH_SNIPPET_MAX)
+      page = _clip_text(item[3], SEARCH_PAGE_MAX) if len(item) > 3 else ""
+      lines.append("\n%d. %s\n   %s" % (i + 1,
+               (title or "").strip() or "(no title)", (link or "").strip()))
       if snippet:
         lines.append("   %s" % snippet)
+      if page:
+        lines.append("   ----- page text of result %d -----\n%s"
+                     % (i + 1, page))
     return "\n".join(lines)
 
   def execute_web_search(self, arguments):
@@ -1171,68 +1265,160 @@ class ToolExecBase:
       num = 1
     if num > 10:
       num = 10
-    key = self._read_tavily_key()
-    if key:
-      return self._tavily_search(query, num, key)
-    return self._ddg_search(query, num)
+    # Engines come from the "search_engine" list in /config/gpt.json, in
+    # try-order (see resolve_search_engines). Empty = nothing configured, so
+    # web_search stays on the built-in keyless DuckDuckGo path.
+    vs = getattr(self, 'vs', None)
+    engines = resolve_search_engines(vs)
+    if not engines:
+      return self._search_ddg(query, num)[1]
+    failures = []
+    for engine in engines:
+      ok, text = self._search_engine(engine, query, num)
+      if ok:
+        if failures:
+          # An earlier engine failed; the note tells the model (and the user,
+          # via the echoed [Result] line) where these results really came from.
+          note = ("(note: fell back to %s after %s)"
+                  % (engine["type"], "; ".join(failures)))
+          if vs is not None:
+            print("%s[search]%s %s" % (el.bold(), el.bold_off(), note),
+                  file=vs)
+          return note + "\n" + text
+        return text
+      failures.append("%s: %s" % (engine["type"], text))
+      if vs is not None:
+        print("%s[search]%s %s failed (%s); trying the next configured engine"
+              % (el.bold(), el.bold_off(), engine["type"], text[:120]),
+              file=vs)
+    # Every configured engine failed: DuckDuckGo stays available as the
+    # keyless floor, with a note so the model/user knows what happened and
+    # can fix the configuration.
+    ok, text = self._search_ddg(query, num)
+    if ok:
+      return ("(note: every configured search engine failed (%s); these "
+              "results come from keyless DuckDuckGo instead)\n%s"
+              % ("; ".join(failures), text))
+    return ("Error: web search failed on every configured engine:\n  "
+            + "\n  ".join(failures) + "\n  duckduckgo: " + text)
 
-  def _ddg_search(self, query, num):
+  def _search_engine(self, engine, query, num):
+    """Run one configured search engine. Returns (ok, result text): ok=True
+    means the engine answered - even if with zero results, which is a valid
+    answer for the model to act on - and ok=False that it failed and the
+    next configured engine should be tried instead."""
+    if engine["type"] == "tavily":
+      return self._search_tavily(query, num, engine)
+    if engine["type"] in ("rustxng", "searxng"):
+      return self._search_rustxng(query, num, engine)
+    return False, "Error: unknown search engine type '%s'" % engine["type"]
+
+  def _search_ddg(self, query, num):
     # Keyless DuckDuckGo HTML endpoint, POSTing the query as a form field.
+    # Returns (ok, text) like the configured-engine handlers.
     try:
       import curl
       status, _rh, body = curl.request(
         DDG_SEARCH_URL, method="POST", data="q=" + url_quote(query),
         user_agent=WEB_UA, timeout=30, follow=3)
     except Exception as e:
-      return ("Error: web search request failed: %s. Check the network "
+      return False, ("Error: web search request failed: %s. Check the network "
               "connection (try 'ping duckduckgo.com' via command_with_return)." % e)
     try:
       code = int(status.split(" ")[1])
     except:
       code = 0
     if code != 200:
-      return ("Error: web search returned HTTP %d from DuckDuckGo. Retry in a "
-              "moment; if it persists the endpoint may be rate-limiting." % code)
+      return False, ("Error: web search returned HTTP %d from DuckDuckGo. "
+              "Retry in a moment; if it persists the endpoint may be "
+              "rate-limiting." % code)
     html = body.decode("utf-8", "replace") if body else ""
-    return self._format_web_results(query, _ddg_parse(html, num))
+    return True, self._format_web_results(query, _ddg_parse(html, num))
 
-  def _tavily_search(self, query, num, key):
-    # Tavily JSON search (used when a key is configured). POSTs the query and
+  def _search_tavily(self, query, num, engine):
+    # Tavily JSON search. POSTs the query with the engine's bearer key and
     # gets back LLM-ready results with a content snippet per hit.
+    if not engine.get("api_key"):
+      return False, ("Error: the Tavily engine in %s carries no api_key."
+                     % gpt_l.registry_path())
     payload = ujson.dumps({"query": query, "max_results": num})
     headers = ["Content-Type: application/json",
-               "Authorization: Bearer " + key]
+               "Authorization: Bearer " + engine["api_key"]]
     try:
       import curl
       status, _rh, body = curl.request(
-        TAVILY_SEARCH_URL, method="POST", data=payload,
+        engine["endpoint"], method="POST", data=payload,
         header_lines=headers, timeout=30, follow=3)
     except Exception as e:
-      return "Error: web search request failed: %s." % e
+      return False, "Error: web search request failed: %s." % e
     try:
       code = int(status.split(" ")[1])
     except:
       code = 0
     if code == 401:
-      return ("Error: Tavily rejected the API key (HTTP 401). Check the key in "
-              "%s, or remove that file to fall back to keyless search." % TAVILY_KEY_PATH)
+      return False, ("Error: Tavily rejected the api_key (HTTP 401). Fix the "
+                     "api_key in the search_engine list of %s."
+                     % gpt_l.registry_path())
     if code == 429:
-      return "Error: Tavily search is rate-limited (HTTP 429). Retry shortly."
+      return False, "Error: Tavily search is rate-limited (HTTP 429). Retry shortly."
     if code != 200:
       snippet = body[:200].decode("utf-8", "replace") if body else ""
-      return "Error: Tavily search returned HTTP %d. %s" % (code, snippet)
+      return False, "Error: Tavily search returned HTTP %d. %s" % (code, snippet)
     try:
       data = ujson.loads(body)
     except Exception:
-      return "Error: could not parse Tavily search response."
+      return False, "Error: could not parse Tavily search response."
     results = data.get("results") if isinstance(data, dict) else None
     if not results:
-      return "No web results found for '%s'." % query
+      return True, "No web results found for '%s'." % query
     items = []
     for r in results[:num]:
       if isinstance(r, dict):
         items.append((r.get("title"), r.get("url"), r.get("content")))
-    return self._format_web_results(query, items)
+    return True, self._format_web_results(query, items)
+
+  def _search_rustxng(self, query, num, engine):
+    # Self-hosted RustXNG / SearXNG instance, SearXNG's JSON API
+    # (GET /search?q=..&format=json&max_results=..&include_raw_content=1).
+    # RustXNG fans the query out to ~170 upstream engines in parallel and
+    # fetches the text of the top result pages (its own raw_content_limit,
+    # default 5), so the model can ground on the sources without a second
+    # fetch. Raw text is capped per result by SEARCH_PAGE_MAX in the formatter.
+    url = (engine["endpoint"] + "/search?q=" + url_quote(query)
+           + "&format=json&max_results=%d&include_raw_content=1" % num)
+    headers = None
+    if engine.get("api_key"):
+      headers = ["Authorization: Bearer " + engine["api_key"]]
+    try:
+      import curl
+      status, _rh, body = curl.request(
+        url, user_agent=WEB_UA, header_lines=headers, timeout=30, follow=3)
+    except Exception as e:
+      return False, ("Error: the %s engine at %s is unreachable: %s."
+                     % (engine["type"], engine["endpoint"], e))
+    try:
+      code = int(status.split(" ")[1])
+    except:
+      code = 0
+    if code != 200:
+      snippet = body[:200].decode("utf-8", "replace") if body else ""
+      return False, ("Error: %s at %s returned HTTP %d. %s"
+                     % (engine["type"], engine["endpoint"], code, snippet))
+    try:
+      data = ujson.loads(body)
+    except Exception:
+      return False, ("Error: %s at %s did not answer with JSON (a real "
+                     "SearXNG instance needs format=json enabled)."
+                     % (engine["type"], engine["endpoint"]))
+    results = data.get("results") if isinstance(data, dict) else None
+    if not results:
+      return True, "No web results found for '%s'." % query
+    items = []
+    for r in results[:num]:
+      if isinstance(r, dict):
+        items.append((r.get("title"), r.get("url"), r.get("content"),
+                      r.get("raw_content")))
+    return True, self._format_web_results(query, items)
 
   # ---- implementations -----------------------------------------------------
   def execute_command_with_return(self, arguments):

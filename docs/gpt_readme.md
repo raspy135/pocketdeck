@@ -45,7 +45,7 @@ Option | Description
 `-f file [file...]` | Attach one or more files as reference context. Also accepts URLs.
 `-i img [img...]` | Attach image files or URLs for vision queries.
 `-c` | Use clipboard content as reference text.
-`-m model` | Model to use — a `name` from `/config/gpt.json`, a shortcut (`f`/`fast` → gpt-5.4-mini, `m`/`medium` → ngpt-5.4, `h`/`high` → gpt-5.5), or a raw model id. Default: the registry `default`. See [Model configuration](#model-configuration-configgptjson).
+`-m model` | Model to use — a `name` from `/config/gpt.json`, or a raw model id (treated as an OpenAI Responses model). Default: the registry `default`. See [Model configuration](#model-configuration-configgptjson).
 `--base-url url` | Override the endpoint base URL for this run.
 `-e level` | Reasoning effort: `low`, `medium` (default), or `high`. Responses models only.
 `-j` | Answer in Japanese. Also switches terminal font to Unicode automatically.
@@ -54,6 +54,10 @@ Option | Description
 `-n` | Do not save the response log.
 `-nf` | No formatting (skip bold/markdown rendering).
 `-s` | Silent mode — suppress progress indicators.
+`--stream` | Stream the reply live (thinking, answer text and tool-call drafts as they arrive). Device only. Off by default; toggle with `/stream` in conversation mode.
+`--resume` | Save this turn's response id so a later run can continue the conversation.
+`--resume-id id` | Continue a prior conversation: a response id, or `last` for the most recent saved session.
+`-T`, `--training` | Dump each turn (system/user/tool-calls/results/answer + tool schema) as JSONL to `/sd/training_data` for fine-tuning. Attachments are excluded. Chat Completions models only.
 `--log-file file` | Internal: reuse a specific log filename across turns/iterations.
 
 ## Voice Mode (`-v`)
@@ -157,7 +161,7 @@ AI can do the following things in agent mode.
 
 - Command execution
 - **Python one-liners** (`run_python`) — runs a short MicroPython snippet on the device and returns what it prints (plus the value if the snippet is a single expression), so the model can compute something, inspect a file, poke a device API or test a function of a module it is editing without writing a script first. `print()` output is captured, exceptions come back as text with a traceback, and the snippet can use `reload('mod')` to re-import a module it just edited. Like `command_with_return`, it is confirmed first in Plan mode.
-- **Web search** — a `web_search` tool returns ranked results (title, URL, snippet) so the model gets current information without scraping search pages with `curl`. On genuine OpenAI models this uses OpenAI's hosted web search; on every other endpoint (local/Chat-Completions models, non-OpenAI providers, the voice agent) it runs on-device against DuckDuckGo, keyless. Drop a [Tavily](https://www.tavily.com) key at `/config/tavily_api_key` to upgrade the device-side search to Tavily's LLM-native results (free tier available).
+- **Web search** — a `web_search` tool returns ranked results (title, URL, snippet) so the model gets current information without scraping search pages with `curl`. On genuine OpenAI models this uses OpenAI's hosted web search; every other endpoint (local/Chat-Completions models, non-OpenAI providers, the voice agent) runs the on-device tool against the engines configured in `/config/gpt.json` (see [Web search engines](#web-search-engines)) — keyless DuckDuckGo when none are.
 - PEM file editing. AI can read the editor status and edit the currently open file.
 - Read / write files. The old files are copied to /sd/backup.
 - **Ask you a question** (`ask_user`) — when the spec is unclear, it needs a decision or permission, or it is stuck, the model asks instead of guessing. The question is shown as `[Question] ...` with an `Answer:` prompt; your reply goes straight back to the model as the tool result and it carries on in the same turn. Ctrl-C cancels (the model is told you didn't answer). Text agents only — the voice agent just asks out loud.
@@ -213,7 +217,25 @@ Both APIs stream. What you get for `[Thinking]` depends on the endpoint:
 | `api` | thinking text |
 |---|---|
 | `responses` | reasoning summary (the request asks for `summary: "auto"`; endpoints that reject it are re-asked once without, and you still get the answer and call drafts live) |
-| `chat` | whatever the provider sends as `reasoning_content` / `reasoning` in the delta — local servers (llama.cpp, vLLM, Ollama with a thinking model) do; OpenAI's Chat Completions does not expose reasoning text at all |
+| `chat` | whatever the provider sends as `reasoning_content` / `reasoning` / `reasoning_details` in the delta — local servers (llama.cpp, vLLM, Ollama with a thinking model) do; OpenAI's Chat Completions does not expose reasoning text at all |
+
+The thinking is also **kept and replayed** in the provider's own message field,
+never folded into the visible answer:
+
+- `chat`: the assistant message stored in `messages` carries
+  `reasoning_content` (DeepSeek/Qwen/vLLM), `reasoning`, or `reasoning_details`
+  (OpenRouter's signed blocks), whichever the server sent. This is required:
+  DeepSeek returns 400 when a conversation with `tools` is missing an earlier
+  turn's `reasoning_content`, and Claude/Gemini need their signed details back
+  after a tool result. It also rides along when the conversation is saved with
+  `--resume` and loaded again with `--resume-id`.
+- `responses`: reasoning items live server-side and are chained with
+  `previous_response_id`. Only the display summary is streamed, so it is not
+  re-injected as text (that would make the model treat its private notes as
+  part of the conversation). On models that support it (GPT-5.6+ / GPT-6.1),
+  earlier turns' reasoning can be rendered into the next request with
+  `"extra_args": {"reasoning": {"context": "all_turns"}}` on the entry;
+  GPT-5.4/5.5 only support the default `current_turn`.
 
 Also in `-h`: `--stream`.
 
@@ -226,12 +248,11 @@ rest of the session.
 
 While `Asking GPT.. (ESC to interrupt)` is shown, press **ESC**. The request in
 flight still finishes (the label switches to `(ESC pressed, waiting for AI)` —
-it can't be cancelled), but the tool calls it comes back
-with are then confirmed one by one, as in Plan mode: run the next step, skip it,
-or type a comment that goes back to the model as feedback. Once that batch is
-handled the chain resumes in whatever mode you were in — press ESC again to take
-control of the next round. Your Auto/Plan setting is never changed, and anything
-else you typed while waiting is kept, not swallowed.
+it can't be cancelled). The tool calls it comes back with run as usual; then,
+before the model continues, the turn pauses for one free-form instruction from
+you — type a message to steer it (e.g. "stop and summarize what you found") or
+just press Enter to let it continue. Press ESC again during a later request to
+steer the next round too. Your Auto/Plan setting is never changed.
 
 ## Conversation Mode (`-C`)
 
@@ -243,7 +264,8 @@ starts without them, `/tools` toggles them mid-session, `/role coder` switches
 to the coding persona.
 
 Line editing: arrows move the cursor, Up/Down browse history, Ctrl-A/E jump to
-start/end, Ctrl-K/U kill to end/start, Ctrl-C cancels the current line.
+start/end, Ctrl-K/U kill to end/start, Ctrl-C cancels the current line, Tab
+completes slash commands and skill names.
 
 **Japanese input:** Alt+` or Alt+j toggles a kana (romaji → kana → kanji) IME.
 Use `-j` so the Unicode terminal font is loaded first.
@@ -255,16 +277,21 @@ Command | Effect
 `/help` | Show command help.
 `/quit`, `/exit` | Leave the conversation.
 `/clear`, `/reset` | Start fresh (clear the conversation context).
-`/model [name]` | Show or set the model — a `name` from `/config/gpt.json`, a shortcut (`f`/`m`/`h`), or a raw id. Switching to a different endpoint resets the context.
+`/model [name]` | Show or set the model — a `name` from `/config/gpt.json`, or a raw id. Switching to a different endpoint resets the context.
 `/models` | List the models configured in `/config/gpt.json`.
 `/effort [level]` | Show or set reasoning effort (`low`/`medium`/`high`). Responses models only.
 `/role [name\|text]` | Show or set the role (`assistant` or `coder`; resets context).
 `/tools` | Toggle the function-calling tools on/off.
+`/mode [auto\|plan]` | Show or set the execution mode; no argument toggles. `/auto` and `/plan` set it directly. Shift-Tab toggles too.
+`/stream [on\|off]` | Show the reply live as it arrives; no argument toggles. Device only.
+`/speak [text]` | Read text (default: the last reply) aloud with the configured TTS engine.
+`/history` | Show recent input history.
 `/file <path>` | Attach a file as reference for the next message.
 `/skills` | List available skills (your own plus the built-in system skills).
-`/<skill-name>` | Run a skill by name, e.g. `/morning_ritual` (hyphens, underscores and spaces all match). Press **Tab** while typing the name to complete it, or to list the matching skills when several share the prefix. The agent reads the skill file and carries it out; anything after the name is passed as extra input.
+`/<skill-name>` | Run a skill by name, e.g. `/morning_ritual` (hyphens, underscores and spaces all match). Press **Tab** while typing a slash command or skill name to complete it, or to list the matches when several share the prefix. The agent reads the skill file and carries it out; anything after the name is passed as extra input.
 `/compact` | Summarize and shrink the running context now. Chat Completions models only.
-`/auto-compact [n]` | Auto-compact every `n` turns (`off` to disable). Chat Completions models only.
+`/context` | Show context usage vs the model's `context_length` (if set). Chat Completions models only.
+`/auto-compact [n]` | Auto-compact every `n` turns (`off` to disable). Chat Completions models only. When `context_length` is set, auto-compact also triggers on its own at 90% of the limit.
 `/improve` | Improve AI agent knowledge. Save learned preferences and stable behavior notes from recent interaction history into a long-term memo; does not change core system rules or persona.
 `/auto-improve [n]` | Auto-run `/improve` every `n` completed turns (`off` to disable). Off by default (each run blocks the prompt for an extra model call); shows the current setting when given no argument.
 
@@ -304,12 +331,13 @@ Per-entry fields (only `name` is required):
 Field | Meaning
 ------|--------
 `name` | The label you pass to `-m` and `/model` (e.g. `-m llama3`).
-`api` | `responses` — OpenAI's Responses API (server-side context, reasoning `effort`, and OpenAI's hosted web search on genuine OpenAI endpoints). `chat` — the portable Chat Completions API used by Ollama, local servers, and other providers. Both get web search: non-OpenAI endpoints fall back to the on-device `web_search` tool.
+`api` | `responses` — OpenAI's Responses API (server-side context, reasoning `effort`, and OpenAI's hosted web search on genuine OpenAI endpoints). `chat` — the portable Chat Completions API used by Ollama, local servers, and other providers. Both get web search: non-OpenAI endpoints use the on-device `web_search` tool, driven by the `search_engine` list (see below).
 `base_url` | Endpoint base. Default: `https://api.openai.com/v1`.
 `model` | The actual model id sent to the API. Default: same as `name`.
 `effort` | Optional default reasoning effort for a `responses` entry.
 `key` | Optional API key (bearer token) for this entry, for a provider that needs its own — e.g. xAI. With no `key`, an OpenAI endpoint uses `/config/openai_api_key` and any other endpoint is called without authorization.
-`extra_args` | Optional object merged verbatim into every request payload for this entry, for provider-specific fields the client doesn't model. E.g. a llama.cpp/vLLM Qwen3 server takes `"extra_args": {"chat_template_kwargs": {"reasoning_effort": "medium"}}`; also useful for `temperature`, `top_p`, etc. Keys collide last-write-wins with the client's own fields, so you can override `reasoning` on a `responses` entry too.
+`extra_args` | Optional object merged verbatim into every request payload for this entry, for provider-specific fields the client doesn't model. E.g. a llama.cpp/vLLM Qwen3 server takes `"extra_args": {"chat_template_kwargs": {"reasoning_effort": "medium"}}`; also useful for `temperature`, `top_p`, etc. Keys collide last-write-wins with the client's own fields, except `reasoning` on a `responses` entry, which is merged into the client's `{"effort": ...}` so you can add `"context": "all_turns"` without losing the effort.
+`context_length` | Max context window in tokens. Chat Completions entries use it to report context usage (`/context`) and to auto-compact when the prompt reaches 90% of the limit. Defaults to `512000`; set `0` to disable monitoring.
 `text_only` | Set `true` if this model has no vision. The model itself is never told it lacks vision, so `capture_screen` is dropped from its tools entirely (and the system prompt stops mentioning it) instead of the model calling it and hallucinating a description of a screenshot it never received. Default: `false`.
 
 `default` names the entry used when `-m` is omitted. An OpenAI endpoint with no
@@ -326,15 +354,51 @@ carries its own `key`; local endpoints (Ollama, etc.) need none.
 (with `/models` to list them). You can even switch between an OpenAI model and a
 local model in the middle of one conversation — the context resets on the switch.
 
-`/compact` and `/auto-compact [n]` (summarize and shrink the running context) are
-offered for `chat` models, where the whole history is resent each turn; `/effort`
-applies to `responses` models. A raw model id or a shortcut (`f`/`m`/`h`) still
+`/compact`, `/context` and `/auto-compact [n]` (summarize and shrink the running
+context) are offered for `chat` models, where the whole history is resent each
+turn; `/effort` applies to `responses` models. With `context_length` set, the
+conversation auto-compacts once the prompt reaches 90% of the limit (the
+turn-based `/auto-compact` threshold, if any, applies in addition). Usage is
+read from the provider's `usage` block (streaming included); if the endpoint
+reports none, a rough local estimate is used. A raw model id still
 works with `-m` even if it isn't registered — it's treated as an OpenAI Responses
 model.
 
 > The Chat Completions client lives in the internal `gpt_c` module; you don't run
 > it directly anymore. An old `gpt_c ...` command still works — it's routed
 > through `gpt`.
+
+### Web search engines
+
+The device-side `web_search` tool takes its engines from a `search_engine` list
+in the same `/config/gpt.json` — an ordered list of records, tried in order,
+with keyless DuckDuckGo as the final fallback:
+
+```json
+"search_engine": [
+  { "type": "rustxng", "endpoint": "192.168.11.206" },
+  { "type": "tavily", "api_key": "tvly-..." }
+]
+```
+
+Per-record fields:
+
+Field | Meaning
+------|--------
+`type` | `tavily` — [Tavily](https://www.tavily.com)'s LLM-native JSON search (free tier available). `rustxng` / `searxng` — a self-hosted [RustXNG](https://github.com/sahenjp/RustXNG) or SearXNG instance speaking the SearXNG JSON API.
+`endpoint` | Engine address. For `tavily` it's optional (defaults to api.tavily.com); for `rustxng`/`searxng` it's the instance's base URL — a bare host is completed with plain http and RustXNG's default port 8888, so `192.168.11.206` reaches the instance exactly as installed.
+`api_key` | Bearer token. Required for `tavily`; optional for `rustxng`/`searxng` (sent as a bearer token when set).
+
+A failing engine (instance down, bad key, rate limit) falls through to the next
+list entry, and the model is told which engine produced the results it got.
+RustXNG also returns the text of the top result pages (`include_raw_content`),
+so the model can answer from the sources instead of spending a second `curl`
+round-trip fetching each page; that text is capped per result in the tool
+output, and the model can still `curl` a page for the full text.
+
+Backward compatibility: with no `search_engine` list configured, a Tavily key
+at `/config/tavily_api_key` still selects Tavily, exactly as before. With no
+engines at all, the tool stays on keyless DuckDuckGo.
 
 ### Audio backend (STT/TTS)
 

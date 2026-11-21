@@ -21,6 +21,10 @@
             "cd.py"
         ],
         [
+            "chop.py",
+            "chop.py"
+        ],
+        [
             "clip.py",
             "clip.py"
         ],
@@ -87,6 +91,10 @@
         [
             "data/checked.xbmr",
             "data/checked.xbmr"
+        ],
+        [
+            "data/chop_demo.wav",
+            "data/chop_demo.wav"
         ],
         [
             "data/clear.wav",
@@ -875,6 +883,10 @@
             "md5": "6acb5aee0ff0a6d76f3c542d55e2fcb2"
         },
         {
+            "path": "chop.py",
+            "md5": "9a71f7903ff49a2fe46d5ffd445a2bfd"
+        },
+        {
             "path": "listup.py",
             "md5": "bc6984554e88131ceb64c07b86809fae"
         },
@@ -920,7 +932,7 @@
         },
         {
             "path": "gpt.py",
-            "md5": "e196c53797114a371ce712b84fe2c463"
+            "md5": "37a86449204c998d898d98c3ac40494c"
         },
         {
             "path": "morning_word.py",
@@ -992,7 +1004,7 @@
         },
         {
             "path": "gpt_c.py",
-            "md5": "7bccad47f4f4aa279302e216396f9762"
+            "md5": "c5a25f4b192bc81b0873d9a426802065"
         },
         {
             "path": "update_updater.py",
@@ -1132,7 +1144,7 @@
         },
         {
             "path": "noa/wav_play.py",
-            "md5": "14b175658f8c6bbfea2d36f77731c9c8"
+            "md5": "1719031102ebfa7d647ad0d45bd24b2b"
         },
         {
             "path": "noa/pc_compat.py",
@@ -1176,7 +1188,7 @@
         },
         {
             "path": "noa/gpt_tools.py",
-            "md5": "34a78b44cb96924aaf14dbe845a01a7d"
+            "md5": "570cc4ce08344e66307c6acb7797f1ff"
         },
         {
             "path": "noa/pdeck_complete.py",
@@ -1317,6 +1329,10 @@
         {
             "path": "data/block.xbmr",
             "md5": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        {
+            "path": "data/chop_demo.wav",
+            "md5": "2f3847eaeafeb3d91b582c8b4e1882da"
         },
         {
             "path": "data/invader.wav",
